@@ -1,0 +1,18 @@
+{
+ "id": "synthetic-unknown-rule",
+ "type": "release",
+ "mainClass": "net.minecraft.client.main.Main",
+ "assets": "5",
+ "libraries": [
+  {
+   "name": "com.example:example:1.0",
+   "rules": [
+    { "action": "allow", "os": { "name": "osx", "unknownPlatformFlag": true } }
+   ]
+  }
+ ],
+ "arguments": {
+  "game": ["--username", "${auth_player_name}"],
+  "jvm": ["-cp", "${classpath}"]
+ }
+}

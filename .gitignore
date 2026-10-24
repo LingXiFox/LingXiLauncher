@@ -1,0 +1,12 @@
+.build/
+.swiftpm/
+DerivedData/
+*.xcodeproj
+*.xcworkspace
+.DS_Store
+.tmp/
+.env
+.env.*
+# Never commit credentials, launcher accounts or downloaded game data.
+accounts/
+runs/
