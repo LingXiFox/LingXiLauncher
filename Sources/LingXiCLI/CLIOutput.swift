@@ -136,6 +136,96 @@ struct JSONInstance: Encodable {
     let lastIdentityMode: String?
 }
 
+struct JSONVersionEntry: Encodable {
+    let id: String
+    let type: String
+    let releaseTime: String?
+    let url: String?
+    let sha1: String?
+
+    init(_ entry: VersionManifest.Entry) {
+        self.id = entry.id
+        self.type = entry.type.rawValue
+        self.releaseTime = entry.releaseTime
+        self.url = entry.urlString
+        self.sha1 = entry.sha1
+    }
+}
+
+struct JSONVersionList: Encodable {
+    let source: String
+    let count: Int
+    let versions: [JSONVersionEntry]
+}
+
+struct JSONInstallReport: Encodable {
+    let versionID: String
+    let instanceID: String
+    let gameDirectory: String
+    let downloadedFiles: Int
+    let downloadedBytes: Int
+    let cacheHits: Int
+    let assetObjectCount: Int
+    let extractedNatives: Int
+    let missingAfterInstall: [JSONMissingDependency]
+    let diagnostics: [JSONDiagnostic]
+    let javaMajorVersion: Int?
+    let javaComponent: String?
+    let sourcePolicy: String
+    let complete: Bool
+
+    init(_ report: InstallReport) {
+        self.versionID = report.versionID
+        self.instanceID = report.instanceID
+        self.gameDirectory = report.gameDirectory.path
+        self.downloadedFiles = report.downloadedFiles
+        self.downloadedBytes = report.downloadedBytes
+        self.cacheHits = report.cacheHits
+        self.assetObjectCount = report.assetObjectCount
+        self.extractedNatives = report.extractedNatives
+        self.missingAfterInstall = report.missingAfterInstall.map(JSONMissingDependency.init)
+        self.diagnostics = report.diagnostics.map(JSONDiagnostic.init)
+        self.javaMajorVersion = report.javaRequirement.majorVersion
+        self.javaComponent = report.javaRequirement.component
+        self.sourcePolicy = report.sourcePolicy.rawValue
+        self.complete = report.isComplete
+    }
+}
+
+struct JSONVerificationIssue: Encodable {
+    let kind: String
+    let path: String
+    let expected: String?
+    let actual: String?
+
+    init(_ issue: VerificationIssue) {
+        self.kind = issue.kind.rawValue
+        self.path = issue.path.path
+        self.expected = issue.expected
+        self.actual = issue.actual
+    }
+}
+
+struct JSONVerifyReport: Encodable {
+    let versionID: String
+    let checkedFiles: Int
+    let checkedBytes: Int
+    let clean: Bool
+    let missingCount: Int
+    let mismatchCount: Int
+    let issues: [JSONVerificationIssue]
+
+    init(_ report: VerificationReport) {
+        self.versionID = report.versionID
+        self.checkedFiles = report.checkedFiles
+        self.checkedBytes = report.checkedBytes
+        self.clean = report.isClean
+        self.missingCount = report.missingCount
+        self.mismatchCount = report.mismatchCount
+        self.issues = report.issues.map(JSONVerificationIssue.init)
+    }
+}
+
 struct JSONMessage: Encodable {
     let ok: Bool
     let message: String

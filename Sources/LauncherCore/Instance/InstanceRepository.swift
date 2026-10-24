@@ -58,6 +58,34 @@ public struct InstanceRepository: Sendable {
         self.layout = layout
     }
 
+    /// Creates an instance with an explicit, caller-chosen id (used by the installer, where
+    /// `--instance <id>` must remain stable).
+    @discardableResult
+    public func create(id: String, displayName: String, versionID: String?) throws -> Instance {
+        let component = try PathSafety.validatedPathComponent(id)
+        let directory = try layout.instanceDirectory(component)
+        guard !FileManager.default.fileExists(atPath: directory.path) else {
+            throw LauncherError(.ioFailure, "Instance '\(component)' already exists at \(directory.path)")
+        }
+        let trimmed = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let manifest = InstanceManifest(id: component, displayName: trimmed.isEmpty ? component : trimmed, versionID: versionID)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: directory.appendingPathComponent(".minecraft", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(
+            at: directory.appendingPathComponent(".minecraft/logs", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createDirectory(
+            at: directory.appendingPathComponent(".minecraft/crash-reports", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        try save(manifest, in: directory)
+        return Instance(directory: directory, manifest: manifest)
+    }
+
     @discardableResult
     public func create(displayName: String, versionID: String?) throws -> Instance {
         let trimmed = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -125,6 +153,24 @@ public struct InstanceRepository: Sendable {
             .compactMap { url in
                 try? load(id: url.lastPathComponent)
             }
+    }
+
+    /// Points an existing instance at another version (used by `install vanilla`).
+    @discardableResult
+    public func assignVersion(id: String, versionID: String) throws -> Instance {
+        var instance = try load(id: id)
+        guard instance.manifest.versionID != versionID else { return instance }
+        let updated = InstanceManifest(
+            id: instance.manifest.id,
+            displayName: instance.manifest.displayName,
+            versionID: versionID,
+            createdAt: instance.manifest.createdAt,
+            lastLaunchedAt: instance.manifest.lastLaunchedAt,
+            lastIdentityMode: instance.manifest.lastIdentityMode
+        )
+        try save(updated, in: instance.directory)
+        instance.manifest = updated
+        return instance
     }
 
     /// Records a successful launch for display purposes.

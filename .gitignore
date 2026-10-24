@@ -10,3 +10,4 @@ DerivedData/
 # Never commit credentials, launcher accounts or downloaded game data.
 accounts/
 runs/
+.dev-sandbox/

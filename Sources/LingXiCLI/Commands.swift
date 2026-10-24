@@ -47,8 +47,12 @@ enum CLI {
             return ExitStatus.javaUnusable.rawValue
         case .notImplemented, .unauthorized, .appRegistrationRejected:
             return ExitStatus.unavailable.rawValue
-        case .ioFailure:
+        case .ioFailure, .diskFull, .permissionDenied:
             return ExitStatus.ioError.rawValue
+        case .networkFailure, .httpForbidden, .httpNotFound, .downloadFailed:
+            return ExitStatus.unavailable.rawValue
+        case .hashMismatch, .sizeMismatch:
+            return ExitStatus.dataError.rawValue
         case .launchFailed:
             return ExitStatus.internalError.rawValue
         }
@@ -80,17 +84,9 @@ enum CLI {
         case "instance":
             return try runInstanceCommand(rest)
         case "install":
-            throw LauncherError(
-                .notImplemented,
-                "`lingxi install` (downloader) is milestone M2 and is not implemented yet",
-                suggestion: "Use an existing .minecraft root with --root for now; the downloader is tracked as T10/M2."
-            )
+            return try await runInstall(rest)
         case "verify":
-            throw LauncherError(
-                .notImplemented,
-                "`lingxi verify` (hash verification of installed files) is milestone M2 and is not implemented yet",
-                suggestion: "M1 only performs existence/size preflight checks; full hash verification arrives with the M2 downloader."
-            )
+            return try await runVerify(rest)
         default:
             throw LauncherError(.usageError, "Unknown command '\(command)'", suggestion: "Run `lingxi help`.")
         }
@@ -152,11 +148,7 @@ enum CLI {
         case "inspect":
             return try runVersionInspect(rest)
         case "list":
-            throw LauncherError(
-                .notImplemented,
-                "`lingxi version list` needs the M2 metadata downloader",
-                suggestion: "M1 reads version JSONs from an existing --root. Downloading manifests lands with T10/M2."
-            )
+            return try await runVersionList(rest)
         default:
             throw LauncherError(.usageError, "Unknown version subcommand '\(subcommand)'")
         }
@@ -800,9 +792,16 @@ enum CLI {
           instance create --name "<display name>" [--version <id>] [--json]
           instance list [--json]
 
-          install ...   downloader — milestone M2, not implemented
-          verify ...    hash verification — milestone M2, not implemented
-          version list  needs the M2 metadata downloader
+          version list [--type release|snapshot|all] [--source official|auto|mirror]
+              Fetch the official version manifest (cached) and list versions.
+
+          install vanilla --version <id> --instance <instance-id> [--source auto]
+                  [--mirror-config <path>] [--concurrency 4] [--java <path>]
+              Download client JAR, libraries, asset index, all asset objects,
+              extract legacy natives and write the instance. Never needs a login.
+
+          verify --instance <instance-id> [--json]
+              Re-check every installed file against the metadata SHA-1/size.
 
         GLOBAL OPTIONS
           --root <path>        Minecraft data root (default: official launcher directory)
@@ -813,7 +812,7 @@ enum CLI {
 
         EXIT CODES
           0 success · 3 no usable Java · 4 preflight blocked · 64 usage ·
-          65 invalid metadata · 66 missing input · 69 not implemented/unavailable ·
+          65 invalid metadata/checksum · 66 missing input · 69 not implemented/unavailable ·
           70 internal · 74 I/O. A completed game's own exit code is passed through.
 
         SAFETY

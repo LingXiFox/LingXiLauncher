@@ -1,0 +1,10 @@
+{
+  "id": "example-mirror",
+  "displayName": "Example trusted mirror — replace with a source you have verified",
+  "rules": [
+    { "officialHost": "piston-meta.mojang.com", "mirrorBaseURL": "https://mirror.example.com" },
+    { "officialHost": "piston-data.mojang.com", "mirrorBaseURL": "https://mirror.example.com" },
+    { "officialHost": "libraries.minecraft.net", "mirrorBaseURL": "https://mirror.example.com/maven" },
+    { "officialHost": "resources.download.minecraft.net", "mirrorBaseURL": "https://mirror.example.com/objects" }
+  ]
+}

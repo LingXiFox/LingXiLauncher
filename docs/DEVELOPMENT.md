@@ -1,4 +1,4 @@
-# 开发说明（M1 / T01–T09）
+# 开发说明（M1 + M2 / T01–T10）
 
 本文记录实现约定、契约边界和验收方式。产品边界与安全披露见根目录 [README](../README.md)。
 
@@ -13,6 +13,7 @@ Sources/LauncherCore/
 │   ├── AccountIdentity.swift     # 三种身份（Microsoft / LicensedOffline / LocalOffline）
 │   ├── LaunchPlan.swift          # LaunchContext / LaunchPlan / LaunchPreview（脱敏）
 │   ├── DependencyTypes.swift     # ResolvedFile / ResolvedNative / MissingDependency
+│   ├── InstallModels.swift       # 下载任务/进度/报告/校验结果
 │   ├── GameDataLayout.swift      # dataRoot / gameRoot 路径推导（全部做路径穿越防护）
 │   └── PathSafety.swift          # zip entry / 相对路径的安全校验
 ├── Version/
@@ -26,8 +27,16 @@ Sources/LauncherCore/
 │   ├── GameProcessController.swift        # Process + 异步流 + 退出码（T07）
 │   └── LocalOfflineIdentity.swift         # 离线 UUID v3（T09）
 ├── Instance/
-│   ├── InstanceRepository.swift  # 实例创建/加载/列出
+│   ├── InstanceRepository.swift  # 实例创建/加载/列出/切换版本
 │   └── LocalAccountStore.swift   # 本地离线账户（无令牌字段）
+├── Installer/                    # M2
+│   ├── DownloadSource.swift      # official/mirror/auto/local-cache-only + 显式镜像映射
+│   ├── DownloadTransport.swift   # URLSession 实现 + 可注入传输层
+│   ├── Downloader.swift          # 有界并发、重试、SHA-1 校验、.part 原子落盘
+│   ├── ManifestService.swift     # manifest / 版本 JSON / asset index 缓存与校验
+│   ├── SafeZipExtractor.swift    # 最小 ZIP 读取 + Zip Slip/symlink 防护
+│   ├── VanillaInstaller.swift    # 安装编排
+│   └── InstallationVerifier.swift# 全量哈希校验
 └── LingXiCLI/                    # 薄外壳：argv 解析、Core 调用、退出码映射
 Tests/LauncherCoreTests/
 ├── Fixtures/                     # 真实 Mojang 元数据 + 故意的坏数据
@@ -96,14 +105,39 @@ Tests/LauncherCoreTests/
 
 固定测试向量（Python `hashlib` 独立算得，与 Java `UUID.nameUUIDFromBytes` 一致）：`Notch → b50ad385-829d-3141-a216-7e7d7539ba7f`、`TestPlayer → bb77495a-a740-3169-a238-69654c8bd2c1`。
 
-## 6. 测试
+## 6. 下载安装器（M2）
+
+入口：`lingxi version list` / `lingxi install vanilla` / `lingxi verify`。
+
+```text
+manifest（缓存）→ 版本 JSON（校验 manifest SHA-1）→ 依赖解析
+→ asset index（校验 SHA-1/size）→ 缺失文件 + 全部 asset objects
+→ Downloader（4 路默认并发，.part 临时文件）
+→ SHA-1 + size 校验 → 同目录原子 rename → legacy natives 安全解压
+→ instance.json → 依赖完整性复查
+```
+
+关键不变量：
+
+- **下载与账户完全解耦**：整条链路不读取、不要求任何 Microsoft/令牌；`DownloadSourcePolicy.localCacheOnly` 时传输层一次都不会被调用。
+- **校验链**：manifest → 版本 JSON 的 SHA-1；版本 JSON → asset index 的 SHA-1；所有文件 → 元数据 SHA-1 + size。校验失败立刻删除 `.part`，绝不生成"看起来完成"的目标文件。
+- **源策略**：`official`/`mirror`/`auto`/`local-cache-only`。镜像仅接受显式 host 映射（`MirrorHostRule`），只允许 HTTPS，官方 path/query 原样保留，映射结果仍必须是 HTTPS；不做任意 URL 字符串替换或通配。
+- **重试**：网络、408、429、5xx 按源重试（默认 3 次，线性退避，上限 5s）；403/404 与校验失败不重试，`auto` 会改用镜像。
+- **并发**：默认 4，CLI 可配 1–32。stdout 进度按 0.5s 节流，避免 3000+ 资产刷屏。
+- **磁盘预检**：按待下载 size 之和 + 32MB 余量与目标卷可用空间比较，不足直接 `DISK_FULL`。
+- **缓存命中**：`Downloader` 对队列中的每个文件做 size（有 SHA-1 时也做哈希）检查；`DependencyResolver` 负责找出缺失/大小不符的文件。全量哈希由 `verify` 完成，避免每次 install 都扫描 700MB。
+- **安全解压**：`SafeZipExtractor` 自己解析 ZIP（stored/deflate，Compression 框架），拒绝 `../`、绝对路径、反斜杠、控制字符、符号链接条目、超限条目/总量；ZIP64 明确报不支持。归档本身在解压前已通过 SHA-1 校验。
+- **Java**：不自动安装。`install` 仅在显式传 `--java` 时做兼容性检查；`doctor` 负责发现与诊断。
+- **实例**：`--instance <id>` 是稳定 id（路径安全校验）；不存在则创建，存在则更新 `versionID`。显示名不参与路径拼接。
+
+## 7. 测试
 
 ```bash
 swift build
 swift test
 ```
 
-当前总计 **151 个测试**，连续两次全量运行 0 失败：
+当前总计 **196 个测试**，全量运行 0 失败：
 
 | 测试文件（用例数） | 覆盖 |
 |---|---|
@@ -116,12 +150,16 @@ swift test
 | `LaunchPlanBuilderTests` (22) | 脱敏、额外 JVM 参数位置、身份模式、确定性、26.3 端到端 preview |
 | `JavaRuntimeInspectorTests` (15) | 真实 JDK、无效路径、架构/版本解析表 |
 | `ProcessControllerTests` (11) | 正常/非零/信号退出、>1 MB 输出不死锁、终止、启动失败 |
+| `SourceResolverTests` (11) | 四种源策略、显式镜像映射/前缀/查询串、非 HTTPS 拒绝、配置加载 |
+| `DownloaderTests` (14) | 成功/哈希或大小不符/空文件、缓存命中与失效、重试、404、auto 回退、并发上限、去重 |
+| `SafeZipExtractorTests` (10) | 正常/存储模式、`../`、嵌套穿越、绝对路径、symlink、损坏包、条目与数量上限 |
+| `InstallerTests` (10) | 端到端安装、二次缓存、宽展修复、local-cache-only、mirror-only、版本筛选、natives 解压、verify 检出损坏 |
 | `LocalOfflineIdentityTests` (9) / `InstanceRepositoryTests` (5) | UUID 向量、名字边界、账户无令牌字段、实例隔离 |
 | `PathSafetyTests` (4) / `GameDataLayoutTests` (3) / `PlatformContextTests` (3) | 路径穿越、布局推导、平台上下文 |
 
-安全测试约定：含 token 的 `LaunchPlan`、`--dry-run`、`--json`、日志文件都必须脱敏；游戏中 stdout/stderr 原样记录（启动器从不写完整命令行）。
+安全测试约定：含 token 的 `LaunchPlan`、`--dry-run`、`--json`、日志文件都必须脱敏；游戏中 stdout/stderr 原样记录（启动器从不写完整命令行）。M2 测试全部使用内存传输层（`StubTransport`），不访问网络。
 
-## 7. 任务与里程碑映射
+## 8. 任务与里程碑映射
 
 | 任务 | 内容 | 状态 |
 |---|---|---|
@@ -134,21 +172,36 @@ swift test
 | T07 | GameProcessController（11 tests） | ✅ |
 | T08 | CLI（version inspect / doctor / launch --dry-run） | ✅ 手工冒烟通过 |
 | T09 | LocalOffline 身份（13 tests） | ✅ |
-| T10 | 下载器（官方/镜像/auto/local-cache-only、原子下载、校验） | ⬜ M2 |
+| T10 | 下载器（35 tests：SourceResolver/Downloader/Zip/Installer） | ✅ 真实 1.20.1 安装 3635 文件 / 734.5 MB 通过 |
 | T11 | Microsoft 认证（OAuth+PKCE、Xbox/XSTS、Keychain） | ⬜ M3（AppID 未获批） |
 | T12 | 正版启动回归 | ⬜ M3 |
 
-## 8. 下一步（M2）接口预留
+## 9. 下一步（M3）
 
-- `MissingDependency` 已携带 `downloadURL`/`sha1`/`size`，`SourceResolver` 可直接消费，无需改动 Core 契约。
-- `DependencyResolution` 已给出 `layout`，下载器按 `MissingDependency.kind` 落盘到 `versions/`、`libraries/`、`assets/objects/`、`natives/`。
-- 下载实现必须：`.part` 临时文件 → 校验 SHA-1/size → 原子 rename；Zip Slip / symlink escape 防护复用 `PathSafety`。
-- 新增目标（`Installer`）时保持不变式：**Installer 不构造 JVM 参数，Core 不执行下载**。
+- `Authentication` 模块：Authorization Code + PKCE（S256）、`state` 防 CSRF、loopback 回调、Refresh Token 存 Keychain。
+- `AuthorizedMinecraftSession` 已有内部构造器隔离与脱敏 `description`，M3 只需新增签发路径；**不得**为 CLI 开放自由构造。
+- Xbox Live / XSTS / Minecraft Services 链路；区分 403 AppID、无所有权、令牌过期。
+- `LicensedOffline` 依赖此前真实所有权校验；策略与过期规则需单测覆盖。
+- 失败必须明确报错，**绝不回退 LocalOffline**；M3 验收前不宣称"正版启动闭环"。
 
-## 9. 编码约定
+## 10. 开发沙盒
+
+开发期的下载与实例数据统一放在仓库内（已 gitignore）：
+
+```bash
+mkdir -p .dev-sandbox
+lingxi install vanilla --version 1.20.1 --instance dev-1201 --source official \
+  --concurrency 8 --root .dev-sandbox/mc --data-root .dev-sandbox/data
+```
+
+- `.dev-sandbox/mc`：versions / libraries / assets（1.20.1 约 708 MB）
+- `.dev-sandbox/data`：instances / accounts / natives / cache / logs
+- 不写 `~/Library/Application Support/LingXiLauncher`，不改动官方 `.minecraft`。
+
+## 11. 编码约定
 
 - Swift 6 语言模式（严格并发），macOS 14 部署目标。
 - 注释与测试名用英文；文档中文。
 - 生产路径不使用强解包；错误一律用 `LauncherError`（稳定 code + 可执行建议）。
-- 破坏性操作只发生在 `dataRoot` 下；`--root` 指向的用户游戏目录在 M1 内只读。
+- 破坏性操作只发生在 `dataRoot` 下；`--root` 指向的用户游戏目录在 M1 内只读；`install` 只在显式请求时写入 `--root`。
 - 临时文件放 `/tmp` 或 `.tmp/`，用完删除，不进仓库。
