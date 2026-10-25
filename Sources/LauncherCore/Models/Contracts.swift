@@ -54,6 +54,10 @@ public struct JavaRuntime: Sendable, Equatable {
     public let versionString: String
     public let majorVersion: Int
     public let architecture: PlatformContext.CPUArch
+    /// Physical CPU architecture of the host, used to detect Rosetta translation.
+    public let hostArchitecture: PlatformContext.CPUArch
+    /// True when this is an x86_64 JVM running through Rosetta on Apple Silicon.
+    public let isRosettaTranslated: Bool
     public let vendor: String?
     public let osName: String?
     public let rawProperties: [String: String]
@@ -65,12 +69,16 @@ public struct JavaRuntime: Sendable, Equatable {
         architecture: PlatformContext.CPUArch,
         vendor: String? = nil,
         osName: String? = nil,
-        rawProperties: [String: String] = [:]
+        rawProperties: [String: String] = [:],
+        hostArchitecture: PlatformContext.CPUArch? = nil,
+        isRosettaTranslated: Bool? = nil
     ) {
         self.executable = executable
         self.versionString = versionString
         self.majorVersion = majorVersion
         self.architecture = architecture
+        self.hostArchitecture = hostArchitecture ?? architecture
+        self.isRosettaTranslated = isRosettaTranslated ?? (self.hostArchitecture == .arm64 && architecture == .x86_64)
         self.vendor = vendor
         self.osName = osName
         self.rawProperties = rawProperties
@@ -78,7 +86,8 @@ public struct JavaRuntime: Sendable, Equatable {
 
     public var displayDescription: String {
         let vendorPart = vendor.map { " (\($0))" } ?? ""
-        return "Java \(versionString)\(vendorPart) \(architecture.rawValue)"
+        let rosettaPart = isRosettaTranslated ? " via Rosetta" : ""
+        return "Java \(versionString)\(vendorPart) \(architecture.rawValue)\(rosettaPart)"
     }
 }
 

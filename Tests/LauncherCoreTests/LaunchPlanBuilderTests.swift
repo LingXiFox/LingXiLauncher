@@ -656,6 +656,7 @@ final class LaunchPlanBuilderTests: XCTestCase {
             instanceDirectory: instanceDirectory,
             gameDirectory: gameDirectory,
             javaExecutable: javaExecutable,
+            platform: try PlatformContext.current(),
             identity: .localOffline(profile),
             additionalJVMArguments: ["-Dlingxi.test=1"],
             features: [:]
@@ -810,6 +811,7 @@ final class LaunchPlanBuilderTests: XCTestCase {
             instanceDirectory: instanceDirectory,
             gameDirectory: gameDirectory,
             javaExecutable: javaExecutable,
+            platform: try PlatformContext.current(),
             identity: resolvedIdentity,
             additionalJVMArguments: additionalJVMArguments,
             features: features,

@@ -21,6 +21,7 @@ enum ExitStatus: Int32 {
 struct JSONPlatform: Encodable {
     let os: String
     let architecture: String
+    let hostArchitecture: String
     let version: String
 }
 
@@ -29,6 +30,8 @@ struct JSONJavaRuntime: Encodable {
     let version: String?
     let majorVersion: Int?
     let architecture: String?
+    let hostArchitecture: String?
+    let rosetta: Bool?
     let vendor: String?
     let usable: Bool
     let error: String?
@@ -172,6 +175,7 @@ struct JSONInstallReport: Encodable {
     let javaMajorVersion: Int?
     let javaComponent: String?
     let sourcePolicy: String
+    let platformArchitecture: String
     let complete: Bool
 
     init(_ report: InstallReport) {
@@ -188,6 +192,7 @@ struct JSONInstallReport: Encodable {
         self.javaMajorVersion = report.javaRequirement.majorVersion
         self.javaComponent = report.javaRequirement.component
         self.sourcePolicy = report.sourcePolicy.rawValue
+        self.platformArchitecture = report.platformArchitecture.rawValue
         self.complete = report.isComplete
     }
 }
@@ -298,6 +303,8 @@ enum CLIOutput {
             version: runtime.versionString,
             majorVersion: runtime.majorVersion,
             architecture: runtime.architecture.rawValue,
+            hostArchitecture: runtime.hostArchitecture.rawValue,
+            rosetta: runtime.isRosettaTranslated,
             vendor: runtime.vendor,
             usable: true,
             error: nil
@@ -310,6 +317,8 @@ enum CLIOutput {
             version: nil,
             majorVersion: nil,
             architecture: nil,
+            hostArchitecture: nil,
+            rosetta: nil,
             vendor: nil,
             usable: false,
             error: (error as? LauncherError)?.description ?? error.localizedDescription

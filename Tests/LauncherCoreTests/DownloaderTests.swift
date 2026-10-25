@@ -241,6 +241,56 @@ final class DownloaderTests: XCTestCase {
         XCTAssertEqual(observed8, 1)
     }
 
+
+    func testExistingFileIsAtomicallyReplacedAfterVerification() async throws {
+        let transport = StubTransport()
+        let newPayload = Data("new verified payload".utf8)
+        let url = URL(string: "https://piston-data.mojang.com/v1/objects/aa/file.bin")!
+        await transport.setData(newPayload, for: url)
+        let item = try task(sha1: SHA1.hexDigest(newPayload), size: newPayload.count)
+        try FileManager.default.createDirectory(at: item.destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("old payload".utf8).write(to: item.destination)
+
+        let summary = try await makeDownloader(transport).download([item], progress: { _ in })
+        XCTAssertTrue(summary.failures.isEmpty)
+        XCTAssertEqual(try Data(contentsOf: item.destination), newPayload)
+        XCTAssertEqual(try partFiles(in: item.destination.deletingLastPathComponent()), [])
+    }
+
+    func testFailedVerificationPreservesExistingCacheFile() async throws {
+        let transport = StubTransport()
+        let tampered = Data("tampered download".utf8)
+        let url = URL(string: "https://piston-data.mojang.com/v1/objects/aa/file.bin")!
+        await transport.setData(tampered, for: url)
+        let item = try task(sha1: SHA1.hexDigest(Data("expected".utf8)), size: tampered.count)
+        try FileManager.default.createDirectory(at: item.destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let old = Data("previous complete file".utf8)
+        try old.write(to: item.destination)
+
+        let summary = try await makeDownloader(transport).download([item], progress: { _ in })
+        XCTAssertEqual(summary.failures.first?.code, .hashMismatch)
+        XCTAssertEqual(try Data(contentsOf: item.destination), old, "a rejected download must never replace an existing file")
+        XCTAssertEqual(try partFiles(in: item.destination.deletingLastPathComponent()), [])
+    }
+
+    func testPlacementFailurePreservesExistingFile() async throws {
+        let transport = StubTransport()
+        let payload = Data("replacement".utf8)
+        let url = URL(string: "https://piston-data.mojang.com/v1/objects/aa/immutable.bin")!
+        await transport.setData(payload, for: url)
+        let item = try task(destination: "out/immutable.bin", url: url, sha1: SHA1.hexDigest(payload), size: payload.count)
+        try FileManager.default.createDirectory(at: item.destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let old = Data("immutable original".utf8)
+        try old.write(to: item.destination)
+        try FileManager.default.setAttributes([.immutable: true], ofItemAtPath: item.destination.path)
+        defer { try? FileManager.default.setAttributes([.immutable: false], ofItemAtPath: item.destination.path) }
+
+        let summary = try await makeDownloader(transport).download([item], progress: { _ in })
+        XCTAssertEqual(summary.failures.count, 1)
+        XCTAssertEqual(try Data(contentsOf: item.destination), old, "a failed atomic replace must leave the existing file intact")
+        XCTAssertEqual(try partFiles(in: item.destination.deletingLastPathComponent()), [])
+    }
+
     func testPlanReportsCacheHitsBeforeDownloading() async throws {
         let transport = StubTransport()
         let cached = Data("cached".utf8)

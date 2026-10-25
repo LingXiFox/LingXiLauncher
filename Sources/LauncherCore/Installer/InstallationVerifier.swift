@@ -12,7 +12,9 @@ public struct InstallationVerifier: Sendable {
         self.layout = layout
     }
 
-    public func verify(instance: Instance) throws -> VerificationReport {
+    /// - Parameter platformOverride: the selected JVM platform. Defaults to the launcher host
+    ///   architecture only when no JVM has been chosen (tests, or `verify` without `--java`).
+    public func verify(instance: Instance, platform platformOverride: PlatformContext? = nil) throws -> VerificationReport {
         guard let versionID = instance.manifest.versionID else {
             throw LauncherError(
                 .usageError,
@@ -21,7 +23,7 @@ public struct InstallationVerifier: Sendable {
             )
         }
         let version = try VersionResolver().resolve(versionID: versionID, from: layout.gameRoot)
-        let platform = try PlatformContext.current()
+        let platform = try platformOverride ?? PlatformContext.current()
         let dependencies = try DependencyResolver(ruleEvaluator: RuleEvaluator())
             .resolve(version: version, layout: layout, platform: platform)
         let assetIndex = Self.loadAssetIndex(layout: layout, version: version)

@@ -7,6 +7,9 @@ public struct LaunchContext: Sendable {
     /// The game working directory (`<instance>/.minecraft`). Saves, options and logs live here.
     public let gameDirectory: URL
     public let javaExecutable: URL
+    /// Rule-evaluation context for the **selected JVM** (OS/version from the host, architecture
+    /// measured from that Java). Never derive rules from the launcher process architecture.
+    public let platform: PlatformContext
     public let identity: LaunchIdentity
     public let additionalJVMArguments: [String]
     /// Launcher-controlled feature flags (demo mode, custom resolution, quick play, ...).
@@ -19,6 +22,7 @@ public struct LaunchContext: Sendable {
         instanceDirectory: URL,
         gameDirectory: URL,
         javaExecutable: URL,
+        platform: PlatformContext,
         identity: LaunchIdentity,
         additionalJVMArguments: [String] = [],
         features: [String: Bool] = [:],
@@ -28,9 +32,18 @@ public struct LaunchContext: Sendable {
         self.instanceDirectory = instanceDirectory
         self.gameDirectory = gameDirectory
         self.javaExecutable = javaExecutable
+        // Launcher-controlled features belong to the platform context used for rule evaluation.
+        let mergedFeatures = platform.features.merging(features) { _, newValue in newValue }
+        self.platform = PlatformContext(
+            os: platform.os,
+            architecture: platform.architecture,
+            osVersion: platform.osVersion,
+            features: mergedFeatures,
+            hostArchitecture: platform.hostArchitecture
+        )
         self.identity = identity
         self.additionalJVMArguments = additionalJVMArguments
-        self.features = features
+        self.features = mergedFeatures
         self.launcherName = launcherName
         self.launcherVersion = launcherVersion
     }

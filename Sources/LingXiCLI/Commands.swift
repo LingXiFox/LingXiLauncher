@@ -137,6 +137,14 @@ enum CLI {
         try PlatformContext.current()
     }
 
+    /// Platform used for rule evaluation: the selected JVM when `--java` is given, host otherwise.
+    static func commandPlatform(_ input: CommandLineInput) throws -> PlatformContext {
+        guard let javaPath = input.value("java") else { return try platform() }
+        let executable = URL(fileURLWithPath: (javaPath as NSString).expandingTildeInPath)
+        let runtime = try services.javaInspector.inspect(executable: executable)
+        return try PlatformContext.forJVM(runtime)
+    }
+
     // MARK: - version
 
     private static func runVersionCommand(_ arguments: [String]) async throws -> Int32 {
@@ -155,15 +163,15 @@ enum CLI {
     }
 
     private static func runVersionInspect(_ arguments: [String]) throws -> Int32 {
-        let spec = ArgumentParser.Spec(valueOptions: ["id", "root", "data-root"])
+        let spec = ArgumentParser.Spec(valueOptions: ["id", "java", "root", "data-root"])
         let input = try ArgumentParser.parse(arguments, spec: spec)
         if input.has("help") {
-            print("usage: lingxi version inspect --id <version-id> [--root <path>] [--data-root <path>] [--json]")
+            print("usage: lingxi version inspect --id <version-id> [--java <path>] [--root <path>] [--data-root <path>] [--json]")
             return ExitStatus.success.rawValue
         }
         let versionID = try input.requireValue("id")
         let layout = try resolveLayout(input)
-        let platform = try platform()
+        let platform = try commandPlatform(input)
         let version = try VersionResolver().resolve(versionID: versionID, from: layout.gameRoot)
         let dependencies = try services.dependencyResolver.resolve(version: version, layout: layout, platform: platform)
         let allowedLibraries = try version.libraries.filter {
@@ -254,14 +262,24 @@ enum CLI {
             }
         }
 
+        let selected = usable.first?.1
+        let evaluationPlatform = selected.flatMap { try? PlatformContext.forJVM($0) } ?? platform
+
         var diagnostics: [LaunchDiagnostic] = []
         var missing: [MissingDependency] = []
         var resolvedVersion: ResolvedVersion?
+        if let runtime = selected, runtime.isRosettaTranslated {
+            diagnostics.append(.warning(
+                .javaArchitectureMismatch,
+                "Selected Java is x86_64 running through Rosetta on Apple Silicon; x86_64 natives will be used",
+                suggestion: "Prefer a native arm64 JDK unless Rosetta is intentional."
+            ))
+        }
         if let versionID = input.value("version") {
             do {
                 let version = try VersionResolver().resolve(versionID: versionID, from: layout.gameRoot)
                 resolvedVersion = version
-                let dependencies = try services.dependencyResolver.resolve(version: version, layout: layout, platform: platform)
+                let dependencies = try services.dependencyResolver.resolve(version: version, layout: layout, platform: evaluationPlatform)
                 missing = dependencies.missing
                 diagnostics.append(contentsOf: dependencies.diagnostics)
                 if let requirement = version.javaRequirement.majorVersion {
@@ -278,7 +296,6 @@ enum CLI {
             }
         }
 
-        let selected = usable.first?.1
         // Missing files are blocking for a real launch, so `doctor --version` must fail on them
         // even though they are reported through the dedicated list rather than a diagnostic.
         let hasErrors = diagnostics.contains { $0.severity == .error }
@@ -287,7 +304,12 @@ enum CLI {
 
         if input.has("json") {
             CLIOutput.emitJSON(JSONDoctor(
-                platform: JSONPlatform(os: platform.os.rawValue, architecture: platform.architecture.rawValue, version: platform.osVersion),
+                platform: JSONPlatform(
+                    os: evaluationPlatform.os.rawValue,
+                    architecture: evaluationPlatform.architecture.rawValue,
+                    hostArchitecture: evaluationPlatform.hostArchitecture.rawValue,
+                    version: evaluationPlatform.osVersion
+                ),
                 gameRoot: layout.gameRoot.path,
                 dataRoot: layout.dataRoot.path,
                 javaCandidates: reported,
@@ -301,7 +323,7 @@ enum CLI {
         }
 
         CLIOutput.header("LingXi doctor")
-        CLIOutput.field("platform", "\(platform.os.rawValue) \(platform.osVersion) \(platform.architecture.rawValue)")
+        CLIOutput.field("platform", "\(evaluationPlatform.os.rawValue) \(evaluationPlatform.osVersion) jvm=\(evaluationPlatform.architecture.rawValue) host=\(evaluationPlatform.hostArchitecture.rawValue)")
         CLIOutput.field("game root", layout.gameRoot.path)
         CLIOutput.field("data root", layout.dataRoot.path)
         print("Java runtimes:")
@@ -353,7 +375,6 @@ enum CLI {
             throw LauncherError(.usageError, "--json is only supported together with --dry-run for launch", suggestion: "Use `lingxi launch ... --dry-run --json`.")
         }
         let layout = try resolveLayout(input)
-        let platform = try platform()
         let registry = InstanceRepository(layout: layout)
 
         var instance: Instance?
@@ -390,14 +411,17 @@ enum CLI {
             javaURL = try services.javaInspector.discoverDefaultExecutable()
         }
         let runtime = try services.javaInspector.inspect(executable: javaURL)
+        // Rules, natives selection and natives cache paths must follow the JVM, not the launcher.
+        let jvmPlatform = try PlatformContext.forJVM(runtime)
 
         let version = try VersionResolver().resolve(versionID: versionID, from: layout.gameRoot)
-        let dependencies = try services.dependencyResolver.resolve(version: version, layout: layout, platform: platform)
+        let dependencies = try services.dependencyResolver.resolve(version: version, layout: layout, platform: jvmPlatform)
 
         let context = LaunchContext(
             instanceDirectory: instanceDirectory,
             gameDirectory: gameDirectory,
             javaExecutable: javaURL,
+            platform: jvmPlatform,
             identity: identity,
             additionalJVMArguments: [],
             features: [:]

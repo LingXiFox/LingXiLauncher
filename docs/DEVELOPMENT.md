@@ -1,4 +1,4 @@
-# 开发说明（M1 + M2 / T01–T10）
+# 开发说明（M1 + M2 + M2.5 / T01–T10）
 
 本文记录实现约定、契约边界和验收方式。产品边界与安全披露见根目录 [README](../README.md)。
 
@@ -20,7 +20,9 @@ Sources/LauncherCore/
 │   ├── VersionResolver.swift     # 读取并规范化版本 JSON（拒绝旧格式与继承）
 │   ├── RuleEvaluator.swift       # Mojang rules（T03）
 │   └── ArgumentResolver.swift    # arguments 展开与占位符替换（T06）
-├── Runtime/JavaRuntimeInspector.swift     # 真实执行 java 探测版本/架构（T05）
+├── Runtime/
+│   ├── JavaRuntimeInspector.swift         # 真实执行 java 探测版本/架构/Rosetta（T05）
+│   └── NativeArchiveInspector.swift       # Mach-O 架构检查 + JVM/原生库兼容诊断（M2.5）
 ├── Launch/
 │   ├── DependencyResolver.swift  # 规则过滤 → classpath/natives/assets（T04）
 │   ├── LaunchPlanBuilder.swift   # 纯转换：preview / build / validate（T06）
@@ -35,7 +37,7 @@ Sources/LauncherCore/
 │   ├── Downloader.swift          # 有界并发、重试、SHA-1 校验、.part 原子落盘
 │   ├── ManifestService.swift     # manifest / 版本 JSON / asset index 缓存与校验
 │   ├── SafeZipExtractor.swift    # 最小 ZIP 读取 + Zip Slip/symlink 防护
-│   ├── VanillaInstaller.swift    # 安装编排
+│   ├── VanillaInstaller.swift    # 安装编排（按选定 JVM 架构）
 │   └── InstallationVerifier.swift# 全量哈希校验
 └── LingXiCLI/                    # 薄外壳：argv 解析、Core 调用、退出码映射
 Tests/LauncherCoreTests/
@@ -80,6 +82,15 @@ Tests/LauncherCoreTests/
 - natives 缓存按 `<version>/<arch>` 隔离，x86_64 缓存不可能被 arm64 JVM 复用。
 - 路径（含中文、空格）始终以 argv 数组传递，classpath 用 `:` 拼成单个 `-cp` 参数值，不做 shell quote。
 - 工作目录固定为实例的 `.minecraft`。
+
+## 4.1 JVM 架构与原生库（M2.5）
+
+- **唯一事实来源是实际选定的 JVM**：`JavaRuntimeInspector` 执行 `<java> -XshowSettings:properties -version` 得到 `os.arch`；`PlatformContext.forJVM(runtime)` 用 JVM 架构 + 主机 OS/版本构造规则上下文。
+- `DependencyResolver`、`RuleEvaluator`、`LaunchPlanBuilder`、`InstallationVerifier` 全部显式接收该上下文；`LaunchContext.platform` 是必填字段，builder 不再读取启动器进程架构。
+- natives 缓存目录为 `natives/<version-id>/<jvm-arch>`，arm64 与 x86_64 缓存物理隔离。
+- Rosetta：`hw.optional.arm64=1` 且 JVM `os.arch=x86_64` 时标记 `isRosettaTranslated`；doctor / install / launch 均给出 warning，并选择 x86_64 natives。
+- legacy natives 除了 classifier 提示外，还会解压读取 Mach-O 头（thin/fat）确认真实架构；与 JVM 不匹配是 blocking error。classifier 带 `-x86_64`/`-arm64` 时双向校验（arm64 JVM × x86_64 natives 与 x86_64 JVM × arm64 natives 都报错）。
+- 不根据操作系统指定图形 API：Minecraft 自己选择 OpenGL/Metal 后端，启动器只负责 JVM/natives/参数。
 
 ## 5. 启动计划构建顺序
 
@@ -137,7 +148,7 @@ swift build
 swift test
 ```
 
-当前总计 **196 个测试**，全量运行 0 失败：
+当前总计 **206 个测试**，全量运行 0 失败：
 
 | 测试文件（用例数） | 覆盖 |
 |---|---|
@@ -151,9 +162,10 @@ swift test
 | `JavaRuntimeInspectorTests` (15) | 真实 JDK、无效路径、架构/版本解析表 |
 | `ProcessControllerTests` (11) | 正常/非零/信号退出、>1 MB 输出不死锁、终止、启动失败 |
 | `SourceResolverTests` (11) | 四种源策略、显式镜像映射/前缀/查询串、非 HTTPS 拒绝、配置加载 |
-| `DownloaderTests` (14) | 成功/哈希或大小不符/空文件、缓存命中与失效、重试、404、auto 回退、并发上限、去重 |
+| `DownloaderTests` (17) | 成功/哈希或大小不符/空文件、缓存命中与失效、重试、404、auto 回退、并发上限、去重、原子替换与失败保护 |
 | `SafeZipExtractorTests` (10) | 正常/存储模式、`../`、嵌套穿越、绝对路径、symlink、损坏包、条目与数量上限 |
 | `InstallerTests` (10) | 端到端安装、二次缓存、宽展修复、local-cache-only、mirror-only、版本筛选、natives 解压、verify 检出损坏 |
+| `M2_5CompatibilityTests` (7) | JVM 架构上下文/Rosetta、per-JVM natives 缓存、规则按 JVM 架构、双向架构不匹配、缺失 natives、Mach-O/ZIP 架构检查 |
 | `LocalOfflineIdentityTests` (9) / `InstanceRepositoryTests` (5) | UUID 向量、名字边界、账户无令牌字段、实例隔离 |
 | `PathSafetyTests` (4) / `GameDataLayoutTests` (3) / `PlatformContextTests` (3) | 路径穿越、布局推导、平台上下文 |
 
@@ -172,7 +184,8 @@ swift test
 | T07 | GameProcessController（11 tests） | ✅ |
 | T08 | CLI（version inspect / doctor / launch --dry-run） | ✅ 手工冒烟通过 |
 | T09 | LocalOffline 身份（13 tests） | ✅ |
-| T10 | 下载器（35 tests：SourceResolver/Downloader/Zip/Installer） | ✅ 真实 1.20.1 安装 3635 文件 / 734.5 MB 通过 |
+| T10 | 下载器（SourceResolver/Downloader/Zip/Installer） | ✅ 真实 1.20.1 安装 3635 文件 / 734.5 MB 通过 |
+| M2.5 | JVM 架构感知 + 真实启动闭环 + 原子替换 | ✅ 真机 JDK17 ARM64 到主菜单并 exit 0（见 VERIFICATION-M2.5.md） |
 | T11 | Microsoft 认证（OAuth+PKCE、Xbox/XSTS、Keychain） | ⬜ M3（AppID 未获批） |
 | T12 | 正版启动回归 | ⬜ M3 |
 

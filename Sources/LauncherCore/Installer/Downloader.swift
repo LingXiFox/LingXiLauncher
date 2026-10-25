@@ -1,4 +1,9 @@
 import Foundation
+#if canImport(Darwin)
+import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#endif
 
 /// Downloads a set of files to disk with bounded concurrency, SHA-1/size verification and
 /// atomic placement.
@@ -233,11 +238,24 @@ public struct Downloader: Sendable {
         let fileManager = FileManager.default
         do {
             try fileManager.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try? fileManager.removeItem(at: destination)
-            try fileManager.moveItem(at: partURL, to: destination)
         } catch {
             try? fileManager.removeItem(at: partURL)
-            throw LauncherError(.ioFailure, "Cannot place \(destination.path): \(error.localizedDescription)")
+            throw LauncherError(.ioFailure, "Cannot create directory for \(destination.path): \(error.localizedDescription)")
+        }
+
+        // POSIX rename(2) atomically replaces an existing file on the same filesystem and never
+        // removes the old destination unless it succeeds. The .part file is created next to the
+        // destination, so this is always a same-volume rename (never a copy+delete).
+        if rename(partURL.path, destination.path) != 0 {
+            let code = errno
+            let message = String(cString: strerror(code))
+            try? fileManager.removeItem(at: partURL)
+            let launcherCode: LauncherError.Code = (code == EACCES || code == EPERM) ? .permissionDenied : .ioFailure
+            throw LauncherError(
+                launcherCode,
+                "Cannot atomically replace \(destination.path): \(message)",
+                suggestion: "The existing file was left untouched. Check directory permissions and free space, then retry."
+            )
         }
     }
 

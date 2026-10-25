@@ -143,18 +143,19 @@ extension CLI {
     }
 
     static func runVerify(_ arguments: [String]) async throws -> Int32 {
-        let spec = ArgumentParser.Spec(valueOptions: ["instance", "root", "data-root"])
+        let spec = ArgumentParser.Spec(valueOptions: ["instance", "root", "data-root", "java"])
         let input = try ArgumentParser.parse(arguments, spec: spec)
         if input.has("help") {
-            print("usage: lingxi verify --instance <instance-id> [--root <path>] [--json]")
+            print("usage: lingxi verify --instance <instance-id> [--java <path>] [--root <path>] [--json]")
             return ExitStatus.success.rawValue
         }
         let instanceID = try input.requireValue("instance")
         let layout = try resolveLayout(input)
         let registry = InstanceRepository(layout: layout)
         let instance = try registry.load(id: instanceID)
+        let platform = try commandPlatform(input)
         let verifier = InstallationVerifier(layout: layout)
-        let report = try verifier.verify(instance: instance)
+        let report = try verifier.verify(instance: instance, platform: platform)
 
         if input.has("json") {
             CLIOutput.emitJSON(JSONVerifyReport(report))

@@ -17,5 +17,9 @@ Why these three:
 real structure of `version_manifest_v2.json`; `invalid/` holds deliberately broken documents
 used to assert explicit error reporting.
 
+`zip/` holds small synthetic archives used by the native-extraction and Mach-O tests: a normal
+JAR, a stored (uncompressed) archive, traversal/absolute/symlink attack cases, a corrupt file,
+and arm64/x86_64/fat Mach-O payloads. None of them contains real Mojang binaries.
+
 These files are test input only. Nothing here may be shipped inside the launcher, and no game
 JAR, asset or library is redistributed in this repository.

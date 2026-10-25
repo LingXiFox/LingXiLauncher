@@ -97,6 +97,8 @@ public struct InstallReport: Sendable {
     public let diagnostics: [LaunchDiagnostic]
     public let javaRequirement: JavaVersionRequirement
     public let sourcePolicy: DownloadSourcePolicy
+    /// The JVM architecture the installation was planned for (natives, rules, cache paths).
+    public let platformArchitecture: PlatformContext.CPUArch
 
     public var isComplete: Bool { missingAfterInstall.isEmpty }
 }

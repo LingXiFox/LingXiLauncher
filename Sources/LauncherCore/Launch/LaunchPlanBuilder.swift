@@ -25,7 +25,7 @@ public struct LaunchPlanBuilder: LaunchPlanning {
         context: LaunchContext,
         dependencies: DependencyResolution
     ) throws -> LaunchPlan {
-        let platform = try PlatformContext.current(features: context.features)
+        let platform = context.platform
         let variables = try variables(version: version, context: context, dependencies: dependencies)
 
         let real = try assembledArguments(
@@ -65,7 +65,7 @@ public struct LaunchPlanBuilder: LaunchPlanning {
         dependencies: DependencyResolution,
         java: JavaRuntime?
     ) throws -> LaunchPreview {
-        let platform = try PlatformContext.current(features: context.features)
+        let platform = context.platform
         let variables = try variables(version: version, context: context, dependencies: dependencies)
 
         // Credentials never enter the preview: every expansion uses the redaction key set, so the
@@ -154,12 +154,24 @@ public struct LaunchPlanBuilder: LaunchPlanning {
                     ))
                 }
             }
-            if java.architecture == .arm64,
-               let legacyNative = dependencies.legacyNatives.first(where: { $0.architectureHint == .x86_64 }) {
-                diagnostics.append(.error(
+            // Legacy native archives declare their architecture via the classifier. Compare
+            // against the *JVM* architecture: x86_64 Java under Rosetta must get x86_64 natives,
+            // arm64 Java must get arm64 natives. Never mix them and never guess.
+            for legacyNative in dependencies.legacyNatives {
+                guard let hint = legacyNative.architectureHint else { continue }
+                if hint != java.architecture {
+                    diagnostics.append(.error(
+                        .javaArchitectureMismatch,
+                        "Legacy native '\(legacyNative.classifier)' targets \(hint.rawValue) but the selected Java is \(java.architecture.rawValue)",
+                        suggestion: "Select a JVM whose architecture matches the native archive, or use a version that ships natives for \(java.architecture.rawValue)."
+                    ))
+                }
+            }
+            if java.isRosettaTranslated {
+                diagnostics.append(.warning(
                     .javaArchitectureMismatch,
-                    "Legacy native '\(legacyNative.classifier)' targets x86_64 but the selected Java is arm64",
-                    suggestion: "Use a version whose natives support Apple Silicon, or run an x86_64 Java under Rosetta."
+                    "Java \(java.versionString) is x86_64 running through Rosetta on Apple Silicon; x86_64 natives will be selected",
+                    suggestion: "Prefer a native arm64 JDK for performance and to avoid mixed-architecture surprises."
                 ))
             }
         } else {

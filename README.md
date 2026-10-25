@@ -1,6 +1,6 @@
 # LingXi Launcher
 
-macOS Apple Silicon 原生 **Minecraft: Java Edition** 启动器。当前进度：**M0 + M1 + M2（T01–T10）** —— 元数据解析、规则引擎、依赖解析、Java 检测、启动计划、进程控制、本地 CLI、本地离线身份，以及**无需登录的官方版本下载安装器**均已实现；正版认证（M3）、Fabric（M4）、SwiftUI GUI（M5）尚未实现。
+macOS Apple Silicon 原生 **Minecraft: Java Edition** 启动器。当前进度：**M0 + M1 + M2 + M2.5（T01–T10）** —— 元数据解析、规则引擎、依赖解析、JVM 架构感知的 natives 选择、Java 检测、启动计划、进程控制、本地 CLI、本地离线身份、**无需登录的官方版本下载安装器**均已实现，并已在真机用 **JDK 17 ARM64 + 1.20.1** 验证到主菜单、正常退出（见 [docs/VERIFICATION-M2.5.md](docs/VERIFICATION-M2.5.md)）；正版认证（M3）、Fabric（M4）、SwiftUI GUI（M5）尚未实现。
 
 > 这是一个**开发中**的项目，不是已发布产品。文档中的里程碑勾选状态以实际测试结果为准。
 
@@ -72,6 +72,8 @@ lingxi verify --instance <id>
 - **校验**：以元数据的 SHA-1 + size 为准；校验失败的文件立即删除，绝不落盘为"已完成"。SHA-1 是与 Mojang 元数据兼容的校验和，不等同于现代数字签名。
 - **缓存命中**：已存在的文件按 size（必要时 SHA-1）判断；`install` 修复缺失/大小不符，`verify` 做全量哈希校验。
 - **并发与重试**：默认 4 路（可配 1–32）；网络/408/429/5xx 有上限重试，403/404 不重试；磁盘空间不足在下载前即报错。
+- **原子落盘**：下载写入同目录 `.part` 文件，SHA-1 + size 校验通过后才用 `rename(2)` 原子替换目标；替换失败时已有完整文件保持不变。
+- **JVM 架构感知**：`--java`（或安装时探测到的默认 JVM）决定 rules、natives 选择与 natives 缓存目录（`natives/<version>/<jvm-arch>`），而不是启动器进程架构。x86_64 JVM 在 Apple Silicon 上会被标记为 Rosetta；legacy natives 会读取 Mach-O 头校验真实架构，不匹配即阻断启动。
 - **Java 不会自动安装**：安装后仅提示所需主版本；用 `lingxi doctor --java ...` 检查实际运行时。
 
 ## 三种身份模式的硬性隔离
@@ -129,7 +131,7 @@ lingxi verify --instance <id>
 
 ## 当前限制（诚实清单）
 
-- **尚未启动真实客户端进入单人主菜单**：`.dev-sandbox` 已有完整 1.20.1 文件并通过全量校验，但启动 GUI 游戏需要主人明确同意；进程链路已用子进程测试和一次"占位 jar"端到端启动验证覆盖。
+- 真实启动已验证到 **1.20.1 主菜单**并正常退出（exit 0）；按用户要求未创建测试世界、未验证世界内玩法。离线身份的 `401 / Realms` 认证失败是预期行为（令牌为显式占位 `0`），不是架构或链接错误。
 - M3–M5 未开始：无 Microsoft 登录、无 Keychain、无 Fabric、无 GUI。
 - Java 自动安装未实现（仅检测与提示）。
 - legacy `virtual` / `map_to_resources` 资产索引（1.6 及更早）只下载对象、不生成 resources 树；现代版本不受影响。

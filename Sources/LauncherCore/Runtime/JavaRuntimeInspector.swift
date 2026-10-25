@@ -77,6 +77,14 @@ public struct JavaRuntimeInspector: JavaRuntimeInspecting {
         return second
     }
 
+    /// Rosetta detection: an x86_64 JVM on physically arm64 hardware is translated.
+    public static func detectRosetta(
+        javaArchitecture: PlatformContext.CPUArch,
+        hardwareArchitecture: PlatformContext.CPUArch
+    ) -> Bool {
+        hardwareArchitecture == .arm64 && javaArchitecture == .x86_64
+    }
+
     /// Maps the JVM's `os.arch` property onto the launcher's CPU architecture model.
     public static func mapArchitecture(_ osArch: String) -> PlatformContext.CPUArch {
         switch osArch.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
@@ -307,14 +315,18 @@ public struct JavaRuntimeInspector: JavaRuntimeInspecting {
             )
         }
 
+        let javaArchitecture = mapArchitecture(properties["os.arch"] ?? "")
+        let hardware = PlatformContext.hardwareArchitecture()
         return JavaRuntime(
             executable: executable,
             versionString: versionString,
             majorVersion: majorVersion,
-            architecture: mapArchitecture(properties["os.arch"] ?? ""),
+            architecture: javaArchitecture,
             vendor: properties["java.vendor"],
             osName: properties["os.name"],
-            rawProperties: properties
+            rawProperties: properties,
+            hostArchitecture: hardware,
+            isRosettaTranslated: detectRosetta(javaArchitecture: javaArchitecture, hardwareArchitecture: hardware)
         )
     }
 

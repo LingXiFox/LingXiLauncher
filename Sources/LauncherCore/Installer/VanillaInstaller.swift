@@ -73,7 +73,8 @@ public struct VanillaInstaller: Sendable {
     ) async throws -> InstallReport {
         let sourceResolver = try SourceResolver(policy: request.sourcePolicy, mirror: mirror)
         let manifestService = ManifestService(transport: transport, layout: layout, sourceResolver: sourceResolver)
-        let platform = try PlatformContext.current()
+        let javaState = try resolveJava(explicit: request.javaExecutable)
+        let platform = javaState.platform
         let dependencyResolver = DependencyResolver(ruleEvaluator: RuleEvaluator())
         let registry = InstanceRepository(layout: layout)
 
@@ -100,7 +101,9 @@ public struct VanillaInstaller: Sendable {
         }
 
         let dependencies = try dependencyResolver.resolve(version: version, layout: layout, platform: platform)
-        var diagnostics = dependencies.diagnostics
+        var diagnostics = javaState.diagnostics
+        diagnostics.append(contentsOf: dependencies.diagnostics)
+        diagnostics.append(contentsOf: javaCompatibilityDiagnostics(for: version, runtime: javaState.runtime))
 
         if assetIndex?.virtual == true || assetIndex?.mapToResources == true {
             diagnostics.append(.warning(
@@ -194,7 +197,10 @@ public struct VanillaInstaller: Sendable {
         // expected size. (Full SHA-1 verification is `lingxi verify`.)
         let after = try dependencyResolver.resolve(version: version, layout: layout, platform: platform)
         diagnostics.append(contentsOf: after.diagnostics)
-        diagnostics.append(contentsOf: javaDiagnostics(for: version, executable: request.javaExecutable))
+        diagnostics.append(contentsOf: NativeCompatibility.diagnostics(
+            for: dependencies.legacyNatives,
+            jvmArchitecture: platform.architecture
+        ))
 
         return InstallReport(
             versionID: version.id,
@@ -208,7 +214,8 @@ public struct VanillaInstaller: Sendable {
             missingAfterInstall: after.missing,
             diagnostics: diagnostics,
             javaRequirement: version.javaRequirement,
-            sourcePolicy: request.sourcePolicy
+            sourcePolicy: request.sourcePolicy,
+            platformArchitecture: platform.architecture
         )
     }
 
@@ -221,21 +228,62 @@ public struct VanillaInstaller: Sendable {
         return URL(string: "https://resources.download.minecraft.net/\(normalized.prefix(2))/\(normalized)")
     }
 
-    private func javaDiagnostics(
-        for version: ResolvedVersion,
-        executable: URL?
-    ) -> [LaunchDiagnostic] {
-        guard let required = version.javaRequirement.majorVersion else { return [] }
-        // Downloading never requires Java, so the compatibility check only runs when the caller
-        // explicitly names a runtime. `lingxi doctor` performs full Java discovery.
-        guard let executable else {
-            return [.info("Minecraft \(version.id) requires Java \(required)+; run `lingxi doctor` to check the local runtime.")]
+    private struct JavaState {
+        let runtime: JavaRuntime?
+        let platform: PlatformContext
+        let diagnostics: [LaunchDiagnostic]
+    }
+
+    /// Resolves the JVM that will run the game. The downloader must fetch natives for that JVM,
+    /// not for the architecture of the launcher process.
+    private func resolveJava(explicit: URL?) throws -> JavaState {
+        if let explicit {
+            let runtime: JavaRuntime
+            do {
+                runtime = try javaInspector.inspect(executable: explicit)
+            } catch let error as LauncherError {
+                throw LauncherError(error.code, "Cannot use --java runtime: \(error.message)", suggestion: error.suggestion)
+            }
+            return try state(for: runtime)
         }
-        guard let runtime = try? javaInspector.inspect(executable: executable) else {
+        if let discovered = try? javaInspector.discoverDefaultExecutable(),
+           let runtime = try? javaInspector.inspect(executable: discovered) {
+            return try state(for: runtime)
+        }
+        return JavaState(
+            runtime: nil,
+            platform: try PlatformContext.current(),
+            diagnostics: [.warning(
+                .javaNotFound,
+                "No usable Java runtime was found; native libraries were selected for the launcher's own architecture",
+                suggestion: "Install a Java runtime for the target architecture or pass --java."
+            )]
+        )
+    }
+
+    private func state(for runtime: JavaRuntime) throws -> JavaState {
+        var diagnostics: [LaunchDiagnostic] = []
+        if runtime.isRosettaTranslated {
+            diagnostics.append(.warning(
+                .javaArchitectureMismatch,
+                "Java \(runtime.versionString) is x86_64 running through Rosetta on Apple Silicon; installing x86_64 natives",
+                suggestion: "Use an arm64 JDK unless you explicitly need the Rosetta path."
+            ))
+        }
+        return JavaState(
+            runtime: runtime,
+            platform: try PlatformContext.forJVM(runtime),
+            diagnostics: diagnostics
+        )
+    }
+
+    private func javaCompatibilityDiagnostics(for version: ResolvedVersion, runtime: JavaRuntime?) -> [LaunchDiagnostic] {
+        guard let required = version.javaRequirement.majorVersion else { return [] }
+        guard let runtime else {
             return [.warning(
                 .javaNotFound,
-                "Minecraft \(version.id) requires Java \(required)+ but '\(executable.path)' is not a usable runtime",
-                suggestion: "Pass --java with a working Java \(required)+ executable, or run `lingxi doctor`."
+                "Minecraft \(version.id) requires Java \(required)+, but no runtime was detected during installation",
+                suggestion: "Install a Java \(required)+ runtime for the target architecture and run `lingxi doctor`."
             )]
         }
         if runtime.majorVersion < required {
@@ -247,4 +295,5 @@ public struct VanillaInstaller: Sendable {
         }
         return [.info("Java check: \(runtime.displayDescription) satisfies Java \(required)+")]
     }
+
 }

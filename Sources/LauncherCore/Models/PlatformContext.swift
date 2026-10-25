@@ -25,7 +25,12 @@ public struct PlatformContext: Sendable, Hashable {
     }
 
     public let os: OperatingSystem
+    /// The architecture Mojang rules are evaluated for. This is the **JVM** architecture, not
+    /// necessarily the launcher process or the hardware: an x86_64 Java under Rosetta on an
+    /// Apple Silicon Mac must select x86_64 natives.
     public let architecture: CPUArch
+    /// The real hardware architecture, independent of Rosetta translation of this process.
+    public let hostArchitecture: CPUArch
     /// Numeric dot-separated OS version, e.g. `14.4.1` on macOS.
     public let osVersion: String
     public let features: [String: Bool]
@@ -34,12 +39,19 @@ public struct PlatformContext: Sendable, Hashable {
         os: OperatingSystem,
         architecture: CPUArch,
         osVersion: String,
-        features: [String: Bool] = [:]
+        features: [String: Bool] = [:],
+        hostArchitecture: CPUArch? = nil
     ) {
         self.os = os
         self.architecture = architecture
         self.osVersion = osVersion
         self.features = features
+        self.hostArchitecture = hostArchitecture ?? architecture
+    }
+
+    /// True when the selected JVM is x86_64 on Apple Silicon hardware (Rosetta 2 translation).
+    public var isTranslated: Bool {
+        hostArchitecture == .arm64 && architecture == .x86_64
     }
 
     /// The architecture names Mojang metadata may use for this CPU.
@@ -75,8 +87,39 @@ public struct PlatformContext: Sendable, Hashable {
             os: os,
             architecture: hostArchitecture(),
             osVersion: osVersion,
-            features: features
+            features: features,
+            hostArchitecture: hardwareArchitecture()
         )
+    }
+
+    /// Builds the rule-evaluation context for a concrete JVM.
+    ///
+    /// The OS and its version come from the host; the architecture comes from `runtime`, which
+    /// was measured by actually executing that Java. This is the context that must be passed to
+    /// `DependencyResolver`, `RuleEvaluator` and `LaunchPlanBuilder` so natives are chosen for
+    /// the JVM that will load them.
+    public static func forJVM(_ runtime: JavaRuntime, features: [String: Bool] = [:]) throws -> PlatformContext {
+        let host = try current(features: features)
+        return PlatformContext(
+            os: host.os,
+            architecture: runtime.architecture,
+            osVersion: host.osVersion,
+            features: features,
+            hostArchitecture: host.hostArchitecture
+        )
+    }
+
+    /// Hardware architecture of the machine, even when this process runs translated by Rosetta.
+    /// `hw.optional.arm64` reports the physical CPU; `uname` reports the *process* ABI.
+    public static func hardwareArchitecture() -> CPUArch {
+        #if canImport(Darwin)
+        var value: Int32 = 0
+        var size = MemoryLayout<Int32>.size
+        if sysctlbyname("hw.optional.arm64", &value, &size, nil, 0) == 0, value == 1 {
+            return .arm64
+        }
+        #endif
+        return hostArchitecture()
     }
 
     /// Reads the CPU architecture of the *current process* (not the machine), so a Rosetta
