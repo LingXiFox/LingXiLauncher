@@ -4,6 +4,9 @@ DerivedData/
 *.xcodeproj
 *.xcworkspace
 .DS_Store
+*.xcuserstate
+xcuserdata/
+.idea/
 .tmp/
 .env
 .env.*

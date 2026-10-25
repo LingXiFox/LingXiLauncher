@@ -137,3 +137,9 @@ lingxi verify --instance <id>
 - 同尺寸但内容损坏的文件不会被 `install` 自动发现（依赖解析只做 stat），请用 `lingxi verify` 做哈希级校验。
 
 更多实现细节见 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)。
+
+## License
+
+[MIT](LICENSE) © 2026 LingXiFox
+
+Minecraft is a trademark of Mojang Studios. This project is not affiliated with, endorsed by, or sponsored by Mojang Studios or Microsoft. It does not distribute Minecraft game files, assets or modified JARs; the installer downloads them from Mojang's own servers into the user's local data directory.
