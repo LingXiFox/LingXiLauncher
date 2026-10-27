@@ -231,6 +231,31 @@ struct JSONVerifyReport: Encodable {
     }
 }
 
+struct JSONMicrosoftAccount: Encodable {
+    let id: String
+    let playerName: String
+    let xuid: String
+    let ownsGame: Bool
+    let lastValidatedAt: String?
+
+    init(_ account: MicrosoftAccount) {
+        self.id = account.id.uuidString.lowercased()
+        self.playerName = account.playerName
+        self.xuid = account.xuid
+        self.ownsGame = account.ownsGame
+        self.lastValidatedAt = account.lastValidatedAt.map(CLIOutput.formatDate)
+    }
+}
+
+struct JSONAccountSummary: Encodable {
+    let kind: String
+    let identifier: String
+    let playerName: String
+    let uuid: String?
+    let ownsGame: Bool?
+    let active: Bool
+}
+
 struct JSONMessage: Encodable {
     let ok: Bool
     let message: String

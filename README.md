@@ -1,60 +1,87 @@
 # LingXi Launcher
 
-macOS Apple Silicon 原生 **Minecraft: Java Edition** 启动器。当前进度：**M0 + M1 + M2 + M2.5（T01–T10）** —— 元数据解析、规则引擎、依赖解析、JVM 架构感知的 natives 选择、Java 检测、启动计划、进程控制、本地 CLI、本地离线身份、**无需登录的官方版本下载安装器**均已实现，并已在真机用 **JDK 17 ARM64 + 1.20.1** 验证到主菜单、正常退出（见 [docs/VERIFICATION-M2.5.md](docs/VERIFICATION-M2.5.md)）；正版认证（M3）、Fabric（M4）、SwiftUI GUI（M5）尚未实现。
+macOS Apple Silicon 原生 **Minecraft: Java Edition** 启动器。当前进度：**M0 + M1 + M2 + M2.5 + M3 + M5-Alpha**。
 
-> 这是一个**开发中**的项目，不是已发布产品。文档中的里程碑勾选状态以实际测试结果为准。
+- **M3 Microsoft 正版认证已实现并通过真机验证**：OAuth 2.0 Authorization Code + PKCE S256、系统浏览器、localhost 回调、Xbox Live → XSTS → Minecraft Services → 所有权/档案、Keychain 存储与刷新。
+- **M5-Alpha SwiftUI GUI 可用**：首页 / 游戏实例 / 版本下载 / 账户管理 / 运行日志 / 设置，直接调用 LauncherCore，不执行 CLI。
+- 真实账号 `Ling_Xi_Fox`（UUID `ee1d1605-5048-42b2-925f-d1032b1909dd`）已验证所有权并完成 CLI/GUI 启动到 1.20.1 主菜单，正常退出 0。
+- Fabric（M4）未实现；本地离线身份仅保留给 CLI 技术验证，GUI 不提供绕过所有权的启动入口。
+
+详见 [docs/VERIFICATION-M3-M5.md](docs/VERIFICATION-M3-M5.md) 与 [docs/VERIFICATION-M2.5.md](docs/VERIFICATION-M2.5.md)。这是一个**开发中**项目，不是已发布产品。
 
 ## 设计边界
 
 - `LauncherCore` 是独立 Swift library，不依赖 SwiftUI/AppKit/CLI 参数解析，不进行用户交互。
-- `lingxi` 只是薄外壳：解析 argv → 调用 Core API → 映射退出码。**没有任何启动/下载逻辑写在 CLI 里。**
-- 未来 `LingXiMac`（M5）直接调用同一个 library，**不会**通过执行 CLI 获取核心功能。
-- 零第三方依赖：Foundation / CryptoKit / Compression（系统框架）。
+- `lingxi` 只是薄外壳：解析 argv → 调用 Core API → 映射退出码。
+- `LingXiMac` 直接调用同一个 library，**不会**通过执行 CLI 获取核心功能。
+- 零第三方依赖：Foundation / CryptoKit / Compression / Security（系统框架）。
 
 ```text
-LingXiMac (SwiftUI, M5)          lingxi (CLI)
+LingXiMac (SwiftUI)              lingxi (CLI)
         │                             │
         └──────────────┬──────────────┘
                        ▼
                  LauncherCore
    VersionResolver · RuleEvaluator · ArgumentResolver
    DependencyResolver · JavaRuntimeInspector · LaunchPlanBuilder
-   GameProcessController · InstanceRepository · LocalOfflineIdentity
-   SourceResolver · Downloader · ManifestService
-   SafeZipExtractor · VanillaInstaller · InstallationVerifier
+   GameProcessController · InstanceRepository
+   MicrosoftOAuthClient · XboxMinecraftAuthenticator
+   KeychainRefreshTokenStore · MicrosoftAuthenticationService
+   LaunchService · VanillaInstaller · InstallationVerifier
 ```
 
-## 快速开始（开发沙盒，不写系统目录）
+## 快速开始
 
-要求：macOS 14+、Apple Silicon、Swift 6 工具链（Xcode 26/27 自带）。
-
-开发期的游戏文件全部放在仓库内的 `.dev-sandbox/`（已 gitignore），不碰 `~/Library`。1.20.1 约 **735 MB**。
+要求：macOS 14+、Apple Silicon、Swift 6 工具链（Xcode 26/27 自带）。开发期游戏文件全部放在仓库内 `.dev-sandbox/`（已 gitignore），不写系统目录。
 
 ```bash
 swift build
 swift test
 
-# 1) 列出版本（下载官方 manifest 到 .dev-sandbox/data/cache）
-swift run lingxi version list --type release --source official \
-  --root .dev-sandbox/mc --data-root .dev-sandbox/data
-
-# 2) 安装 1.20.1（官方源，8 并发；约 2–3 分钟）
-swift run lingxi install vanilla --version 1.20.1 --instance dev-1201 \
-  --name "Dev 1.20.1" --source official --concurrency 8 \
-  --root .dev-sandbox/mc --data-root .dev-sandbox/data
-
-# 3) 全量 SHA-1 校验
-swift run lingxi verify --instance dev-1201 \
-  --root .dev-sandbox/mc --data-root .dev-sandbox/data
-
-# 4) 本地离线身份 + 脱敏启动预览
-swift run lingxi account local create --name DevPlayer \
-  --root .dev-sandbox/mc --data-root .dev-sandbox/data
-swift run lingxi launch --instance dev-1201 --identity local:DevPlayer \
-  --root .dev-sandbox/mc --data-root .dev-sandbox/data --dry-run
+# 1) 生成可双击的 .app（ad-hoc 签名）
+Scripts/build-app.sh
+open dist/LingXiMac.app
 ```
 
-生产默认值不变：数据根目录 `~/Library/Application Support/LingXiLauncher`，游戏根目录默认指向官方启动器的 `~/Library/Application Support/minecraft`（只读引用）。任何下载/写入都只发生在显式传入的 `--root` / `--data-root` 下。
+开发沙盒中的 GUI（需通过环境变量指定数据目录；直接运行 bundle 内二进制）：
+
+```bash
+LINGXI_DATA_ROOT="$PWD/.dev-sandbox/data" \
+LINGXI_GAME_ROOT="$PWD/.dev-sandbox/mc" \
+  ./dist/LingXiMac.app/Contents/MacOS/LingXiMac
+```
+
+Xcode 也可构建 SwiftPM scheme：
+
+```bash
+xcodebuild -scheme LingXiMac -destination 'platform=macOS' build
+```
+
+### Microsoft 登录（CLI）
+
+Client ID 已内嵌于 `Sources/LauncherCore/Authentication/MicrosoftAppRegistration.swift`，**不需要 `auth.json`、不需要 Client Secret**。登录会打开系统浏览器，在 localhost 随机端口接收回调。
+
+```bash
+swift run lingxi account microsoft login \
+  --root .dev-sandbox/mc --data-root .dev-sandbox/data
+
+swift run lingxi account microsoft status \
+  --root .dev-sandbox/mc --data-root .dev-sandbox/data
+
+swift run lingxi account list \
+  --root .dev-sandbox/mc --data-root .dev-sandbox/data
+```
+
+正版会话启动：
+
+```bash
+swift run lingxi launch --instance dev-1201 \
+  --identity microsoft:<uuid|player-name> \
+  --java /Library/Java/JavaVirtualMachines/microsoft-17.jdk/Contents/Home/bin/java \
+  --root .dev-sandbox/mc --data-root .dev-sandbox/data
+```
+
+登录失败、无所有权、Xbox 限制、Keychain 错误都会显式报错，**绝不回退到本地身份**。
 
 ## 安装器（M2，无需登录）
 
@@ -76,41 +103,69 @@ lingxi verify --instance <id>
 - **JVM 架构感知**：`--java`（或安装时探测到的默认 JVM）决定 rules、natives 选择与 natives 缓存目录（`natives/<version>/<jvm-arch>`），而不是启动器进程架构。x86_64 JVM 在 Apple Silicon 上会被标记为 Rosetta；legacy natives 会读取 Mach-O 头校验真实架构，不匹配即阻断启动。
 - **Java 不会自动安装**：安装后仅提示所需主版本；用 `lingxi doctor --java ...` 检查实际运行时。
 
-## 三种身份模式的硬性隔离
+## Microsoft 认证（M3）
+
+- **Public client**：Authorization Code + PKCE S256；系统浏览器；`http://localhost` loopback；随机 `state`；无密码输入、无 Client Secret。
+- **链路**：Microsoft token → Xbox Live user auth → XSTS（Minecraft relying party）→ Minecraft Services `login_with_xbox` → `entitlements/mcstore` + profile → 所有权判定。
+- **令牌类型严格区分**：MSA access token、Xbox token、XSTS token、Minecraft access token 均在内存/会话中；**只有 refresh token 写入 macOS Keychain**（service `com.lingxifox.LingXiLauncher.microsoft`）。
+- **恢复/刷新**：新进程从 Keychain 读取 refresh token 并刷新；访问令牌过期会刷新，refresh token 失效返回 `TOKEN_EXPIRED`。
+- **错误**：无所有权 `GAME_OWNERSHIP_MISSING`；Xbox 限制 `XBOX_ACCOUNT_RESTRICTED`；应用注册 403 `APP_REGISTRATION_REJECTED`；Keychain 错误 `KEYCHAIN_FAILURE`。
+- **XUID**：优先 XSTS `DisplayClaims`/Xbox Live；否则用独立 XSTS audience + Xbox profile service 获取。若仍不可用，允许占位 `0` 继续本地启动（在线功能可能受限），但不伪造所有权。
+- **客户端配置**：`MicrosoftAppRegistration` 单一内嵌来源；开发者可用 `LINGXI_MICROSOFT_CLIENT_ID` 临时覆盖。无外部 auth 配置文件。
+
+## 身份模式与发布边界
 
 | 模式 | 状态 | 行为 |
 |---|---|---|
-| `local-offline` | **M1 已实现** | 玩家名 + Java 兼容的确定性离线 UUID（`OfflinePlayer:<name>` 的 MD5 v3）；`auth_access_token`/`xuid`/`clientid` 使用显式占位值 `0`，`user_type=legacy`。**不是购买验证。** |
-| `microsoft` | M3，未实现 | 需要 Entra 应用 + Minecraft AppID 获批；CLI 明确返回 `NOT_IMPLEMENTED`，不会伪造会话。 |
-| `licensed-offline` | M3，未实现 | 使用此前通过正版所有权校验的本地缓存；构建计划时明确抛错，不静默降级。 |
+| `local-offline` | M1，CLI 技术验证 | 确定性离线 UUID，token/xuid 占位 `0`；**不是购买验证**。GUI 不提供启动入口。 |
+| `microsoft` | **M3 已实现/真机验证** | 真实 Microsoft/Xbox/Minecraft 会话、所有权检查、Keychain 刷新。 |
+| `licensed-offline` | 未实现 | 构建计划时显式抛错，不静默降级。 |
+
+Minecraft AppID 已于 **2026-10-26** 通过 Mojang 官方审核并加入 API Allow List（项目所有者确认）。GUI 公开构建只允许 Microsoft 正版身份启动；本地离线身份仅用于 CLI 技术验证，与 Microsoft 身份严格隔离。
 
 **严禁静默回退**：Microsoft 登录失败必须报错，绝不自动切换成本地身份；反之亦然。`LaunchPlan` 的 `description`/日志只使用脱敏 argv。
 
-### 政策与发布门槛（必须如实披露）
+## SwiftUI GUI（M5-Alpha）
 
-本项目已有 Entra 应用 `LingXi Launcher`，**Minecraft AppID 审核状态尚未确认批准**。审核表要求"应用必须验证用户的游戏所有权并在启用游戏前认证"，并明确反对绕过认证与许可证检查。
+原生 SwiftUI，macOS 14+，无 Electron/WebView：
 
-- `LocalOffline` 是**本地技术验证路径**，不代表获得 Mojang 授权，也不代表能访问需要正版会话的服务。
-- 若要把该能力带入面向公众、使用已获批 AppID 的发行版，**必须先向审核方如实披露并取得明确答复**；若不允许，发行版应禁用该模式。
-- 不隐藏特性、不借用他人 Client ID、不自动回退以规避审核。
-- 不随安装包分发任何游戏本体、资源或修改后的 JAR；下载器抓取的文件留在用户本机。
+- **首页**：当前实例、账户、Java、启动/停止、最近退出码。
+- **游戏实例**：列表、创建、删除（需确认）、打开目录、JVM 内存设置、启动。
+- **版本下载**：官方/可信镜像清单、Release/Snapshot 过滤、进度/速度/当前文件、取消、安装后完整性验证。
+- **账户管理**：Microsoft 登录进度、UUID、所有权、切换、验证、退出；本地身份只读并明确标注未验证。
+- **运行日志**：LauncherCore 事件、Java stdout/stderr、游戏输出、退出码；搜索、复制、自动滚动、脱敏诊断导出、打开 Minecraft `latest.log`。
+- **设置**：Java 检测/选择、下载源/镜像配置、数据/游戏目录、内嵌认证状态。
+- **安全**：GUI 不执行 CLI；OAuth code、access/refresh token、PKCE verifier 不写入日志；诊断导出脱敏。
+
+GUI 使用 `LaunchService` 启动：`resolve → dependencies → preflight → GameProcessController`，与 CLI 共享 Core 组件，不复制业务逻辑。
 
 ## 数据布局
 
 ```text
-<root>/                                  # 游戏根（--root；开发期是 .dev-sandbox/mc）
+<root>/                                  # 游戏根（--root；开发期 .dev-sandbox/mc）
 ├── versions/<id>/<id>.json + <id>.jar
 ├── libraries/<maven path>
 ├── assets/indexes/<asset-id>.json
 ├── assets/objects/<hash[0..2]>/<hash>
 └── assets/log_configs/<id>
 
-<data-root>/                             # 启动器数据（--data-root；开发期是 .dev-sandbox/data）
+<data-root>/                             # 启动器数据（--data-root；开发期 .dev-sandbox/data）
 ├── instances/<instance-id>/instance.json + .minecraft/
 ├── accounts/local/<name>.json           # 本地离线账户（无令牌字段，显式 unverified）
-├── natives/<version-id>/<arch>/         # legacy natives 解压缓存，可重建
+├── accounts/microsoft/<uuid>.json       # 仅元数据：UUID/name/xuid/ownership/时间
+├── accounts/active.json
+├── natives/<version-id>/<arch>/         # legacy natives 解压缓存
 ├── cache/manifests/version_manifest_v2.json
-└── logs/launcher/                       # 仅记录脱敏后的 argv
+├── logs/launcher/launch-*.log           # CLI，脱敏 argv
+└── logs/launcher/gui-launch-*.log       # GUI，脱敏 argv
+```
+
+macOS Keychain（不落盘到上述目录）：
+
+```text
+service: com.lingxifox.LingXiLauncher.microsoft
+account: <Microsoft account UUID>
+value:   refresh token only
 ```
 
 ## 退出码
@@ -121,22 +176,24 @@ lingxi verify --instance <id>
 | 3 | 没有可用 Java（版本/架构/可执行性） |
 | 4 | preflight / verify 失败（缺失文件、架构不兼容、校验不通过） |
 | 64 | 用法错误 |
-| 65 | 元数据无效 / 校验和不匹配 |
+| 65 | 元数据无效 / 校验和不匹配 / 认证数据无效 |
 | 66 | 缺少输入（版本 JSON、实例、账户） |
-| 69 | 未实现 / 不可用（M3、网络或 HTTP 失败） |
+| 69 | 未实现 / 不可用（网络、HTTP 失败、认证/所有权/配置错误） |
 | 70 | 内部错误 |
-| 74 | I/O 错误（含磁盘空间、权限） |
+| 74 | I/O 错误（含磁盘空间、权限、Keychain） |
 
 游戏正常跑完时，启动器透传游戏自身的退出码。
 
 ## 当前限制（诚实清单）
 
-- 真实启动已验证到 **1.20.1 主菜单**并正常退出（exit 0）；按用户要求未创建测试世界、未验证世界内玩法。离线身份的 `401 / Realms` 认证失败是预期行为（令牌为显式占位 `0`），不是架构或链接错误。
-- M3–M5 未开始：无 Microsoft 登录、无 Keychain、无 Fabric、无 GUI。
-- Java 自动安装未实现（仅检测与提示）。
-- legacy `virtual` / `map_to_resources` 资产索引（1.6 及更早）只下载对象、不生成 resources 树；现代版本不受影响。
-- 旧版 natives 架构只能在 classifier 明确写出时判定：`-x86_64` 报 error；仅 `natives-macos` 的旧版给 warning，提示可能需要 Rosetta，绝不自动做混合架构修复。
-- 同尺寸但内容损坏的文件不会被 `install` 自动发现（依赖解析只做 stat），请用 `lingxi verify` 做哈希级校验。
+- M3 真实登录已验证；但本次使用浏览器已有 Microsoft 会话（SSO），未在全新浏览器 profile 下重走密码 + 首次 consent。
+- CLI/GUI 正版启动均验证到 **1.20.1 主菜单**并正常退出 0；未创建新世界、未验证世界内玩法、多人或 Realms。1.20.1 的 Realms “Client incompatible” 是旧版本游戏侧提示，不是认证失败。
+- GUI 下载本次是 1.20.1 缓存命中 + 3636 文件全量验证；大文件全新下载已由 M2 CLI 验证，但 GUI 中途取消未做真机大文件实测。
+- 未测试 Intel Mac；`.app` 为 ad-hoc 签名，未做 Developer ID 签名/公证。
+- XUID 依赖额外的 Xbox profile 请求；失败时占位 `0` 会限制在线功能。
+- Fabric（M4）未实现。
+- legacy `virtual` / `map_to_resources` 资产索引（1.6 及更早）只下载对象、不生成 resources 树。
+- 同尺寸但内容损坏的文件不会被 `install` 自动发现，请用 `lingxi verify` 做哈希级校验。
 
 更多实现细节见 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)。
 

@@ -1,4 +1,4 @@
-# 开发说明（M1 + M2 + M2.5 / T01–T10）
+# 开发说明（M1 + M2 + M2.5 + M3 + M5-Alpha）
 
 本文记录实现约定、契约边界和验收方式。产品边界与安全披露见根目录 [README](../README.md)。
 
@@ -27,9 +27,20 @@ Sources/LauncherCore/
 │   ├── DependencyResolver.swift  # 规则过滤 → classpath/natives/assets（T04）
 │   ├── LaunchPlanBuilder.swift   # 纯转换：preview / build / validate（T06）
 │   ├── GameProcessController.swift        # Process + 异步流 + 退出码（T07）
+│   ├── LaunchService.swift                # GUI/CLI 共享的启动编排
 │   └── LocalOfflineIdentity.swift         # 离线 UUID v3（T09）
+├── Authentication/                # M3
+│   ├── MicrosoftAppRegistration.swift     # 唯一内嵌 Entra public-client 配置
+│   ├── AuthenticationModels.swift         # 配置/阶段/状态/账户模型
+│   ├── PKCE.swift                         # S256 verifier/challenge
+│   ├── MicrosoftOAuthClient.swift         # authorize/token/refresh
+│   ├── LoopbackOAuthAuthorizer.swift      # localhost server + state 校验
+│   ├── XboxMinecraftAuthenticator.swift   # Xbox/XSTS/Minecraft/所有权/XUID
+│   ├── KeychainRefreshTokenStore.swift    # 仅 refresh token
+│   ├── MicrosoftAccountStore.swift        # 元数据 + active account
+│   └── MicrosoftAuthenticationService.swift # actor 状态机/刷新/登出
 ├── Instance/
-│   ├── InstanceRepository.swift  # 实例创建/加载/列出/切换版本
+│   ├── InstanceRepository.swift  # 实例创建/加载/列出/切换版本/内存/删除
 │   └── LocalAccountStore.swift   # 本地离线账户（无令牌字段）
 ├── Installer/                    # M2
 │   ├── DownloadSource.swift      # official/mirror/auto/local-cache-only + 显式镜像映射
@@ -39,7 +50,11 @@ Sources/LauncherCore/
 │   ├── SafeZipExtractor.swift    # 最小 ZIP 读取 + Zip Slip/symlink 防护
 │   ├── VanillaInstaller.swift    # 安装编排（按选定 JVM 架构）
 │   └── InstallationVerifier.swift# 全量哈希校验
-└── LingXiCLI/                    # 薄外壳：argv 解析、Core 调用、退出码映射
+├── Apps/LingXiMac/               # M5 SwiftUI GUI（直接依赖 LauncherCore）
+│   ├── Info.plist
+│   └── Sources/                  # AppModel + Views
+├── Scripts/build-app.sh          # SwiftPM → dist/LingXiMac.app（ad-hoc）
+└── Sources/LingXiCLI/            # 薄外壳：argv 解析、Core 调用、退出码映射
 Tests/LauncherCoreTests/
 ├── Fixtures/                     # 真实 Mojang 元数据 + 故意的坏数据
 └── *Tests.swift                  # 见 §6
@@ -148,7 +163,7 @@ swift build
 swift test
 ```
 
-当前总计 **206 个测试**，全量运行 0 失败：
+当前总计 **231 个测试**，全量运行 0 失败：
 
 | 测试文件（用例数） | 覆盖 |
 |---|---|
@@ -166,7 +181,9 @@ swift test
 | `SafeZipExtractorTests` (10) | 正常/存储模式、`../`、嵌套穿越、绝对路径、symlink、损坏包、条目与数量上限 |
 | `InstallerTests` (10) | 端到端安装、二次缓存、宽展修复、local-cache-only、mirror-only、版本筛选、natives 解压、verify 检出损坏 |
 | `M2_5CompatibilityTests` (7) | JVM 架构上下文/Rosetta、per-JVM natives 缓存、规则按 JVM 架构、双向架构不匹配、缺失 natives、Mach-O/ZIP 架构检查 |
-| `LocalOfflineIdentityTests` (9) / `InstanceRepositoryTests` (5) | UUID 向量、名字边界、账户无令牌字段、实例隔离 |
+| `LocalOfflineIdentityTests` (9) / `InstanceRepositoryTests` (6) | UUID 向量、名字边界、账户无令牌字段、实例隔离、内存/删除 |
+| `AuthenticationTests` (23) | 内嵌配置、PKCE RFC 向量、OAuth、state 拒绝、真实 loopback、Xbox/XSTS/Minecraft/所有权、Keychain |
+| `LaunchServiceTests` (2) | 启动失败事件、事件流终止与重复调用 |
 | `PathSafetyTests` (4) / `GameDataLayoutTests` (3) / `PlatformContextTests` (3) | 路径穿越、布局推导、平台上下文 |
 
 安全测试约定：含 token 的 `LaunchPlan`、`--dry-run`、`--json`、日志文件都必须脱敏；游戏中 stdout/stderr 原样记录（启动器从不写完整命令行）。M2 测试全部使用内存传输层（`StubTransport`），不访问网络。
@@ -186,16 +203,16 @@ swift test
 | T09 | LocalOffline 身份（13 tests） | ✅ |
 | T10 | 下载器（SourceResolver/Downloader/Zip/Installer） | ✅ 真实 1.20.1 安装 3635 文件 / 734.5 MB 通过 |
 | M2.5 | JVM 架构感知 + 真实启动闭环 + 原子替换 | ✅ 真机 JDK17 ARM64 到主菜单并 exit 0（见 VERIFICATION-M2.5.md） |
-| T11 | Microsoft 认证（OAuth+PKCE、Xbox/XSTS、Keychain） | ⬜ M3（AppID 未获批） |
-| T12 | 正版启动回归 | ⬜ M3 |
+| T11 | Microsoft 认证（OAuth+PKCE、Xbox/XSTS、Keychain） | ✅ 真机登录 `Ling_Xi_Fox`，UUID/所有权验证通过 |
+| T12 | 正版启动回归 | ✅ CLI + GUI 到 1.20.1 主菜单，exit 0 |
+| M5-A | SwiftUI GUI + `.app` + 六页 + 实时日志 | ✅ Alpha 可用（见 VERIFICATION-M3-M5.md） |
 
-## 9. 下一步（M3）
+## 9. 剩余工作
 
-- `Authentication` 模块：Authorization Code + PKCE（S256）、`state` 防 CSRF、loopback 回调、Refresh Token 存 Keychain。
-- `AuthorizedMinecraftSession` 已有内部构造器隔离与脱敏 `description`，M3 只需新增签发路径；**不得**为 CLI 开放自由构造。
-- Xbox Live / XSTS / Minecraft Services 链路；区分 403 AppID、无所有权、令牌过期。
-- `LicensedOffline` 依赖此前真实所有权校验；策略与过期规则需单测覆盖。
-- 失败必须明确报错，**绝不回退 LocalOffline**；M3 验收前不宣称"正版启动闭环"。
+- **M4**：Fabric/Quilt 加载器安装、版本继承解析、mods 目录与冲突提示。
+- **M5-B**：实例创建向导、下载任务历史、Java 自动安装/下载、更多诊断导出项。
+- 真实大文件 GUI 下载中途取消、Intel Mac、Developer ID 签名/公证。
+- 认证增强：多账户切换的 UI 覆盖、refresh token 轮换异常监控、全新浏览器 profile 的首次 consent 真机回归。
 
 ## 10. 开发沙盒
 

@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# Builds LingXiMac and assembles a launchable .app bundle (ad-hoc signed).
+# Usage: Scripts/build-app.sh [--release|--debug]
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+CONFIGURATION="release"
+if [[ "${1:-}" == "--debug" ]]; then
+  CONFIGURATION="debug"
+fi
+
+cd "$ROOT"
+swift build -c "$CONFIGURATION" --product LingXiMac
+
+APP="$ROOT/dist/LingXiMac.app"
+rm -rf "$APP"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+cp "$ROOT/.build/$CONFIGURATION/LingXiMac" "$APP/Contents/MacOS/LingXiMac"
+cp "$ROOT/Apps/LingXiMac/Info.plist" "$APP/Contents/Info.plist"
+printf 'APPL????' > "$APP/Contents/PkgInfo"
+chmod +x "$APP/Contents/MacOS/LingXiMac"
+
+# Ad-hoc signature is enough for local development; distribution signing/notarization is M5+.
+codesign --force --sign - "$APP" >/dev/null 2>&1 || echo "warning: ad-hoc codesign failed; the app may still run locally"
+
+echo "Built: $APP"

@@ -45,9 +45,11 @@ enum CLI {
             return ExitStatus.missingInput.rawValue
         case .javaNotFound, .javaVersionMismatch, .javaArchitectureMismatch:
             return ExitStatus.javaUnusable.rawValue
-        case .notImplemented, .unauthorized, .appRegistrationRejected:
+        case .notImplemented, .unauthorized, .appRegistrationRejected,
+             .configurationMissing, .authenticationCancelled, .authenticationTimeout,
+             .gameOwnershipMissing, .xboxAccountRestricted, .tokenExpired:
             return ExitStatus.unavailable.rawValue
-        case .ioFailure, .diskFull, .permissionDenied:
+        case .ioFailure, .diskFull, .permissionDenied, .keychainFailure:
             return ExitStatus.ioError.rawValue
         case .networkFailure, .httpForbidden, .httpNotFound, .downloadFailed:
             return ExitStatus.unavailable.rawValue
@@ -80,7 +82,7 @@ enum CLI {
         case "launch":
             return try await runLaunchCommand(rest)
         case "account":
-            return try runAccountCommand(rest)
+            return try await runAccountCommand(rest)
         case "instance":
             return try runInstanceCommand(rest)
         case "install":
@@ -367,7 +369,7 @@ enum CLI {
         )
         let input = try ArgumentParser.parse(arguments, spec: spec)
         if input.has("help") {
-            print("usage: lingxi launch --identity local:<name> [--instance <id> | --root <path> --version <id>] [--dry-run] [--java <path>] [--json]")
+            print("usage: lingxi launch --identity local:<name>|microsoft:<uuid|playerName> [--instance <id> | --root <path> --version <id>] [--dry-run] [--java <path>] [--json]")
             return ExitStatus.success.rawValue
         }
         let dryRun = input.has("dry-run")
@@ -392,7 +394,7 @@ enum CLI {
             )
         }
 
-        let identity = try resolveIdentity(input.requireValue("identity"), layout: layout)
+        let identity = try await resolveIdentity(input.requireValue("identity"), layout: layout)
 
         let instanceDirectory: URL
         let gameDirectory: URL
@@ -519,24 +521,47 @@ enum CLI {
         }
     }
 
-    private static func resolveIdentity(_ raw: String, layout: GameDataLayout) throws -> LaunchIdentity {
+    private static func resolveIdentity(_ raw: String, layout: GameDataLayout) async throws -> LaunchIdentity {
         let parts = raw.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
         guard parts.count == 2, !parts[1].isEmpty else {
             throw LauncherError(
                 .usageError,
                 "Malformed --identity value '\(raw)'",
-                suggestion: "Use --identity local:<player-name>. Microsoft and licensed-offline identities arrive with M3."
+                suggestion: "Use --identity local:<player-name> or --identity microsoft:<uuid|player-name>."
             )
         }
         switch parts[0] {
         case "local":
             let profile = try LocalAccountStore(layout: layout).profile(forName: parts[1])
             return .localOffline(profile)
-        case "microsoft", "licensed-offline":
+        case "microsoft":
+            let service = try MicrosoftAuthenticationFactory.makeDefault(
+                layout: layout,
+                browser: ProcessBrowserOpener()
+            )
+            let accounts = try await service.accounts()
+            let identifier = parts[1]
+            let account: MicrosoftAccount?
+            if let uuid = UUID(uuidString: identifier) {
+                account = accounts.first { $0.id == uuid }
+            } else {
+                account = accounts.first { $0.playerName.caseInsensitiveCompare(identifier) == .orderedSame }
+            }
+            guard let account else {
+                throw LauncherError(
+                    .unauthorized,
+                    "No signed-in Microsoft account matches '\(identifier)'",
+                    suggestion: "Run `lingxi account microsoft login` or `lingxi account list`."
+                )
+            }
+            CLIOutput.fail("Refreshing Microsoft session for \(account.playerName)...")
+            let session = try await service.session(for: account.id)
+            return .microsoft(session)
+        case "licensed-offline":
             throw LauncherError(
                 .notImplemented,
-                "Identity mode '\(parts[0])' requires the M3 Microsoft authentication module and an approved Minecraft AppID",
-                suggestion: "M1 only supports the explicit local offline identity for local technical validation; it is not a licence check."
+                "Licensed-offline identity is not implemented yet",
+                suggestion: "Use a Microsoft account, or a local profile for local technical validation."
             )
         default:
             throw LauncherError(.usageError, "Unknown identity mode '\(parts[0])'")
@@ -640,29 +665,45 @@ enum CLI {
 
     // MARK: - account
 
-    private static func runAccountCommand(_ arguments: [String]) throws -> Int32 {
+    private static func runAccountCommand(_ arguments: [String]) async throws -> Int32 {
         guard let scope = arguments.first else {
-            throw LauncherError(.usageError, "Missing account subcommand", suggestion: "Use `lingxi account local create --name <name>`.")
+            throw LauncherError(.usageError, "Missing account subcommand", suggestion: "Use `lingxi account list` or `lingxi account microsoft login`.")
         }
         let rest = Array(arguments.dropFirst())
         switch scope {
         case "local":
-            return try runLocalAccountCommand(rest)
+            let status = try runLocalAccountCommand(rest)
+            markLocalAccountActiveIfCreated(rest)
+            return status
+        case "microsoft":
+            return try await runMicrosoftAccountCommand(rest)
+        case "list":
+            return try await runAccountList(rest)
         case "login":
             throw LauncherError(
-                .notImplemented,
-                "Microsoft login requires the M3 authentication module (OAuth + PKCE, Xbox Live, Minecraft Services) and an approved Minecraft AppID",
-                suggestion: "M1 only supports local offline identities; no real authentication is implemented or claimed."
+                .usageError,
+                "Use `lingxi account microsoft login`",
+                suggestion: "The local identity never substitutes for a Microsoft sign-in."
             )
         case "status":
             throw LauncherError(
-                .notImplemented,
-                "Account status requires the M3 authentication module",
-                suggestion: "M1 has no Microsoft session to report."
+                .usageError,
+                "Use `lingxi account microsoft status`",
+                suggestion: "Run `lingxi account list` to see all local and Microsoft accounts."
             )
         default:
             throw LauncherError(.usageError, "Unknown account subcommand '\(scope)'")
         }
+    }
+
+    /// Records the last-created local account as active (non-secret convenience only).
+    private static func markLocalAccountActiveIfCreated(_ arguments: [String]) {
+        guard arguments.first == "create" else { return }
+        let spec = ArgumentParser.Spec(valueOptions: ["name", "root", "data-root"])
+        guard let input = try? ArgumentParser.parse(Array(arguments.dropFirst()), spec: spec),
+              let name = input.value("name"),
+              let layout = try? resolveLayout(input, requireGameRoot: false) else { return }
+        try? ActiveAccountStore(layout: layout).save(AccountReference(kind: .local, identifier: name))
     }
 
     private static func runLocalAccountCommand(_ arguments: [String]) throws -> Int32 {

@@ -1,7 +1,7 @@
 import Foundation
 
 /// A launcher instance: one isolated game directory plus the metadata describing it.
-public struct Instance: Sendable, Equatable {
+public struct Instance: Sendable, Equatable, Identifiable {
     public let directory: URL
     public var manifest: InstanceManifest
 
@@ -29,6 +29,8 @@ public struct InstanceManifest: Codable, Sendable, Equatable {
     public var lastLaunchedAt: Date?
     /// Which identity mode was last used, for display only.
     public var lastIdentityMode: IdentityMode?
+    /// Per-instance JVM heap limit (`-Xmx<N>M`). Nil means no launcher-supplied limit.
+    public var memoryMiB: Int?
 
     public init(
         id: String,
@@ -36,7 +38,8 @@ public struct InstanceManifest: Codable, Sendable, Equatable {
         versionID: String?,
         createdAt: Date = Date(),
         lastLaunchedAt: Date? = nil,
-        lastIdentityMode: IdentityMode? = nil
+        lastIdentityMode: IdentityMode? = nil,
+        memoryMiB: Int? = nil
     ) {
         self.id = id
         self.displayName = displayName
@@ -44,6 +47,7 @@ public struct InstanceManifest: Codable, Sendable, Equatable {
         self.createdAt = createdAt
         self.lastLaunchedAt = lastLaunchedAt
         self.lastIdentityMode = lastIdentityMode
+        self.memoryMiB = memoryMiB
     }
 }
 
@@ -166,11 +170,51 @@ public struct InstanceRepository: Sendable {
             versionID: versionID,
             createdAt: instance.manifest.createdAt,
             lastLaunchedAt: instance.manifest.lastLaunchedAt,
-            lastIdentityMode: instance.manifest.lastIdentityMode
+            lastIdentityMode: instance.manifest.lastIdentityMode,
+            memoryMiB: instance.manifest.memoryMiB
         )
         try save(updated, in: instance.directory)
         instance.manifest = updated
         return instance
+    }
+
+    /// Updates the per-instance heap limit. Validates the range so a typo cannot create a
+    /// 1 MiB heap or an absurd allocation.
+    @discardableResult
+    public func setMemory(id: String, memoryMiB: Int?) throws -> Instance {
+        if let memoryMiB, !(256...65_536).contains(memoryMiB) {
+            throw LauncherError(.usageError, "Memory must be between 256 and 65536 MiB")
+        }
+        var instance = try load(id: id)
+        let updated = InstanceManifest(
+            id: instance.manifest.id,
+            displayName: instance.manifest.displayName,
+            versionID: instance.manifest.versionID,
+            createdAt: instance.manifest.createdAt,
+            lastLaunchedAt: instance.manifest.lastLaunchedAt,
+            lastIdentityMode: instance.manifest.lastIdentityMode,
+            memoryMiB: memoryMiB
+        )
+        try save(updated, in: instance.directory)
+        instance.manifest = updated
+        return instance
+    }
+
+    /// Deletes an instance directory. Callers must confirm with the user first; this removes
+    /// worlds under the instance's `.minecraft` and is intentionally not exposed by the CLI.
+    public func delete(id: String) throws {
+        let directory = try layout.instanceDirectory(id)
+        guard FileManager.default.fileExists(atPath: directory.path) else {
+            throw LauncherError(.missingDependency, "Instance '\(id)' does not exist")
+        }
+        guard PathSafety.isContainedResolvingSymlinks(directory, inBase: layout.instancesDirectory) else {
+            throw LauncherError(.pathEscapesRoot, "Instance '\(id)' resolves outside the instances directory")
+        }
+        do {
+            try FileManager.default.removeItem(at: directory)
+        } catch {
+            throw LauncherError(.ioFailure, "Cannot delete instance '\(id)': \(error.localizedDescription)")
+        }
     }
 
     /// Records a successful launch for display purposes.

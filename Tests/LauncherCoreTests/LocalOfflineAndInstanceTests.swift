@@ -152,6 +152,22 @@ final class InstanceRepositoryTests: XCTestCase {
         XCTAssertNotNil(reloaded.manifest.lastLaunchedAt)
     }
 
+
+    func testMemorySettingAndInstanceDeletion() throws {
+        let (repository, root) = try makeRepository()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let instance = try repository.create(displayName: "Memory Test", versionID: "1.20.1")
+        let updated = try repository.setMemory(id: instance.id, memoryMiB: 4096)
+        XCTAssertEqual(updated.manifest.memoryMiB, 4096)
+        XCTAssertEqual(try repository.load(id: instance.id).manifest.memoryMiB, 4096)
+        XCTAssertThrowsError(try repository.setMemory(id: instance.id, memoryMiB: 64)) { error in
+            XCTAssertEqual((error as? LauncherError)?.code, .usageError)
+        }
+        try repository.delete(id: instance.id)
+        XCTAssertTrue(try repository.list().isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: instance.directory.path))
+    }
+
     func testUnknownInstanceIsExplicitError() throws {
         let (repository, root) = try makeRepository()
         defer { try? FileManager.default.removeItem(at: root) }

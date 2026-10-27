@@ -81,7 +81,7 @@ final class LaunchPlanBuilderTests: XCTestCase {
 
         let cpIndex = try XCTUnwrap(plan.arguments.firstIndex(of: "-cp"))
         XCTAssertEqual(Array(plan.arguments[(cpIndex - 2)..<cpIndex]), ["-Dfoo=bar", "-Dlingxi.feature=on"])
-        XCTAssertEqual(plan.arguments[cpIndex - 3], "-Dminecraft.launcher.version=0.1.0")
+        XCTAssertEqual(plan.arguments[cpIndex - 3], "-Dminecraft.launcher.version=\(LauncherInfo.version)")
         XCTAssertEqual(plan.arguments[cpIndex + 1], fixture.classpathValue)
 
         let redactedCPIndex = try XCTUnwrap(plan.redactedArguments.firstIndex(of: "-cp"))
@@ -816,7 +816,7 @@ final class LaunchPlanBuilderTests: XCTestCase {
             additionalJVMArguments: additionalJVMArguments,
             features: features,
             launcherName: "LingXi Launcher",
-            launcherVersion: "0.1.0"
+            launcherVersion: LauncherInfo.version
         )
         return T06PlanFixture(
             root: root,

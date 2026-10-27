@@ -27,6 +27,13 @@ public struct LauncherError: Error, Sendable, Equatable, CustomStringConvertible
         case sizeMismatch = "SIZE_MISMATCH"
         case diskFull = "DISK_FULL"
         case permissionDenied = "PERMISSION_DENIED"
+        case configurationMissing = "CONFIGURATION_MISSING"
+        case authenticationCancelled = "AUTHENTICATION_CANCELLED"
+        case authenticationTimeout = "AUTHENTICATION_TIMEOUT"
+        case gameOwnershipMissing = "GAME_OWNERSHIP_MISSING"
+        case xboxAccountRestricted = "XBOX_ACCOUNT_RESTRICTED"
+        case tokenExpired = "TOKEN_EXPIRED"
+        case keychainFailure = "KEYCHAIN_FAILURE"
         case usageError = "USAGE_ERROR"
         case notImplemented = "NOT_IMPLEMENTED"
     }

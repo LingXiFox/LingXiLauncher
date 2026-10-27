@@ -71,6 +71,7 @@ public struct VanillaInstaller: Sendable {
         _ request: InstallRequest,
         progress: @escaping @Sendable (InstallProgressEvent) -> Void
     ) async throws -> InstallReport {
+        try Task.checkCancellation()
         let sourceResolver = try SourceResolver(policy: request.sourcePolicy, mirror: mirror)
         let manifestService = ManifestService(transport: transport, layout: layout, sourceResolver: sourceResolver)
         let javaState = try resolveJava(explicit: request.javaExecutable)
@@ -88,12 +89,14 @@ public struct VanillaInstaller: Sendable {
             )
         }
 
+        try Task.checkCancellation()
         progress(.phase(.versionMetadata, "Fetching metadata for Minecraft \(request.versionID)"))
         let version = try await manifestService.fetchVersionMetadata(
             versionID: request.versionID,
             expectedSHA1: entry.sha1
         )
 
+        try Task.checkCancellation()
         progress(.phase(.assetIndex, "Fetching asset index \(version.assetIndexID)"))
         var assetIndex: AssetIndexDocument?
         if version.assetIndex != nil {
@@ -147,6 +150,7 @@ public struct VanillaInstaller: Sendable {
         )
         progress(.phase(.downloading, "Downloading \(tasks.count) file(s) via \(request.sourcePolicy.displayName)"))
         let summary = try await downloader.download(tasks, progress: progress)
+        try Task.checkCancellation()
 
         if !summary.failures.isEmpty {
             let examples = summary.failures.prefix(3).map { "\($0.task.destination.lastPathComponent): \($0.message)" }
@@ -157,6 +161,7 @@ public struct VanillaInstaller: Sendable {
             )
         }
 
+        try Task.checkCancellation()
         // Legacy natives: extract into the version+arch scoped cache and rebuild it from scratch
         // so a stale extraction from another Java architecture can never be reused.
         progress(.phase(.extractingNatives, "Extracting native libraries"))

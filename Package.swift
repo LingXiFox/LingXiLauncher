@@ -23,6 +23,12 @@ let package = Package(
             dependencies: ["LauncherCore"],
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
+        .executableTarget(
+            name: "LingXiMac",
+            dependencies: ["LauncherCore"],
+            path: "Apps/LingXiMac/Sources",
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
         .testTarget(
             name: "LauncherCoreTests",
             dependencies: ["LauncherCore"],

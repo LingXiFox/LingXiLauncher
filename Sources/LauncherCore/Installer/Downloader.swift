@@ -36,6 +36,7 @@ public struct Downloader: Sendable {
         _ tasks: [DownloadTask],
         progress: @escaping @Sendable (InstallProgressEvent) -> Void
     ) async throws -> DownloadSummary {
+        try Task.checkCancellation()
         let uniqueTasks = Self.deduplicated(tasks)
         var cacheHits = 0
         var pending: [DownloadTask] = []
@@ -97,6 +98,8 @@ public struct Downloader: Sendable {
             }
         }
 
+        try Task.checkCancellation()
+
         // Stable, deterministic output ordering independent of completion order.
         downloaded.sort { $0.path.path < $1.path.path }
         failures.sort { $0.task.destination.path < $1.task.destination.path }
@@ -137,6 +140,9 @@ public struct Downloader: Sendable {
         task: DownloadTask,
         progress: @Sendable @escaping (InstallProgressEvent) -> Void
     ) async -> DownloadResult {
+        if Task.isCancelled {
+            return .failure(DownloadFailure(task: task, code: .downloadFailed, message: "Cancelled"))
+        }
         progress(.fileStarted(path: task.destination.path, size: task.size ?? 0))
 
         guard let officialURL = task.officialURL else {
