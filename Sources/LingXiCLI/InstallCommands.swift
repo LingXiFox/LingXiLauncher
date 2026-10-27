@@ -46,11 +46,14 @@ extension CLI {
         guard let loader = arguments.first else {
             throw LauncherError(.usageError, "Missing install target", suggestion: "Use `lingxi install vanilla --version <id> --instance <id>`.")
         }
+        if loader == "fabric" {
+            return try await runFabricInstall(Array(arguments.dropFirst()))
+        }
         guard loader == "vanilla" else {
             throw LauncherError(
                 .notImplemented,
-                "Only vanilla installation is implemented (M2); '\(loader)' arrives with M4",
-                suggestion: "Use `lingxi install vanilla ...`."
+                "Only vanilla and Fabric installation are implemented; '\(loader)' is not supported",
+                suggestion: "Use `lingxi install vanilla ...` or `lingxi install fabric ...`."
             )
         }
         let spec = ArgumentParser.Spec(
@@ -140,6 +143,73 @@ extension CLI {
             }
         }
         return report.isComplete ? ExitStatus.success.rawValue : ExitStatus.preflightBlocked.rawValue
+    }
+
+    static func runFabricInstall(_ arguments: [String]) async throws -> Int32 {
+        let spec = ArgumentParser.Spec(
+            valueOptions: ["version", "instance", "name", "loader", "root", "data-root", "source", "mirror-config", "concurrency", "java"],
+            flagOptions: ["update", "help"]
+        )
+        let input = try ArgumentParser.parse(arguments, spec: spec)
+        if input.has("help") {
+            print("""
+            usage: lingxi install fabric --version <minecraft-id> --instance <instance-id> [options]
+
+              --loader <version>      Fabric Loader version (default: newest compatible stable)
+              --instance <id>         new instance id, or existing id with --update
+              --update                explicitly update an existing instance (manifest backup first)
+              --name "<label>"        display name for a new instance
+              --source <policy>       official | mirror | auto | local-cache-only
+              --java <path>           Java 17+ runtime used for install and preflight
+              --root / --data-root    game and launcher data roots
+            """)
+            return ExitStatus.success.rawValue
+        }
+        let versionID = try input.requireValue("version")
+        let instanceID = try input.requireValue("instance")
+        let layout = try resolveLayout(input)
+        let policy = try sourcePolicy(input)
+        let mirror = try mirrorConfiguration(input)
+        let concurrency = Int(input.value("concurrency") ?? "4") ?? 4
+        guard (1...32).contains(concurrency) else {
+            throw LauncherError(.usageError, "--concurrency must be between 1 and 32")
+        }
+        let javaURL: URL
+        if let raw = input.value("java") {
+            javaURL = URL(fileURLWithPath: (raw as NSString).expandingTildeInPath)
+        } else {
+            javaURL = try JavaRuntimeInspector().discoverDefaultExecutable()
+        }
+        let target: InstallTargetChoice
+        if input.has("update") {
+            target = .existingInstance(id: instanceID)
+        } else {
+            target = .newInstance(id: instanceID, displayName: input.value("name") ?? instanceID)
+        }
+        let request = OneStopInstallRequest(
+            minecraftVersionID: versionID,
+            loader: .fabric(loaderVersion: input.value("loader")),
+            target: target,
+            javaExecutable: javaURL,
+            sourcePolicy: policy,
+            concurrency: concurrency
+        )
+        let installer = OneStopInstaller(layout: layout, transport: URLSessionTransport(), mirror: mirror)
+        let printer = InstallProgressPrinter()
+        CLIOutput.header("Installing Fabric for Minecraft \(versionID)")
+        CLIOutput.field("instance", instanceID)
+        CLIOutput.field("target", input.has("update") ? "update existing (backup manifest)" : "new instance")
+        let report = try await installer.install(request, progress: { printer.handle($0) })
+        printer.finish()
+        CLIOutput.header("Fabric install complete")
+        CLIOutput.field("profile", report.installedVersionID)
+        CLIOutput.field("instance", "\(report.instanceID)  \(report.gameDirectory.path)")
+        if let backup = report.backupManifest {
+            CLIOutput.field("backup", backup.path)
+        }
+        CLIOutput.field("downloaded", "\(report.downloadedFiles) file(s), \(Downloader.format(bytes: report.downloadedBytes))")
+        print("Next: lingxi launch --instance \(report.instanceID) --identity <identity> --java <path> --root \(layout.gameRoot.path) --data-root \(layout.dataRoot.path)")
+        return ExitStatus.success.rawValue
     }
 
     static func runVerify(_ arguments: [String]) async throws -> Int32 {

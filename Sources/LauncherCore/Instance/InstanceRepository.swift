@@ -240,6 +240,22 @@ public struct InstanceRepository: Sendable {
         return target
     }
 
+    /// Backs up only the small instance manifest before an explicit version update. Worlds,
+    /// options, mods and logs are not touched by a version-pointer update.
+    @discardableResult
+    public func backupManifest(id: String) throws -> URL {
+        let instance = try load(id: id)
+        let source = instance.directory.appendingPathComponent("instance.json", isDirectory: false)
+        let stamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
+        let destination = instance.directory.appendingPathComponent("instance.json.backup-\(stamp)", isDirectory: false)
+        do {
+            try FileManager.default.copyItem(at: source, to: destination)
+            return destination
+        } catch {
+            throw LauncherError(.ioFailure, "Cannot back up instance manifest: \(error.localizedDescription)")
+        }
+    }
+
     /// Records a successful launch for display purposes.
     public func recordLaunch(id: String, identityMode: IdentityMode, at date: Date = Date()) throws {
         var instance = try load(id: id)

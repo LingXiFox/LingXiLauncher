@@ -1,0 +1,43 @@
+M6.1 verification commands and observed results (2026-10-27, macOS 27.2 arm64)
+
+Automated:
+  swift test
+  => Executed 244 tests, with 0 failures (0 unexpected)
+
+Fabric install (real network, official meta/Maven):
+  lingxi install fabric --version 1.20.1 --instance fabric-1201 \
+    --name "Fabric 1.20.1" --loader 0.20.1 --java <JDK17>/bin/java \
+    --root .dev-sandbox/mc --data-root .dev-sandbox/data
+  => profile fabric-loader-0.20.1-1.20.1
+  => 8 Fabric files downloaded (4.5 MB), 0 failures
+  => 3575 vanilla/shared files cache hits
+  => staging instance removed; target created
+
+Fabric launch (real Microsoft session, CLI):
+  lingxi launch --instance fabric-1201 \
+    --identity microsoft:ee1d1605-5048-42b2-925f-d1032b1909dd \
+    --java <JDK17>/bin/java --root .dev-sandbox/mc --data-root .dev-sandbox/data
+  => reached Minecraft* 1.20.1 / Fabric (Modded) main menu
+  => quit through Quit Game; Game exited with code 0
+
+Managed Java (real Adoptium download):
+  lingxi java install --major 17 --yes --data-root .dev-sandbox/data
+  => Eclipse Temurin 17.0.21+9, macOS arm64
+  => SHA-256 78b08c7f5a0598242d5719c022e19479cb4a3aa45c37c19726a757a469ed1c15
+  => verified before extraction
+  => <dataRoot>/java/temurin-17-17.0.21_9/Contents/Home/bin/java
+  => source.json records vendor/version/download URL/license
+
+No-system-Java verification:
+  sandbox-exec profile denies file reads of /Library/Java,
+  /System/Library/Java, and /usr/bin/java.
+  GUI wizard: "没有找到兼容的 Java" -> confirmed Temurin download ->
+  managed Java selected -> Fabric installed.
+  CLI with managed Temurin and local-offline technical identity:
+  => reached Minecraft* 1.20.1 / Fabric (Modded) main menu.
+
+Target safety tests:
+  - collision on a new target is rejected before any mutation;
+  - implicit update of an existing instance is rejected;
+  - failed new install leaves no target instance;
+  - explicit update writes instance.json.backup-* and preserves level.dat.

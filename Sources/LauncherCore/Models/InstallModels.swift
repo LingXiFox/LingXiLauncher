@@ -7,6 +7,9 @@ public enum InstallPhase: String, Sendable, Equatable, Codable {
     case assetIndex = "asset-index"
     case downloading
     case extractingNatives = "extracting-natives"
+    case loaderMetadata = "loader-metadata"
+    case loaderProfile = "loader-profile"
+    case loaderLibraries = "loader-libraries"
     case finalizing
 }
 

@@ -26,6 +26,10 @@ struct DownloadsView: View {
                     if model.isLoadingVersions {
                         ProgressView().controlSize(.small).tint(theme.orange)
                     }
+                    LXButton("安装向导", systemImage: "wand.and.stars", kind: .primary) {
+                        model.installWizardInitialVersion = selectedVersionID
+                        model.showInstallWizard = true
+                    }
                     LXIconButton(systemImage: "arrow.clockwise", label: "刷新版本列表") {
                         Task { await model.loadVersions() }
                     }
@@ -123,9 +127,7 @@ struct DownloadsView: View {
     private var installPane: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: LXSpace.md) {
-                targetCard
-                installCard
-                progressCard
+                wizardCard
                 sourceCard
             }
             .frame(maxWidth: 760, alignment: .leading)
@@ -134,122 +136,47 @@ struct DownloadsView: View {
         .scrollIndicators(.never)
     }
 
-    private var targetCard: some View {
-        LXCard(padding: LXSpace.md) {
-            VStack(alignment: .leading, spacing: 8) {
-                LXOverline(text: "TARGET INSTANCE", color: theme.textSecondary)
-                if let instance = model.selectedInstance {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(instance.manifest.displayName)
-                                .font(LXFont.headline)
-                                .foregroundStyle(theme.text)
-                            Text("安装会更新该实例绑定的版本，不会删除世界。")
-                                .font(LXFont.caption)
-                                .foregroundStyle(theme.textTertiary)
-                        }
-                        Spacer()
-                        LXBadge(text: "已有实例", tone: .neutral)
-                    }
-                } else {
-                    Text("未选择实例；安装时会创建 `vanilla-<version>` 实例。")
-                        .font(LXFont.body)
-                        .foregroundStyle(theme.textSecondary)
-                }
-            }
-        }
-    }
-
-    private var installCard: some View {
-        LXCard(padding: LXSpace.md) {
-            VStack(alignment: .leading, spacing: LXSpace.sm) {
-                LXOverline(text: "INSTALL", color: theme.textSecondary)
-                if let selectedVersionID {
-                    HStack(alignment: .firstTextBaseline) {
-                        Text(selectedVersionID)
-                            .font(.system(size: 25, weight: .bold, design: .rounded))
-                            .foregroundStyle(theme.text)
-                        Spacer()
-                        LXBadge(text: model.settings.source.displayName, tone: .info)
-                    }
-                } else {
-                    Text("从左侧列表选择一个 Minecraft 版本。")
-                        .font(LXFont.body)
-                        .foregroundStyle(theme.textSecondary)
-                }
-                HStack(spacing: 8) {
-                    LXButton("安装", systemImage: "arrow.down.circle", kind: .primary, isDisabled: selectedVersionID == nil || model.installState.isRunning) {
-                        if let selectedVersionID { model.installVersion(selectedVersionID) }
-                    }
-                    if model.installState.isRunning {
-                        LXButton("取消下载", systemImage: "xmark", kind: .destructive) {
-                            model.cancelInstall()
-                        }
-                    }
-                    Spacer()
-                }
-            }
-        }
-    }
-
-    private var progressCard: some View {
-        LXCard(padding: LXSpace.md, elevated: true) {
-            VStack(alignment: .leading, spacing: LXSpace.sm) {
-                HStack {
-                    LXOverline(text: "DOWNLOAD PROGRESS", color: theme.textSecondary)
-                    Spacer()
-                    if model.installState.isRunning {
-                        LXBadge(text: "进行中", tone: .accent, dot: true)
-                    } else if model.installState.cancelled {
-                        LXBadge(text: "已取消", tone: .warning)
-                    } else if model.installState.finished {
-                        LXBadge(text: "完成", tone: .success, icon: "checkmark")
-                    } else {
-                        LXBadge(text: "空闲", tone: .neutral)
-                    }
-                }
-
-                Text(model.installState.phase)
-                    .font(LXFont.headline)
+    private var wizardCard: some View {
+        LXCard(padding: LXSpace.lg, elevated: true, accent: theme.orange) {
+            VStack(alignment: .leading, spacing: LXSpace.md) {
+                LXOverline(text: "ONE-STOP INSTALL", color: theme.orange)
+                Text("从版本到启动，一次完成")
+                    .font(LXFont.title(23))
                     .foregroundStyle(theme.text)
-                    .lineLimit(2)
-
-                LXProgressBar(fraction: model.installState.fraction, height: 7)
-                    .padding(.top, 2)
-
-                HStack(spacing: LXSpace.lg) {
-                    progressMetric("速度", speedText)
-                    progressMetric("已下载", "\(compactBytes(model.installState.bytes)) / \(compactBytes(model.installState.totalBytes))")
-                    progressMetric("文件", model.installState.total > 0 ? "\(model.installState.completed) / \(model.installState.total)" : "—")
+                Text("安装 Minecraft、选择 Vanilla 或 Fabric、检测/下载 Java，并明确创建新实例或更新现有实例。")
+                    .font(LXFont.body)
+                    .foregroundStyle(theme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                VStack(alignment: .leading, spacing: 6) {
+                    wizardPoint("自动读取版本元数据与 Java 要求", icon: "cpu")
+                    wizardPoint("Fabric 官方 Loader 与 Maven 依赖", icon: "square.stack.3d.up")
+                    wizardPoint("失败/取消不修改目标实例", icon: "shield.checkered")
                 }
-
-                if let file = model.installState.currentFile {
+                if let selectedVersionID {
                     HStack(spacing: 6) {
-                        Image(systemName: "doc.fill")
-                            .font(.system(size: 9))
-                        Text(file)
-                            .font(LXFont.monoSmall)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
+                        Image(systemName: "checkmark.circle.fill").foregroundStyle(theme.success)
+                        Text("已选择 Minecraft \(selectedVersionID)，可在向导中确认")
+                            .font(LXFont.caption)
+                            .foregroundStyle(theme.textSecondary)
                     }
-                    .foregroundStyle(theme.textTertiary)
                 }
-
-                if let error = model.installState.error {
-                    Text(error)
-                        .font(LXFont.caption)
-                        .foregroundStyle(theme.danger)
-                        .textSelection(.enabled)
-                }
-                if let verify = model.installState.verifyMessage {
-                    HStack(spacing: 6) {
-                        Image(systemName: verify.contains("通过") ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
-                        Text(verify)
-                    }
-                    .font(LXFont.captionStrong)
-                    .foregroundStyle(verify.contains("通过") ? theme.success : theme.warning)
+                LXButton("打开安装向导", systemImage: "arrow.right", kind: .primary, isFullWidth: true) {
+                    model.installWizardInitialVersion = selectedVersionID
+                    model.showInstallWizard = true
                 }
             }
+        }
+    }
+
+    private func wizardPoint(_ text: String, icon: String) -> some View {
+        HStack(spacing: 7) {
+            Image(systemName: icon)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(theme.orange)
+                .frame(width: 16)
+            Text(text)
+                .font(LXFont.caption)
+                .foregroundStyle(theme.textSecondary)
         }
     }
 
@@ -273,37 +200,6 @@ struct DownloadsView: View {
         }
     }
 
-    private var speedText: String {
-        guard model.installState.bytesPerSecond > 0 else { return "—" }
-        return "\(compactBytes(Int(model.installState.bytesPerSecond)))/s"
-    }
-
-    private func compactBytes(_ bytes: Int) -> String {
-        let value = max(0, bytes)
-        if value < 1024 { return "\(value) B" }
-        let units = ["KB", "MB", "GB", "TB"]
-        var amount = Double(value)
-        var unit = 0
-        while amount >= 1024 && unit < units.count - 1 {
-            amount /= 1024
-            unit += 1
-        }
-        return String(format: amount >= 100 ? "%.0f %@" : "%.1f %@", amount, units[unit])
-    }
-
-    private func progressMetric(_ label: String, _ value: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(label)
-                .font(LXFont.caption)
-                .foregroundStyle(theme.textTertiary)
-            Text(value)
-                .font(LXFont.monoSmall)
-                .foregroundStyle(theme.textSecondary)
-                .lineLimit(1)
-                .truncationMode(.middle)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
 }
 
 private struct VersionListRow: View {

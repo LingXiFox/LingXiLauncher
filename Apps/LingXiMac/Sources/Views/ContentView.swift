@@ -23,6 +23,12 @@ struct ContentView: View {
             .background(theme.canvas)
             .navigationTitle("LingXi Launcher")
             .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    LXButton("安装游戏", systemImage: "plus", kind: .primary) {
+                        model.installWizardInitialVersion = nil
+                        model.showInstallWizard = true
+                    }
+                }
                 ToolbarItem(placement: .status) {
                     HStack(spacing: 8) {
                         if model.authState.isWorking || model.authActionInProgress {
@@ -45,6 +51,11 @@ struct ContentView: View {
         .tint(theme.orange)
         .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: model.lastError)
         .background(theme.canvas)
+        .sheet(isPresented: $model.showInstallWizard) {
+            InstallWizardView()
+                .environmentObject(model)
+                .environment(\.lxTheme, theme)
+        }
     }
 
     @ViewBuilder

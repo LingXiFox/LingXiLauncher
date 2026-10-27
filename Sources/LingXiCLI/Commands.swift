@@ -83,6 +83,8 @@ enum CLI {
             return try await runLaunchCommand(rest)
         case "account":
             return try await runAccountCommand(rest)
+        case "java":
+            return try await runJavaCommand(rest)
         case "instance":
             return try runInstanceCommand(rest)
         case "install":
@@ -831,7 +833,7 @@ enum CLI {
 
     static func printHelp() {
         print("""
-        \(LauncherInfo.name) \(LauncherInfo.version) — macOS Apple Silicon Minecraft: Java Edition launcher (M1 scope)
+        \(LauncherInfo.name) \(LauncherInfo.version) — macOS Apple Silicon Minecraft: Java Edition launcher
 
         USAGE
           lingxi <command> [options]
@@ -854,8 +856,8 @@ enum CLI {
           account local list [--json]
               Local offline identities (unverified, no token, local single-player
               technical validation only).
-          account login | account status
-              Microsoft authentication — milestone M3, not implemented.
+          account microsoft login | account microsoft status
+              Microsoft OAuth/Xbox/Minecraft authentication and Keychain refresh.
 
           instance create --name "<display name>" [--version <id>] [--json]
           instance list [--json]
@@ -865,8 +867,19 @@ enum CLI {
 
           install vanilla --version <id> --instance <instance-id> [--source auto]
                   [--mirror-config <path>] [--concurrency 4] [--java <path>]
-              Download client JAR, libraries, asset index, all asset objects,
-              extract legacy natives and write the instance. Never needs a login.
+              Download the vanilla profile and shared files, then create/update
+              the instance. Never needs a login.
+
+          install fabric --version <minecraft-id> --instance <instance-id> [--update]
+                  [--loader <fabric-version>] [--java <path>] [--source auto]
+              Install Fabric Loader on top of vanilla, querying Fabric's official
+              compatibility metadata and Maven artifacts. New instance by default;
+              --update explicitly backs up instance.json before changing the target.
+
+          java list [--data-root <path>]
+          java install --major <version> --yes [--data-root <path>]
+              Detect Java runtimes; optionally download a verified Eclipse Temurin
+              JDK into <dataRoot>/java without touching system Java.
 
           verify --instance <instance-id> [--json]
               Re-check every installed file against the metadata SHA-1/size.

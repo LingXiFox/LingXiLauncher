@@ -33,7 +33,7 @@ public struct DependencyResolver: DependencyResolving {
     ) throws -> DependencyResolution {
         // Computed even when no legacy natives exist: it is part of the resolution contract and
         // the launch plan substitutes it into `${natives_directory}`.
-        let nativesDirectory = try layout.nativesDirectory(versionID: version.id, architecture: platform.architecture)
+        let nativesDirectory = try layout.nativesDirectory(versionID: version.nativesVersionID, architecture: platform.architecture)
 
         var classpath: [URL] = []
         var classpathFiles: [ResolvedFile] = []
@@ -51,7 +51,7 @@ public struct DependencyResolver: DependencyResolving {
             //    legacy natives: the native JAR is extracted, the main JAR must still be loadable.
             if let relativePath = library.artifactRelativePath {
                 let url = try layout.libraryURL(relativePath: relativePath)
-                let file = resolvedFile(at: url, artifact: library.artifact)
+                let file = resolvedFile(at: url, artifact: library.effectiveArtifact)
                 appendClasspath(file, classpath: &classpath, files: &classpathFiles, seen: &classpathPaths)
                 recordMissing(file, kind: .library, missing: &missing, reported: &reportedMissing)
             } else {
@@ -118,7 +118,7 @@ public struct DependencyResolver: DependencyResolving {
         // 3. The client JAR is required and always the last classpath entry. It is appended even
         //    when the metadata omits `downloads.client`; the missing entry then carries no download
         //    metadata, and the plan builder blocks the launch based on the empty file list.
-        let clientJarURL = try layout.clientJarURL(version.id)
+        let clientJarURL = try layout.clientJarURL(version.clientJarVersionID)
         let clientJar = resolvedFile(at: clientJarURL, artifact: version.clientJar)
         if let existing = classpath.firstIndex(where: { Self.samePath($0, clientJarURL) }) {
             classpath.remove(at: existing)

@@ -1,4 +1,4 @@
-# 开发说明（M1 + M2 + M2.5 + M3 + M5-Alpha）
+# 开发说明（M1 + M2 + M2.5 + M3 + M5-Alpha + M6.1）
 
 本文记录实现约定、契约边界和验收方式。产品边界与安全披露见根目录 [README](../README.md)。
 
@@ -17,11 +17,12 @@ Sources/LauncherCore/
 │   ├── GameDataLayout.swift      # dataRoot / gameRoot 路径推导（全部做路径穿越防护）
 │   └── PathSafety.swift          # zip entry / 相对路径的安全校验
 ├── Version/
-│   ├── VersionResolver.swift     # 读取并规范化版本 JSON（拒绝旧格式与继承）
+│   ├── VersionResolver.swift     # 读取并合并 inheritsFrom 链；legacy 参数转换
 │   ├── RuleEvaluator.swift       # Mojang rules（T03）
 │   └── ArgumentResolver.swift    # arguments 展开与占位符替换（T06）
 ├── Runtime/
 │   ├── JavaRuntimeInspector.swift         # 真实执行 java 探测版本/架构/Rosetta（T05）
+│   ├── JavaManager.swift                  # 元数据驱动选择 + 确认后托管 Temurin 下载/校验（M6.1）
 │   └── NativeArchiveInspector.swift       # Mach-O 架构检查 + JVM/原生库兼容诊断（M2.5）
 ├── Launch/
 │   ├── DependencyResolver.swift  # 规则过滤 → classpath/natives/assets（T04）
@@ -49,6 +50,8 @@ Sources/LauncherCore/
 │   ├── ManifestService.swift     # manifest / 版本 JSON / asset index 缓存与校验
 │   ├── SafeZipExtractor.swift    # 最小 ZIP 读取 + Zip Slip/symlink 防护
 │   ├── VanillaInstaller.swift    # 安装编排（按选定 JVM 架构）
+│   ├── FabricInstaller.swift     # Fabric 官方 meta/profile/Maven，stage 安全提交
+│   ├── OneStopInstaller.swift    # GUI/CLI 统一的 Vanilla/Fabric 安装与目标策略
 │   └── InstallationVerifier.swift# 全量哈希校验
 ├── Apps/LingXiMac/               # M5 SwiftUI GUI（直接依赖 LauncherCore）
 │   ├── Info.plist
@@ -153,8 +156,9 @@ manifest（缓存）→ 版本 JSON（校验 manifest SHA-1）→ 依赖解析
 - **磁盘预检**：按待下载 size 之和 + 32MB 余量与目标卷可用空间比较，不足直接 `DISK_FULL`。
 - **缓存命中**：`Downloader` 对队列中的每个文件做 size（有 SHA-1 时也做哈希）检查；`DependencyResolver` 负责找出缺失/大小不符的文件。全量哈希由 `verify` 完成，避免每次 install 都扫描 700MB。
 - **安全解压**：`SafeZipExtractor` 自己解析 ZIP（stored/deflate，Compression 框架），拒绝 `../`、绝对路径、反斜杠、控制字符、符号链接条目、超限条目/总量；ZIP64 明确报不支持。归档本身在解压前已通过 SHA-1 校验。
-- **Java**：不自动安装。`install` 仅在显式传 `--java` 时做兼容性检查；`doctor` 负责发现与诊断。
-- **实例**：`--instance <id>` 是稳定 id（路径安全校验）；不存在则创建，存在则更新 `versionID`。显示名不参与路径拼接。
+- **Java**：默认不自动安装；`JavaManager` 按版本/Loader 元数据选择兼容运行时。托管安装必须由用户确认，校验 Adoptium SHA-256/size 后解压到 `<dataRoot>/java`，不修改系统 Java；手动 `--java` 始终优先。
+- **实例**：`--instance <id>` 是稳定 id（路径安全校验）。GUI 安装向导默认创建新实例；更新已有实例必须显式选择、确认并备份 `instance.json`。显示名不参与路径拼接。
+- **Loader**：Fabric 子版本通过 `inheritsFrom` 合并 parent；client JAR/assets/natives 复用 parent，loader 库从 Fabric 官方 Maven 获取。
 
 ## 7. 测试
 
@@ -163,13 +167,13 @@ swift build
 swift test
 ```
 
-当前总计 **233 个测试**，全量运行 0 失败：
+当前总计 **244 个测试**，全量运行 0 失败：
 
 | 测试文件（用例数） | 覆盖 |
 |---|---|
 | `ManifestTests` (4) | manifest / 版本 JSON 解码、坏 JSON、缺字段、未知 rule 字段 |
 | `VersionMetadataTests` (7) | 真实 26.3/1.16.5 元数据、`assetIndex.url`、logging `id`、数组参数 |
-| `VersionResolverTests` (5) | 正常解析、缺失元数据、旧格式拒绝、继承拒绝、id 不一致 |
+| `VersionResolverTests` (8) | 正常解析、缺失元数据、legacy 转换、继承合并、缺失父版本、循环继承、真实 Fabric profile、id 不一致 |
 | `RuleEvaluatorTests` (23) | macOS/Linux、arm64/x86_64、allow/disallow 顺序、features、version 正则与区间 |
 | `ArgumentResolverTests` (13) | 字符串/对象混合、数组展开、占位符、未知占位符报错 |
 | `DependencyResolverTests` (27) | classpath 顺序与去重、缺失收集、legacy natives 告警、路径穿越 |
@@ -183,6 +187,7 @@ swift test
 | `M2_5CompatibilityTests` (7) | JVM 架构上下文/Rosetta、per-JVM natives 缓存、规则按 JVM 架构、双向架构不匹配、缺失 natives、Mach-O/ZIP 架构检查 |
 | `LocalOfflineIdentityTests` (9) / `InstanceRepositoryTests` (9) | UUID 向量、名字边界、账户无令牌字段、单一 `.minecraft` 与迁移、内存策略/删除 |
 | `AuthenticationTests` (23) | 内嵌配置、PKCE RFC 向量、OAuth、state 拒绝、真实 loopback、Xbox/XSTS/Minecraft/所有权、Keychain |
+| `M6InstallTests` (8) | Fabric 兼容 Loader 端点、目标冲突/显式更新、备份与存档保留、失败不创建目标、Java 无兼容运行时、SHA-256 |
 | `LaunchServiceTests` (2) | 启动失败事件、事件流终止与重复调用 |
 | `PathSafetyTests` (4) / `GameDataLayoutTests` (3) / `PlatformContextTests` (3) | 路径穿越、布局推导、平台上下文 |
 
@@ -206,13 +211,14 @@ swift test
 | T11 | Microsoft 认证（OAuth+PKCE、Xbox/XSTS、Keychain） | ✅ 真机登录 `Ling_Xi_Fox`，UUID/所有权验证通过 |
 | T12 | 正版启动回归 | ✅ CLI + GUI 到 1.20.1 主菜单，exit 0 |
 | M5-A | SwiftUI GUI + `.app` + 六页 + 实时日志 | ✅ Alpha 可用（见 VERIFICATION-M3-M5.md） |
+| M6.1 | 版本继承、Fabric、JavaManager、一站式安装向导 | ✅ 244 tests；真实 Fabric 安装/启动；无系统 Java 的托管 Java 流程（见 VERIFICATION-M6.1.md） |
 
 ## 9. 剩余工作
 
-- **M4**：Fabric/Quilt 加载器安装、版本继承解析、mods 目录与冲突提示。
-- **M5-B**：下载任务历史、Java 自动安装/下载、更多诊断导出项。
+- **M6.2+**：Quilt/NeoForge/Forge 加载器、mods 管理与冲突提示、Fabric 元数据镜像策略。
+- **M5-B**：下载任务历史、更多诊断导出项。
 - 外观：皮肤/披风纹理缓存、Cape 动画与更多皮肤模型细节。
-- 真实大文件 GUI 下载中途取消、Intel Mac、Developer ID 签名/公证。
+- 真实大文件 GUI 下载中途取消、Intel Mac 托管 Java、Developer ID 签名/公证。
 - 认证增强：多账户切换的 UI 覆盖、refresh token 轮换异常监控、全新浏览器 profile 的首次 consent 真机回归。
 
 ## 10. 开发沙盒

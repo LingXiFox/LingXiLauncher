@@ -96,12 +96,17 @@ struct SettingsView: View {
                     Spacer()
                 }
                 if let runtime = model.selectedJavaRuntime {
-                    Text(runtime.executable.path)
-                        .font(LXFont.monoSmall)
-                        .foregroundStyle(theme.textTertiary)
-                        .textSelection(.enabled)
-                        .lineLimit(2)
-                        .truncationMode(.middle)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("来源：\(model.javaSourceLabel(for: runtime))")
+                            .font(LXFont.captionStrong)
+                            .foregroundStyle(theme.textSecondary)
+                        Text(runtime.executable.path)
+                            .font(LXFont.monoSmall)
+                            .foregroundStyle(theme.textTertiary)
+                            .textSelection(.enabled)
+                            .lineLimit(2)
+                            .truncationMode(.middle)
+                    }
                 }
             }
         }

@@ -80,26 +80,6 @@ final class AppModel: ObservableObject {
         let appearance: PlayerAppearance?
     }
 
-    struct InstallState {
-        var isRunning = false
-        var phase = "空闲"
-        var completed = 0
-        var total = 0
-        var bytes = 0
-        var totalBytes = 0
-        var bytesPerSecond: Double = 0
-        var currentFile: String?
-        var error: String?
-        var verifyMessage: String?
-        var cancelled = false
-        var finished = false
-
-        var fraction: Double {
-            guard total > 0 else { return 0 }
-            return min(1, Double(completed) / Double(total))
-        }
-    }
-
     struct Settings: Equatable {
         var javaPath = ""
         var sourceRaw = DownloadSourcePolicy.auto.rawValue
@@ -131,6 +111,7 @@ final class AppModel: ObservableObject {
     }
     @Published var installedVersionIDs: [String] = []
     @Published var javaRuntimes: [JavaRuntime] = []
+    @Published var managedJava: [ManagedJava] = []
     @Published var selectedJavaPath = ""
 
     @Published var accounts: [AccountRow] = []
@@ -151,8 +132,9 @@ final class AppModel: ObservableObject {
     @Published var versionEntries: [VersionManifest.Entry] = []
     @Published var versionFilter: VersionFilter = .release
     @Published var isLoadingVersions = false
-    @Published var installState = InstallState()
     @Published var settings: Settings
+    @Published var showInstallWizard = false
+    @Published var installWizardInitialVersion: String?
 
     // MARK: - Services
 
@@ -162,14 +144,12 @@ final class AppModel: ObservableObject {
     private let microsoftAccountStore: MicrosoftAccountStore
     private let activeAccountStore: ActiveAccountStore
     private let javaInspector = JavaRuntimeInspector()
+    private let javaManager: JavaManager
     private let launchService: LaunchService
     private var authService: MicrosoftAuthenticationService?
     private var authObserver: Task<Void, Never>?
     private var launchTask: Task<Void, Never>?
-    private var installTask: Task<Void, Never>?
     private var logBuffers: [String: String] = [:]
-    private var lastInstallBytes = 0
-    private var lastInstallTime = Date()
 
     // MARK: - Init
 
@@ -190,6 +170,7 @@ final class AppModel: ObservableObject {
         self.microsoftAccountStore = MicrosoftAccountStore(layout: layout)
         self.activeAccountStore = ActiveAccountStore(layout: layout)
         self.launchService = LaunchService(layout: layout)
+        self.javaManager = JavaManager(layout: layout, transport: URLSessionTransport())
         self.settings = Self.loadSettings()
 
         appendLine("LingXi Launcher \(LauncherInfo.version) starting", source: "launcher")
@@ -348,13 +329,9 @@ final class AppModel: ObservableObject {
     // MARK: - Java
 
     func refreshJavaRuntimes() async {
-        var runtimes: [JavaRuntime] = []
-        for path in JavaRuntimeInspector.candidateExecutablePaths() {
-            if let runtime = try? javaInspector.inspect(executable: path) {
-                runtimes.append(runtime)
-            }
-        }
-        javaRuntimes = runtimes
+        javaRuntimes = javaManager.detectRuntimes()
+        managedJava = javaManager.managedRuntimes()
+        let runtimes = javaRuntimes
         if !settings.javaPath.isEmpty,
            let saved = runtimes.first(where: { $0.executable.path == settings.javaPath }) {
             selectedJavaPath = saved.executable.path
@@ -363,6 +340,10 @@ final class AppModel: ObservableObject {
         }
         appendLine("Detected \(runtimes.count) Java runtime(s)", source: "java")
         ensureCompatibleJava()
+    }
+
+    func javaSourceLabel(for runtime: JavaRuntime) -> String {
+        managedJava.first { $0.runtime.executable == runtime.executable }?.source ?? "系统 / 本地 JDK"
     }
 
     /// Picks the closest compatible, preferably arm64 runtime for the selected instance.
@@ -672,136 +653,6 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func installVersion(_ versionID: String) {
-        guard !installState.isRunning else { return }
-        let instanceID: String
-        let displayName: String
-        if let selected = selectedInstance {
-            instanceID = selected.id
-            displayName = selected.manifest.displayName
-        } else {
-            instanceID = "vanilla-\(versionID.replacingOccurrences(of: ".", with: "-"))"
-            displayName = "Minecraft \(versionID)"
-        }
-        let mirror: TrustedMirrorConfiguration?
-        do {
-            mirror = try mirrorConfiguration()
-        } catch {
-            setError(error)
-            return
-        }
-        let request = InstallRequest(
-            versionID: versionID,
-            instanceID: instanceID,
-            displayName: displayName,
-            sourcePolicy: settings.source,
-            concurrency: 4,
-            javaExecutable: selectedJavaRuntime?.executable
-        )
-        installState = InstallState(
-            isRunning: true,
-            phase: "准备安装",
-            completed: 0,
-            total: 0,
-            bytes: 0,
-            totalBytes: 0,
-            bytesPerSecond: 0,
-            currentFile: nil,
-            error: nil,
-            verifyMessage: nil,
-            cancelled: false,
-            finished: false
-        )
-        lastInstallBytes = 0
-        lastInstallTime = Date()
-        appendLine("Installing Minecraft \(versionID) into \(instanceID) (\(settings.source.rawValue))", source: "install")
-
-        installTask?.cancel()
-        installTask = Task {
-            do {
-                let installer = VanillaInstaller(
-                    layout: self.layout,
-                    transport: URLSessionTransport(),
-                    mirror: mirror
-                )
-                let report = try await installer.install(request, progress: { [weak self] event in
-                    Task { @MainActor [weak self] in
-                        self?.handleInstallEvent(event)
-                    }
-                })
-                self.installState.isRunning = false
-                self.installState.finished = true
-                self.installState.phase = "安装完成"
-                self.appendLine(
-                    "Installed \(report.versionID): \(report.downloadedFiles) downloaded, \(report.cacheHits) cached, \(report.extractedNatives) native entries",
-                    source: "install"
-                )
-                self.reloadInstances()
-                self.selectedInstanceID = report.instanceID
-                self.appendLine("Verifying installed files…", source: "install")
-                do {
-                    let registry = InstanceRepository(layout: self.layout)
-                    let instance = try registry.load(id: report.instanceID)
-                    let platform = try self.selectedJavaRuntime.map { try PlatformContext.forJVM($0) }
-                    let verification = try InstallationVerifier(layout: self.layout)
-                        .verify(instance: instance, platform: platform)
-                    if verification.isClean {
-                        self.installState.verifyMessage = "完整性验证通过（\(verification.checkedFiles) 个文件）"
-                        self.appendLine("Verification passed for \(verification.checkedFiles) files", source: "install")
-                    } else {
-                        self.installState.verifyMessage = "验证发现 \(verification.issues.count) 个问题"
-                        self.lastError = "安装后校验发现 \(verification.issues.count) 个问题，请查看日志。"
-                    }
-                } catch {
-                    self.installState.verifyMessage = "验证失败：\(Self.describe(error))"
-                    self.setError(error)
-                }
-            } catch is CancellationError {
-                self.installState.isRunning = false
-                self.installState.cancelled = true
-                self.installState.phase = "已取消"
-                self.appendLine("Installation cancelled", source: "install", level: .warning)
-            } catch {
-                self.installState.isRunning = false
-                self.installState.error = Self.describe(error)
-                self.setError(error)
-                self.appendLine("Installation failed: \(Self.describe(error))", source: "install", level: .error)
-            }
-        }
-    }
-
-    func cancelInstall() {
-        installTask?.cancel()
-        installState.phase = "正在取消…"
-        appendLine("Cancelling installation…", source: "install", level: .warning)
-    }
-
-    private func handleInstallEvent(_ event: InstallProgressEvent) {
-        switch event {
-        case let .phase(_, message):
-            installState.phase = message
-            appendLine("install: \(message)", source: "install")
-        case let .plan(totalFiles, totalBytes, cacheHits):
-            installState.total = max(0, totalFiles - cacheHits)
-            installState.totalBytes = totalBytes
-            appendLine("install plan: \(totalFiles) files, \(cacheHits) cached, \(Downloader.format(bytes: totalBytes)) to download", source: "install")
-        case let .fileStarted(path, _):
-            installState.currentFile = (path as NSString).lastPathComponent
-        case let .fileFinished(_, bytes, _):
-            installState.completed += 1
-            installState.bytes += bytes
-            let now = Date()
-            let elapsed = now.timeIntervalSince(lastInstallTime)
-            if elapsed > 0.5 {
-                installState.bytesPerSecond = Double(installState.bytes - lastInstallBytes) / elapsed
-                lastInstallBytes = installState.bytes
-                lastInstallTime = now
-            }
-        case let .fileFailed(path, message):
-            appendLine("install failed for \(path): \(message)", source: "install", level: .error)
-        }
-    }
-
     private func mirrorConfiguration() throws -> TrustedMirrorConfiguration? {
         guard !settings.mirrorConfigPath.isEmpty else {
             if settings.source == .mirror {
@@ -819,6 +670,14 @@ final class AppModel: ObservableObject {
     }
 
     // MARK: - Settings
+
+    func makeOneStopInstaller() throws -> OneStopInstaller {
+        OneStopInstaller(layout: layout, transport: URLSessionTransport(), mirror: try mirrorConfiguration())
+    }
+
+    func makeJavaManager() -> JavaManager {
+        JavaManager(layout: layout, transport: URLSessionTransport())
+    }
 
     func saveSettings() {
         let defaults = UserDefaults.standard

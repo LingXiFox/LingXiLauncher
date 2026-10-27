@@ -129,6 +129,19 @@ public struct LaunchPlanBuilder: LaunchPlanning {
         java: JavaRuntime?
     ) -> [LaunchDiagnostic] {
         var diagnostics: [LaunchDiagnostic] = []
+        if version.compatibility == .legacyArguments {
+            diagnostics.append(.warning(
+                .unsupportedVersion,
+                "Version \(version.id) uses legacy minecraftArguments; launch support is best-effort",
+                suggestion: "Modern versions are fully supported. Legacy arguments were converted and may not match every old profile."
+            ))
+        } else if version.compatibility == .incomplete {
+            diagnostics.append(.warning(
+                .unsupportedVersion,
+                "Version \(version.id) has incomplete argument metadata",
+                suggestion: "Do not treat this profile as fully compatible until its metadata is repaired."
+            ))
+        }
 
         for missing in dependencies.missing {
             diagnostics.append(.error(

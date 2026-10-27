@@ -170,6 +170,11 @@ public struct Library: Decodable, Sendable, Equatable {
     /// OS name (`osx`, `linux`, `windows`) to classifier name, e.g. `osx: natives-macos`.
     public let natives: [String: String]?
     public let extractExclude: [String]?
+    /// Maven repository base URL used by loader metadata (Fabric's `libraries[]` has `url`).
+    public let urlString: String?
+    /// Loader metadata often puts checksum/size beside `name` rather than under `downloads`.
+    public let sha1: String?
+    public let size: Int?
 
     public init(
         name: String,
@@ -177,7 +182,10 @@ public struct Library: Decodable, Sendable, Equatable {
         artifact: Artifact? = nil,
         classifiers: [String: Artifact]? = nil,
         natives: [String: String]? = nil,
-        extractExclude: [String]? = nil
+        extractExclude: [String]? = nil,
+        urlString: String? = nil,
+        sha1: String? = nil,
+        size: Int? = nil
     ) {
         self.name = name
         self.rules = rules
@@ -185,6 +193,9 @@ public struct Library: Decodable, Sendable, Equatable {
         self.classifiers = classifiers
         self.natives = natives
         self.extractExclude = extractExclude
+        self.urlString = urlString
+        self.sha1 = sha1
+        self.size = size
     }
 
     public var coordinates: MavenCoordinates? {
@@ -198,8 +209,25 @@ public struct Library: Decodable, Sendable, Equatable {
         return nil
     }
 
+    /// Maven repository URL for loader libraries that omit `downloads.artifact`.
+    public var mavenArtifactURL: URL? {
+        guard let urlString, let base = URL(string: urlString), let path = artifactRelativePath else {
+            return nil
+        }
+        let baseString = base.absoluteString.hasSuffix("/") ? base.absoluteString : base.absoluteString + "/"
+        return URL(string: baseString + path)
+    }
+
+    /// Artifact representation for loader metadata that only supplies `name`/`url`/`sha1`.
+    /// Vanilla's explicit `downloads.artifact` always wins.
+    public var effectiveArtifact: Artifact? {
+        if let artifact { return artifact }
+        guard let path = artifactRelativePath, let url = mavenArtifactURL else { return nil }
+        return Artifact(urlString: url.absoluteString, path: path, sha1: sha1, size: size)
+    }
+
     private enum CodingKeys: String, CodingKey {
-        case name, rules, downloads, natives, extract
+        case name, rules, downloads, natives, extract, url, sha1, size
     }
 
     private struct LibraryDownloads: Decodable {
@@ -216,6 +244,9 @@ public struct Library: Decodable, Sendable, Equatable {
         self.name = try container.decode(String.self, forKey: .name)
         self.rules = try container.decodeIfPresent([Rule].self, forKey: .rules)
         self.natives = try container.decodeIfPresent([String: String].self, forKey: .natives)
+        self.urlString = try container.decodeIfPresent(String.self, forKey: .url)
+        self.sha1 = try container.decodeIfPresent(String.self, forKey: .sha1)
+        self.size = try container.decodeIfPresent(Int.self, forKey: .size)
 
         let downloads = try container.decodeIfPresent(LibraryDownloads.self, forKey: .downloads)
         self.artifact = downloads?.artifact

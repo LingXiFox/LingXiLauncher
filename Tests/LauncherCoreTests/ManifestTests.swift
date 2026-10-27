@@ -183,22 +183,91 @@ final class VersionResolverTests: XCTestCase {
         }
     }
 
-    func testLegacyArgumentsAreRejected() throws {
+    func testLegacyArgumentsAreNormalizedButMarkedLegacy() throws {
         let root = try makeGameRoot(fixturePath: "invalid/version_legacy_arguments.json", versionID: "synthetic-legacy")
         defer { try? FileManager.default.removeItem(at: root) }
-        XCTAssertThrowsError(try VersionResolver().resolve(versionID: "synthetic-legacy", from: root)) { error in
-            XCTAssertEqual((error as? LauncherError)?.code, .unsupportedVersion)
-        }
+        let resolved = try VersionResolver().resolve(versionID: "synthetic-legacy", from: root)
+        XCTAssertEqual(resolved.compatibility, .legacyArguments)
+        XCTAssertEqual(resolved.gameArguments.count, 4)
+        XCTAssertTrue(resolved.gameArguments.contains(.argument("${auth_player_name}")))
+        XCTAssertTrue(resolved.jvmArguments.contains(.argument("-cp")))
     }
 
-    func testInheritanceIsRejectedWithMilestoneHint() throws {
+    func testInheritanceMergesParentAndChild() throws {
+        let root = try FixtureLoader.temporaryDirectory("lingxi-resolver-inheritance")
+        defer { try? FileManager.default.removeItem(at: root) }
+        for (id, fixture) in [
+            ("1.20.1", "versions/1.20.1.json"),
+            ("synthetic-inherits", "invalid/version_inherits.json"),
+        ] {
+            let directory = root.appendingPathComponent("versions/\(id)", isDirectory: true)
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try FileManager.default.copyItem(
+                at: try FixtureLoader.url(fixture),
+                to: directory.appendingPathComponent("\(id).json")
+            )
+        }
+        let resolved = try VersionResolver().resolve(versionID: "synthetic-inherits", from: root)
+        XCTAssertEqual(resolved.mainClass, "net.fabricmc.loader.impl.launch.knot.KnotClient")
+        XCTAssertEqual(resolved.inheritsFrom, "1.20.1")
+        XCTAssertEqual(resolved.clientJarVersionID, "1.20.1")
+        XCTAssertEqual(resolved.javaRequirement.majorVersion, 17)
+        XCTAssertFalse(resolved.gameArguments.isEmpty)
+        XCTAssertTrue(resolved.jvmArguments.contains(.argument("-cp")))
+    }
+
+    func testMissingParentIsExplicit() throws {
         let root = try makeGameRoot(fixturePath: "invalid/version_inherits.json", versionID: "synthetic-inherits")
         defer { try? FileManager.default.removeItem(at: root) }
         XCTAssertThrowsError(try VersionResolver().resolve(versionID: "synthetic-inherits", from: root)) { error in
-            guard let launcherError = error as? LauncherError else { return XCTFail("Expected LauncherError") }
-            XCTAssertEqual(launcherError.code, .unsupportedVersion)
-            XCTAssertTrue(launcherError.message.contains("inherits from"), launcherError.message)
+            XCTAssertEqual((error as? LauncherError)?.code, .missingDependency)
         }
+    }
+
+    func testCircularInheritanceIsRejected() throws {
+        let root = try FixtureLoader.temporaryDirectory("lingxi-resolver-cycle")
+        defer { try? FileManager.default.removeItem(at: root) }
+        for id in ["a", "b"] {
+            let directory = root.appendingPathComponent("versions/\(id)", isDirectory: true)
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let json = """
+            {"id":"\(id)","mainClass":"x.Main","inheritsFrom":"\(id == "a" ? "b" : "a")","libraries":[],"arguments":{"game":[],"jvm":[]}}
+            """
+            try Data(json.utf8).write(to: directory.appendingPathComponent("\(id).json"))
+        }
+        XCTAssertThrowsError(try VersionResolver().resolve(versionID: "a", from: root)) { error in
+            XCTAssertEqual((error as? LauncherError)?.code, .invalidMetadata)
+            XCTAssertTrue((error as? LauncherError)?.message.contains("Circular") == true)
+        }
+    }
+
+    func testRealFabricProfileInheritanceAndLibraryMerge() throws {
+        let root = try FixtureLoader.temporaryDirectory("lingxi-resolver-fabric")
+        defer { try? FileManager.default.removeItem(at: root) }
+        for (id, fixture) in [
+            ("1.20.1", "versions/1.20.1.json"),
+            ("fabric-loader-0.20.1-1.20.1", "versions/fabric-loader-0.20.1-1.20.1.json"),
+        ] {
+            let directory = root.appendingPathComponent("versions/\(id)", isDirectory: true)
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try FileManager.default.copyItem(
+                at: try FixtureLoader.url(fixture),
+                to: directory.appendingPathComponent("\(id).json")
+            )
+        }
+        let resolved = try VersionResolver().resolve(versionID: "fabric-loader-0.20.1-1.20.1", from: root)
+        XCTAssertEqual(resolved.mainClass, "net.fabricmc.loader.impl.launch.knot.KnotClient")
+        XCTAssertEqual(resolved.inheritsFrom, "1.20.1")
+        XCTAssertEqual(resolved.clientJarVersionID, "1.20.1")
+        XCTAssertEqual(resolved.assetIndexID, "5")
+        XCTAssertEqual(resolved.javaRequirement.majorVersion, 17)
+        XCTAssertEqual(resolved.compatibility, .modern)
+        let asm = try XCTUnwrap(resolved.libraries.first { $0.name.hasPrefix("org.ow2.asm:asm:") })
+        XCTAssertEqual(asm.name, "org.ow2.asm:asm:9.10.1")
+        XCTAssertNotNil(asm.mavenArtifactURL)
+        XCTAssertEqual(resolved.libraries.filter { $0.name.hasPrefix("org.ow2.asm:asm:") }.count, 1)
+        XCTAssertTrue(resolved.jvmArguments.contains(.argument("-DFabricMcEmu= net.minecraft.client.main.Main ")))
+        XCTAssertTrue(resolved.gameArguments.contains(.argument("--username")))
     }
 
     func testIDMismatchIsRejected() throws {

@@ -2,6 +2,7 @@
  "id": "synthetic-legacy",
  "type": "release",
  "mainClass": "net.minecraft.client.main.Main",
+ "assets": "legacy",
  "minecraftArguments": "--username ${auth_player_name} --session ${auth_access_token}",
  "libraries": [],
  "downloads": { "client": { "sha1": "0000000000000000000000000000000000000000", "size": 1, "url": "https://example.invalid/client.jar" } }
