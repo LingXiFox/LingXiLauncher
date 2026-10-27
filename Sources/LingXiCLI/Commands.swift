@@ -403,7 +403,7 @@ enum CLI {
             gameDirectory = instance.gameDirectory
         } else {
             instanceDirectory = try layout.instanceDirectory("preview-\(versionID)")
-            gameDirectory = instanceDirectory.appendingPathComponent(".minecraft", isDirectory: true)
+            gameDirectory = try layout.instanceGameDirectory("preview-\(versionID)")
         }
 
         let javaURL: URL
@@ -419,13 +419,16 @@ enum CLI {
         let version = try VersionResolver().resolve(versionID: versionID, from: layout.gameRoot)
         let dependencies = try services.dependencyResolver.resolve(version: version, layout: layout, platform: jvmPlatform)
 
+        let memoryArguments = instance.map {
+            InstanceMemory.jvmArguments(configured: $0.manifest.memoryMiB)
+        } ?? []
         let context = LaunchContext(
             instanceDirectory: instanceDirectory,
             gameDirectory: gameDirectory,
             javaExecutable: javaURL,
             platform: jvmPlatform,
             identity: identity,
-            additionalJVMArguments: [],
+            additionalJVMArguments: memoryArguments,
             features: [:]
         )
 

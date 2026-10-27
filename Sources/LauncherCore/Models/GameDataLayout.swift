@@ -8,7 +8,8 @@ import Foundation
 /// <gameRoot>/libraries/<maven path>
 /// <gameRoot>/assets/indexes/<id>.json
 /// <gameRoot>/assets/objects/<hash[0..2]>/<hash>
-/// <dataRoot>/instances/<instance-id>/.minecraft
+/// <dataRoot>/.minecraft/versions/<instance-id>   (one shared .minecraft)
+/// <dataRoot>/instances/<instance-id>/instance.json
 /// <dataRoot>/natives/<version-id>/<arch>
 /// <dataRoot>/accounts/local/<name>.json
 /// <dataRoot>/cache/manifests
@@ -44,6 +45,14 @@ public struct GameDataLayout: Sendable, Equatable {
     public var assetObjectsDirectory: URL { assetsDirectory.appendingPathComponent("objects", isDirectory: true) }
 
     public var instancesDirectory: URL { dataRoot.appendingPathComponent("instances", isDirectory: true) }
+
+    /// The single user-facing game data root. There is exactly one `.minecraft` per launcher
+    /// data root; every instance is forced into its own isolated version directory below it.
+    public var minecraftDirectory: URL { dataRoot.appendingPathComponent(".minecraft", isDirectory: true) }
+
+    /// Root for forced version/isolation game directories. The directory name is intentional:
+    /// profiles never share saves, options, mods or logs.
+    public var isolationRoot: URL { minecraftDirectory.appendingPathComponent("versions", isDirectory: true) }
     public var nativesRoot: URL { dataRoot.appendingPathComponent("natives", isDirectory: true) }
     public var accountsDirectory: URL { dataRoot.appendingPathComponent("accounts", isDirectory: true) }
     public var localAccountsDirectory: URL { accountsDirectory.appendingPathComponent("local", isDirectory: true) }
@@ -104,8 +113,11 @@ public struct GameDataLayout: Sendable, Equatable {
         try instancesDirectory.appendingPathComponent(PathSafety.validatedPathComponent(instanceID), isDirectory: true)
     }
 
+    /// Forced version isolation: `<dataRoot>/.minecraft/versions/<instance-id>`.
+    /// The instance's metadata directory (under `instances/`) never contains a nested
+    /// `.minecraft`; all game writes are confined to this single `.minecraft` tree.
     public func instanceGameDirectory(_ instanceID: String) throws -> URL {
-        try instanceDirectory(instanceID).appendingPathComponent(".minecraft", isDirectory: true)
+        try isolationRoot.appendingPathComponent(PathSafety.validatedPathComponent(instanceID), isDirectory: true)
     }
 
     /// The directory game-side logs are written into by the game itself (`<gameDir>/logs`).

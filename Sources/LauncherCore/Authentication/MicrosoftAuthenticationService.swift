@@ -236,7 +236,8 @@ public actor MicrosoftAuthenticationService {
             xuid: verified.xuid,
             addedAt: existingAccount?.addedAt ?? Date(),
             lastValidatedAt: Date(),
-            ownsGame: verified.ownsGame
+            ownsGame: verified.ownsGame,
+            appearance: verified.appearance ?? existingAccount?.appearance
         )
         let session = AuthorizedMinecraftSession(
             profile: verified.profile,

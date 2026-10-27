@@ -112,6 +112,12 @@ lingxi verify --instance <id>
 - **错误**：无所有权 `GAME_OWNERSHIP_MISSING`；Xbox 限制 `XBOX_ACCOUNT_RESTRICTED`；应用注册 403 `APP_REGISTRATION_REJECTED`；Keychain 错误 `KEYCHAIN_FAILURE`。
 - **XUID**：优先 XSTS `DisplayClaims`/Xbox Live；否则用独立 XSTS audience + Xbox profile service 获取。若仍不可用，允许占位 `0` 继续本地启动（在线功能可能受限），但不伪造所有权。
 - **客户端配置**：`MicrosoftAppRegistration` 单一内嵌来源；开发者可用 `LINGXI_MICROSOFT_CLIENT_ID` 临时覆盖。无外部 auth 配置文件。
+- **外观**：登录/验证时从 Minecraft Profile 读取 `skins` / `capes`，只保存公开纹理 URL 与 Classic/Slim；GUI 用真实纹理绘制头像、皮肤与披风，缺省时显示真实空缺，不伪造玩家资源。
+- **内存**：实例内存默认为自动策略（按物理内存解析为具体 `-Xmx`，上限 8 GiB），也可手动固定；GUI、CLI 与 `LaunchService` 共用同一策略。
+
+## 唯一 `.minecraft` 与强制隔离
+
+实例元数据仍在 `<dataRoot>/instances/<id>/instance.json`，但游戏目录不再嵌套在实例目录中。所有实例共用一个 `<dataRoot>/.minecraft`，实际工作目录是 `<dataRoot>/.minecraft/versions/<instance-id>`，因此版本/实例之间不会共享存档、选项、模组或日志。首次加载旧实例时，旧的 `instances/<id>/.minecraft` 会被**移动**到新隔离目录；若新旧目录同时存在则报错而不会自动合并。
 
 ## 身份模式与发布边界
 
@@ -130,9 +136,9 @@ Minecraft AppID 已于 **2026-10-26** 通过 Mojang 官方审核并加入 API Al
 原生 SwiftUI，macOS 14+，无 Electron/WebView：
 
 - **首页**：当前实例、账户、Java、启动/停止、最近退出码。
-- **游戏实例**：列表、创建、删除（需确认）、打开目录、JVM 内存设置、启动。
+- **游戏实例**：列表、创建、删除（需确认）、打开隔离游戏目录、自动/手动 JVM 内存设置、启动。
 - **版本下载**：官方/可信镜像清单、Release/Snapshot 过滤、进度/速度/当前文件、取消、安装后完整性验证。
-- **账户管理**：Microsoft 登录进度、UUID、所有权、切换、验证、退出；本地身份只读并明确标注未验证。
+- **账户管理**：Microsoft 登录进度、UUID、所有权、真实皮肤/披风纹理与头像裁剪、切换、验证、退出；本地身份只读并明确标注未验证。
 - **运行日志**：LauncherCore 事件、Java stdout/stderr、游戏输出、退出码；搜索、复制、自动滚动、脱敏诊断导出、打开 Minecraft `latest.log`。
 - **设置**：Java 检测/选择、下载源/镜像配置、数据/游戏目录、内嵌认证状态。
 - **安全**：GUI 不执行 CLI；OAuth code、access/refresh token、PKCE verifier 不写入日志；诊断导出脱敏。
@@ -150,9 +156,11 @@ GUI 使用 `LaunchService` 启动：`resolve → dependencies → preflight → 
 └── assets/log_configs/<id>
 
 <data-root>/                             # 启动器数据（--data-root；开发期 .dev-sandbox/data）
-├── instances/<instance-id>/instance.json + .minecraft/
+├── instances/<instance-id>/instance.json # 实例元数据（不含嵌套 .minecraft）
+├── .minecraft/                           # 唯一的游戏数据根
+│   └── versions/<instance-id>/           # 强制版本隔离的游戏目录（存档/模组/日志）
 ├── accounts/local/<name>.json           # 本地离线账户（无令牌字段，显式 unverified）
-├── accounts/microsoft/<uuid>.json       # 仅元数据：UUID/name/xuid/ownership/时间
+├── accounts/microsoft/<uuid>.json       # 仅元数据：UUID/name/xuid/ownership/时间/公开皮肤披风 URL
 ├── accounts/active.json
 ├── natives/<version-id>/<arch>/         # legacy natives 解压缓存
 ├── cache/manifests/version_manifest_v2.json

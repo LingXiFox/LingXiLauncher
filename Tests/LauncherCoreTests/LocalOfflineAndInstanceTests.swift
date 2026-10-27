@@ -127,8 +127,10 @@ final class InstanceRepositoryTests: XCTestCase {
         XCTAssertFalse(instance.id.contains(" "))
         XCTAssertEqual(instance.manifest.displayName, "生存 世界")
         XCTAssertEqual(instance.manifest.versionID, "26.3")
-        // gameDir must resolve inside the instance directory
-        XCTAssertTrue(PathSafety.isContained(instance.gameDirectory, inBase: instance.directory))
+        // Exactly one .minecraft root exists; the metadata directory must not contain another.
+        XCTAssertTrue(PathSafety.isContained(instance.gameDirectory, inBase: repository.layout.minecraftDirectory))
+        XCTAssertEqual(instance.gameDirectory.deletingLastPathComponent().deletingLastPathComponent(), repository.layout.minecraftDirectory)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: instance.directory.appendingPathComponent(".minecraft").path))
     }
 
     func testListAndLoadInstances() throws {
@@ -163,9 +165,39 @@ final class InstanceRepositoryTests: XCTestCase {
         XCTAssertThrowsError(try repository.setMemory(id: instance.id, memoryMiB: 64)) { error in
             XCTAssertEqual((error as? LauncherError)?.code, .usageError)
         }
+        let gameDirectory = instance.gameDirectory
         try repository.delete(id: instance.id)
         XCTAssertTrue(try repository.list().isEmpty)
         XCTAssertFalse(FileManager.default.fileExists(atPath: instance.directory.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: gameDirectory.path))
+    }
+
+    func testLegacyNestedMinecraftIsMigratedIntoTheSingleIsolationRoot() throws {
+        let (repository, root) = try makeRepository()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let instance = try repository.create(displayName: "Legacy", versionID: "1.20.1")
+        let legacy = instance.directory.appendingPathComponent(".minecraft", isDirectory: true)
+        try FileManager.default.moveItem(at: instance.gameDirectory, to: legacy)
+        try Data("world".utf8).write(to: legacy.appendingPathComponent("level.dat"))
+
+        let loaded = try repository.load(id: instance.id)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: legacy.path))
+        XCTAssertEqual(
+            try String(contentsOf: loaded.gameDirectory.appendingPathComponent("level.dat"), encoding: .utf8),
+            "world"
+        )
+        XCTAssertTrue(loaded.gameDirectory.path.hasPrefix(repository.layout.minecraftDirectory.path + "/versions/"))
+    }
+
+    func testAutomaticMemoryPolicy() {
+        let gigabyte: UInt64 = 1_073_741_824
+        XCTAssertEqual(InstanceMemory.automaticMiB(physicalMemoryBytes: 8 * gigabyte), 2_048)
+        XCTAssertEqual(InstanceMemory.automaticMiB(physicalMemoryBytes: 16 * gigabyte), 4_096)
+        XCTAssertEqual(InstanceMemory.automaticMiB(physicalMemoryBytes: 32 * gigabyte), 8_192)
+        XCTAssertEqual(InstanceMemory.automaticMiB(physicalMemoryBytes: 64 * gigabyte), 8_192)
+        XCTAssertEqual(InstanceMemory.resolvedMiB(configured: nil, physicalMemoryBytes: 16 * gigabyte), 4_096)
+        XCTAssertEqual(InstanceMemory.resolvedMiB(configured: 6_144, physicalMemoryBytes: 16 * gigabyte), 6_144)
+        XCTAssertEqual(InstanceMemory.jvmArguments(configured: nil, physicalMemoryBytes: 16 * gigabyte), ["-Xmx4096M"])
     }
 
     func testUnknownInstanceIsExplicitError() throws {
@@ -226,7 +258,8 @@ final class GameDataLayoutTests: XCTestCase {
         XCTAssertEqual(try layout.assetIndexURL(id: "34").path, "/tmp/mc/assets/indexes/34.json")
         XCTAssertEqual(try layout.assetObjectURL(sha1: "ABCDEF12").path, "/tmp/mc/assets/objects/ab/abcdef12")
         XCTAssertEqual(try layout.nativesDirectory(versionID: "26.3", architecture: .arm64).path, "/tmp/data/natives/26.3/arm64")
-        XCTAssertEqual(try layout.instanceGameDirectory("abc").path, "/tmp/data/instances/abc/.minecraft")
+        XCTAssertEqual(try layout.instanceGameDirectory("abc").path, "/tmp/data/.minecraft/versions/abc")
+        XCTAssertEqual(layout.minecraftDirectory.path, "/tmp/data/.minecraft")
         XCTAssertEqual(layout.loggingConfigsDirectory.path, "/tmp/mc/assets/log_configs")
     }
 

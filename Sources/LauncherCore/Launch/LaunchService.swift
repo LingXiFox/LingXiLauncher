@@ -103,13 +103,21 @@ public actor LaunchService {
             continuation.yield(.phase("Resolving libraries and natives"))
             let dependencies = try dependencyResolver.resolve(version: version, layout: layout, platform: platform)
 
+            var jvmArguments = request.additionalJVMArguments
+            // Memory is a launcher contract, not an optional frontend decoration. Automatic
+            // mode still resolves to a concrete -Xmx so the JVM never inherits an unbounded heap.
+            if !jvmArguments.contains(where: { $0.hasPrefix("-Xmx") }) {
+                jvmArguments.append(contentsOf: InstanceMemory.jvmArguments(
+                    configured: request.instance.manifest.memoryMiB
+                ))
+            }
             let context = LaunchContext(
                 instanceDirectory: request.instance.directory,
                 gameDirectory: request.instance.gameDirectory,
                 javaExecutable: request.javaExecutable,
                 platform: platform,
                 identity: request.identity,
-                additionalJVMArguments: request.additionalJVMArguments,
+                additionalJVMArguments: jvmArguments,
                 features: request.features
             )
 

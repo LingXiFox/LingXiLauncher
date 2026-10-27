@@ -96,7 +96,7 @@ Tests/LauncherCoreTests/
 - 旧版 natives 的架构判定是显式的：classifier 带 `-x86_64`/`-x64` 在 arm64 平台产生 **error 级诊断**；只写 `natives-macos`/`natives-osx` 的旧版归档无法静态判定架构，产生 **一次性 warning**（提示可能需要 Rosetta）。两者都不做混合架构自动修复，也不静默硬加载。
 - natives 缓存按 `<version>/<arch>` 隔离，x86_64 缓存不可能被 arm64 JVM 复用。
 - 路径（含中文、空格）始终以 argv 数组传递，classpath 用 `:` 拼成单个 `-cp` 参数值，不做 shell quote。
-- 工作目录固定为实例的 `.minecraft`。
+- 唯一游戏数据根为 `<dataRoot>/.minecraft`；工作目录固定为 `<dataRoot>/.minecraft/versions/<instance-id>`（强制版本/实例隔离），实例元数据目录内不再创建 `.minecraft`。
 
 ## 4.1 JVM 架构与原生库（M2.5）
 
@@ -163,7 +163,7 @@ swift build
 swift test
 ```
 
-当前总计 **231 个测试**，全量运行 0 失败：
+当前总计 **233 个测试**，全量运行 0 失败：
 
 | 测试文件（用例数） | 覆盖 |
 |---|---|
@@ -181,7 +181,7 @@ swift test
 | `SafeZipExtractorTests` (10) | 正常/存储模式、`../`、嵌套穿越、绝对路径、symlink、损坏包、条目与数量上限 |
 | `InstallerTests` (10) | 端到端安装、二次缓存、宽展修复、local-cache-only、mirror-only、版本筛选、natives 解压、verify 检出损坏 |
 | `M2_5CompatibilityTests` (7) | JVM 架构上下文/Rosetta、per-JVM natives 缓存、规则按 JVM 架构、双向架构不匹配、缺失 natives、Mach-O/ZIP 架构检查 |
-| `LocalOfflineIdentityTests` (9) / `InstanceRepositoryTests` (6) | UUID 向量、名字边界、账户无令牌字段、实例隔离、内存/删除 |
+| `LocalOfflineIdentityTests` (9) / `InstanceRepositoryTests` (9) | UUID 向量、名字边界、账户无令牌字段、单一 `.minecraft` 与迁移、内存策略/删除 |
 | `AuthenticationTests` (23) | 内嵌配置、PKCE RFC 向量、OAuth、state 拒绝、真实 loopback、Xbox/XSTS/Minecraft/所有权、Keychain |
 | `LaunchServiceTests` (2) | 启动失败事件、事件流终止与重复调用 |
 | `PathSafetyTests` (4) / `GameDataLayoutTests` (3) / `PlatformContextTests` (3) | 路径穿越、布局推导、平台上下文 |
@@ -210,7 +210,8 @@ swift test
 ## 9. 剩余工作
 
 - **M4**：Fabric/Quilt 加载器安装、版本继承解析、mods 目录与冲突提示。
-- **M5-B**：实例创建向导、下载任务历史、Java 自动安装/下载、更多诊断导出项。
+- **M5-B**：下载任务历史、Java 自动安装/下载、更多诊断导出项。
+- 外观：皮肤/披风纹理缓存、Cape 动画与更多皮肤模型细节。
 - 真实大文件 GUI 下载中途取消、Intel Mac、Developer ID 签名/公证。
 - 认证增强：多账户切换的 UI 覆盖、refresh token 轮换异常监控、全新浏览器 profile 的首次 consent 真机回归。
 

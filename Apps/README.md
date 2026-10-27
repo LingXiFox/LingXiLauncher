@@ -4,6 +4,7 @@
 
 - Package target: `LingXiMac` (path `Apps/LingXiMac/Sources`), depends directly on `LauncherCore`.
 - It never shells out to the `lingxi` CLI; launch/download/auth all go through Core APIs.
+- Game data uses one `<dataRoot>/.minecraft` root with forced per-instance version isolation.
 - Build the double-clickable bundle with `Scripts/build-app.sh` → `dist/LingXiMac.app`.
 - `Info.plist` lives here; the bundle is ad-hoc signed for local development only.
 

@@ -35,13 +35,22 @@ public struct MinecraftAuthenticationResult: Sendable, Equatable {
     public let expiresAt: Date
     public let xuid: String
     public let ownsGame: Bool
+    public let appearance: PlayerAppearance?
 
-    public init(profile: MinecraftProfile, accessToken: String, expiresAt: Date, xuid: String, ownsGame: Bool) {
+    public init(
+        profile: MinecraftProfile,
+        accessToken: String,
+        expiresAt: Date,
+        xuid: String,
+        ownsGame: Bool,
+        appearance: PlayerAppearance? = nil
+    ) {
         self.profile = profile
         self.accessToken = accessToken
         self.expiresAt = expiresAt
         self.xuid = xuid
         self.ownsGame = ownsGame
+        self.appearance = appearance
     }
 }
 
@@ -206,7 +215,8 @@ public struct XboxMinecraftAuthenticator: Sendable {
         xuid: String
     ) async throws -> MinecraftAuthenticationResult {
         let entitlements = try await fetchEntitlements(token: minecraftToken)
-        let profile = try await fetchProfile(token: minecraftToken)
+        let profilePayload = try await fetchProfilePayload(token: minecraftToken)
+        let profile = profilePayload?.profile
         // A Minecraft profile is only issued to accounts that own Java Edition, so either
         // signal is sufficient; an empty entitlement list alone is not proof of ownership.
         let ownsGame = !entitlements.isEmpty || profile != nil
@@ -222,7 +232,8 @@ public struct XboxMinecraftAuthenticator: Sendable {
             accessToken: minecraftToken,
             expiresAt: expiresAt,
             xuid: xuid,
-            ownsGame: true
+            ownsGame: true,
+            appearance: profilePayload?.appearance
         )
     }
 
@@ -254,6 +265,10 @@ public struct XboxMinecraftAuthenticator: Sendable {
 
     /// Returns nil when the account has no Minecraft profile (HTTP 404).
     public func fetchProfile(token: String) async throws -> MinecraftProfile? {
+        try await fetchProfilePayload(token: token)?.profile
+    }
+
+    private func fetchProfilePayload(token: String) async throws -> (profile: MinecraftProfile, appearance: PlayerAppearance?)? {
         let request = MicrosoftHTTPRequest(
             url: URL(string: "https://api.minecraftservices.com/minecraft/profile")!,
             headers: ["Authorization": "Bearer \(token)", "Accept": "application/json"]
@@ -282,7 +297,24 @@ public struct XboxMinecraftAuthenticator: Sendable {
         guard let uuid = Self.uuid(fromMinecraftID: payload.id), !payload.name.isEmpty else {
             throw LauncherError(.invalidMetadata, "Minecraft profile response contained an invalid id or name")
         }
-        return MinecraftProfile(id: uuid, name: payload.name)
+        let skin = payload.skins?.first(where: { $0.state?.uppercased() == "ACTIVE" })
+            ?? payload.skins?.first
+        let cape = payload.capes?.first(where: { $0.state?.uppercased() == "ACTIVE" })
+            ?? payload.capes?.first
+        let appearance: PlayerAppearance?
+        if skin != nil || cape != nil {
+            let model: PlayerAppearance.SkinModel? = skin.map {
+                $0.variant?.uppercased() == "SLIM" ? .slim : .classic
+            }
+            appearance = PlayerAppearance(
+                skinTextureURL: skin?.url,
+                capeTextureURL: cape?.url,
+                skinModel: model
+            )
+        } else {
+            appearance = nil
+        }
+        return (MinecraftProfile(id: uuid, name: payload.name), appearance)
     }
 
     // MARK: - Helpers
@@ -402,8 +434,19 @@ public struct XboxMinecraftAuthenticator: Sendable {
     }
 
     private struct MinecraftProfileResponse: Decodable {
+        struct Skin: Decodable {
+            let state: String?
+            let url: URL
+            let variant: String?
+        }
+        struct Cape: Decodable {
+            let state: String?
+            let url: URL
+        }
         let id: String
         let name: String
+        let skins: [Skin]?
+        let capes: [Cape]?
     }
 }
 

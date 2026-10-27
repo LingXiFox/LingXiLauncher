@@ -17,6 +17,7 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$ROOT/.build/$CONFIGURATION/LingXiMac" "$APP/Contents/MacOS/LingXiMac"
 cp "$ROOT/Apps/LingXiMac/Info.plist" "$APP/Contents/Info.plist"
+cp "$ROOT/Apps/LingXiMac/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
 printf 'APPL????' > "$APP/Contents/PkgInfo"
 chmod +x "$APP/Contents/MacOS/LingXiMac"
 

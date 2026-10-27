@@ -166,6 +166,9 @@ public struct MicrosoftAccount: Codable, Sendable, Equatable, Identifiable {
     public let addedAt: Date
     public var lastValidatedAt: Date?
     public var ownsGame: Bool
+    /// Public skin/cape URLs from the Minecraft profile. Nil until the account is revalidated
+    /// with a build that fetches appearance metadata (older account files decode with nil).
+    public var appearance: PlayerAppearance?
 
     public init(
         id: UUID,
@@ -173,7 +176,8 @@ public struct MicrosoftAccount: Codable, Sendable, Equatable, Identifiable {
         xuid: String,
         addedAt: Date = Date(),
         lastValidatedAt: Date? = nil,
-        ownsGame: Bool
+        ownsGame: Bool,
+        appearance: PlayerAppearance? = nil
     ) {
         self.id = id
         self.playerName = playerName
@@ -181,5 +185,6 @@ public struct MicrosoftAccount: Codable, Sendable, Equatable, Identifiable {
         self.addedAt = addedAt
         self.lastValidatedAt = lastValidatedAt
         self.ownsGame = ownsGame
+        self.appearance = appearance
     }
 }

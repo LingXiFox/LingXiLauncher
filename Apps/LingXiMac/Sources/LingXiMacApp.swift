@@ -8,19 +8,30 @@ struct LingXiMacApp: App {
         WindowGroup("LingXi Launcher") {
             ContentView()
                 .environmentObject(model)
-                .frame(minWidth: 980, minHeight: 640)
-                .tint(Color.lingxiOrange)
+                .frame(minWidth: 960, minHeight: 640)
+                .preferredColorScheme(model.settings.appearance.colorScheme)
         }
-        .defaultSize(width: 1180, height: 760)
+        .defaultSize(width: 1240, height: 820)
+        .windowResizability(.contentMinSize)
         .commands {
             CommandGroup(replacing: .newItem) {}
         }
 
         Settings {
-            SettingsView()
+            SettingsSceneView()
                 .environmentObject(model)
-                .frame(width: 620, height: 520)
-                .tint(Color.lingxiOrange)
         }
+    }
+}
+
+private struct SettingsSceneView: View {
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        SettingsView()
+            .environment(\.lxTheme, LXTheme(colorScheme: colorScheme))
+            .preferredColorScheme(model.settings.appearance.colorScheme)
+            .frame(width: 680, height: 640)
     }
 }

@@ -4,7 +4,8 @@ import Foundation
 public struct LaunchContext: Sendable {
     /// Instance root, e.g. `~/Library/Application Support/LingXiLauncher/instances/<id>`.
     public let instanceDirectory: URL
-    /// The game working directory (`<instance>/.minecraft`). Saves, options and logs live here.
+    /// The forced-isolation game working directory
+    /// (`<dataRoot>/.minecraft/versions/<instance-id>`). Saves, options and logs live here.
     public let gameDirectory: URL
     public let javaExecutable: URL
     /// Rule-evaluation context for the **selected JVM** (OS/version from the host, architecture

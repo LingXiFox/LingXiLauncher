@@ -1,5 +1,7 @@
 # M2.5 真机启动验证记录
 
+> 历史记录：本文件记录 M2.5 时的实例目录布局（每实例 `.minecraft`）。M5.1 已改为唯一 `<dataRoot>/.minecraft/versions/<instance-id>`，路径仅作历史证据保留。
+
 日期：2026-10-25 13:06–13:10（Asia/Shanghai）
 主机：macOS 27.2 / Apple Silicon arm64
 实例：`dev-1201`（Minecraft 1.20.1，`.dev-sandbox` 沙盒）

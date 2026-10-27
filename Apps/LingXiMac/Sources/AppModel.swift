@@ -77,6 +77,7 @@ final class AppModel: ObservableObject {
         let ownsGame: Bool?
         let lastValidated: Date?
         let active: Bool
+        let appearance: PlayerAppearance?
     }
 
     struct InstallState {
@@ -104,6 +105,12 @@ final class AppModel: ObservableObject {
         var sourceRaw = DownloadSourcePolicy.auto.rawValue
         var mirrorConfigPath = ""
         var defaultMemoryMiB = 2048
+        var appearanceRaw = LXAppearance.dark.rawValue
+
+        var appearance: LXAppearance {
+            get { LXAppearance(rawValue: appearanceRaw) ?? .dark }
+            set { appearanceRaw = newValue.rawValue }
+        }
 
         var source: DownloadSourcePolicy {
             get { DownloadSourcePolicy(rawValue: sourceRaw) ?? .auto }
@@ -131,6 +138,7 @@ final class AppModel: ObservableObject {
     @Published var authState: AuthenticationState = .signedOut
     @Published var authSetupError: String?
     @Published var authActionInProgress = false
+    @Published var playerAppearance: PlayerAppearance?
     @Published var lastError: String?
     @Published var logs: [LogEntry] = []
     @Published var logSearchText = ""
@@ -325,6 +333,10 @@ final class AppModel: ObservableObject {
     }
 
     func openInstanceFolder(_ instance: Instance) {
+        NSWorkspace.shared.open(instance.gameDirectory)
+    }
+
+    func openInstanceMetadataFolder(_ instance: Instance) {
         NSWorkspace.shared.open(instance.directory)
     }
 
@@ -451,7 +463,8 @@ final class AppModel: ObservableObject {
                 uuid: account.id.uuidString.lowercased(),
                 ownsGame: account.ownsGame,
                 lastValidated: account.lastValidatedAt,
-                active: active?.kind == .microsoft && active?.identifier == account.id.uuidString.lowercased()
+                active: active?.kind == .microsoft && active?.identifier == account.id.uuidString.lowercased(),
+                appearance: account.appearance
             ))
         }
         let localAccounts = (try? localAccountStore.list()) ?? []
@@ -463,7 +476,8 @@ final class AppModel: ObservableObject {
                 uuid: account.offlineUUID.uuidString.lowercased(),
                 ownsGame: nil,
                 lastValidated: nil,
-                active: active?.kind == .local && active?.identifier == account.playerName
+                active: active?.kind == .local && active?.identifier == account.playerName,
+                appearance: nil
             ))
         }
         accounts = rows
@@ -475,6 +489,11 @@ final class AppModel: ObservableObject {
                 try? activeAccountStore.save(AccountReference(kind: .microsoft, identifier: id.uuidString.lowercased()))
             }
         }
+        loadPlayerAppearance()
+    }
+
+    private func loadPlayerAppearance() {
+        playerAppearance = activeMicrosoftAccount?.appearance
     }
 
     func signInMicrosoft() {
@@ -504,7 +523,10 @@ final class AppModel: ObservableObject {
             defer { authActionInProgress = false }
             do {
                 try await authService.signOut(accountID: uuid)
-                if activeMicrosoftAccountID == uuid { activeMicrosoftAccountID = nil }
+                if activeMicrosoftAccountID == uuid {
+                    activeMicrosoftAccountID = nil
+                    playerAppearance = nil
+                }
                 try? activeAccountStore.save(nil)
                 reloadAccounts()
                 appendLine("Signed out \(row.name)", source: "auth")
@@ -566,15 +588,11 @@ final class AppModel: ObservableObject {
         launchTask = Task {
             do {
                 let session = try await authService.session(for: account.id)
-                var arguments: [String] = []
-                if let memory = instance.manifest.memoryMiB {
-                    arguments.append("-Xmx\(memory)M")
-                }
                 let request = LaunchServiceRequest(
                     instance: instance,
                     identity: .microsoft(session),
                     javaExecutable: java.executable,
-                    additionalJVMArguments: arguments
+                    additionalJVMArguments: []
                 )
                 let stream = await launchService.launch(request)
                 for await event in stream {
@@ -808,6 +826,7 @@ final class AppModel: ObservableObject {
         defaults.set(settings.sourceRaw, forKey: "lingxi.source")
         defaults.set(settings.mirrorConfigPath, forKey: "lingxi.mirrorConfigPath")
         defaults.set(settings.defaultMemoryMiB, forKey: "lingxi.defaultMemoryMiB")
+        defaults.set(settings.appearanceRaw, forKey: "lingxi.appearance")
     }
 
     private static func loadSettings() -> Settings {
@@ -818,6 +837,13 @@ final class AppModel: ObservableObject {
         settings.mirrorConfigPath = defaults.string(forKey: "lingxi.mirrorConfigPath") ?? ""
         let memory = defaults.integer(forKey: "lingxi.defaultMemoryMiB")
         if memory > 0 { settings.defaultMemoryMiB = memory }
+        let appearance = ProcessInfo.processInfo.environment["LINGXI_APPEARANCE"]
+            ?? defaults.string(forKey: "lingxi.appearance")
+        if let appearance, let parsed = LXAppearance(rawValue: appearance) {
+            settings.appearanceRaw = parsed.rawValue
+        } else {
+            settings.appearanceRaw = LXAppearance.dark.rawValue
+        }
         return settings
     }
 

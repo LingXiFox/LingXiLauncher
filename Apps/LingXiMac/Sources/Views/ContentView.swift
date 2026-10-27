@@ -2,71 +2,60 @@ import SwiftUI
 
 struct ContentView: View {
     @EnvironmentObject private var model: AppModel
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var theme: LXTheme { LXTheme(colorScheme: colorScheme) }
 
     var body: some View {
         NavigationSplitView {
-            List(AppModel.Section.allCases, selection: $model.section) { section in
-                Label(section.title, systemImage: section.icon)
-                    .tag(section)
-            }
-            .navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 260)
-            .safeAreaInset(edge: .bottom) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Divider()
-                    HStack(spacing: 6) {
-                        Circle()
-                            .fill(model.isGameRunning ? Color.green : Color.secondary.opacity(0.5))
-                            .frame(width: 7, height: 7)
-                        Text(model.isGameRunning ? "游戏运行中" : "未运行")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    Text(model.activeAccountDescription)
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(1)
-                }
-                .padding(.horizontal, 12)
-                .padding(.bottom, 10)
-            }
+            SidebarView()
+                .navigationSplitViewColumnWidth(min: 220, ideal: 240, max: 280)
         } detail: {
-            Group {
-                switch model.section {
-                case .home:
-                    HomeView()
-                case .instances:
-                    InstancesView()
-                case .downloads:
-                    DownloadsView()
-                case .accounts:
-                    AccountsView()
-                case .logs:
-                    LogsView()
-                case .settings:
-                    SettingsView()
+            VStack(spacing: 0) {
+                if let error = model.lastError {
+                    LXErrorBanner(message: error, dismiss: model.clearError)
+                        .transition(.move(edge: .top).combined(with: .opacity))
                 }
+                page
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            .navigationTitle(model.section.title)
+            .background(theme.canvas)
+            .navigationTitle("LingXi Launcher")
             .toolbar {
                 ToolbarItem(placement: .status) {
-                    if model.authState.isWorking || model.authActionInProgress {
-                        ProgressView()
-                            .controlSize(.small)
-                            .help(model.authPhaseText)
+                    HStack(spacing: 8) {
+                        if model.authState.isWorking || model.authActionInProgress {
+                            ProgressView()
+                                .controlSize(.small)
+                                .tint(theme.orange)
+                        }
+                        LXBadge(
+                            text: model.isGameRunning ? "游戏运行中" : "就绪",
+                            tone: model.isGameRunning ? .success : .neutral,
+                            dot: true
+                        )
                     }
+                    .accessibilityElement(children: .combine)
                 }
             }
         }
-        .alert(
-            "出错了",
-            isPresented: Binding(
-                get: { model.lastError != nil },
-                set: { if !$0 { model.clearError() } }
-            )
-        ) {
-            Button("好") { model.clearError() }
-        } message: {
-            Text(model.lastError ?? "")
+        .navigationSplitViewStyle(.balanced)
+        .environment(\.lxTheme, theme)
+        .tint(theme.orange)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: model.lastError)
+        .background(theme.canvas)
+    }
+
+    @ViewBuilder
+    private var page: some View {
+        switch model.section {
+        case .home: HomeView()
+        case .instances: InstancesView()
+        case .downloads: DownloadsView()
+        case .accounts: AccountsView()
+        case .logs: LogsView()
+        case .settings: SettingsView()
         }
     }
 }

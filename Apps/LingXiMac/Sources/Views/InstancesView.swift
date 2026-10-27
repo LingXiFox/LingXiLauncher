@@ -3,89 +3,48 @@ import SwiftUI
 
 struct InstancesView: View {
     @EnvironmentObject private var model: AppModel
+    @Environment(\.lxTheme) private var theme
+
     @State private var showCreate = false
     @State private var newName = ""
     @State private var newVersion = ""
     @State private var pendingDelete: Instance?
     @State private var memoryTarget: Instance?
     @State private var memoryText = ""
+    @State private var memoryAutomatic = true
 
     var body: some View {
-        HStack(spacing: 0) {
-            VStack(spacing: 0) {
-                List(
-                    model.instances,
-                    selection: Binding(
-                        get: { model.selectedInstanceID },
-                        set: { model.selectedInstanceID = $0 }
-                    )
-                ) { instance in
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(instance.manifest.displayName)
-                            .font(.body.weight(.medium))
-                        Text("\(instance.manifest.versionID ?? "未指定版本") · \(instance.id)")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    .padding(.vertical, 3)
-                    .tag(instance.id)
-                }
-                .overlay {
-                    if model.instances.isEmpty {
-                        EmptyStateView(
-                            icon: "square.stack.3d.up",
-                            title: "没有游戏实例",
-                            message: "创建实例后即可配置内存、打开目录或启动游戏。"
-                        )
-                    }
-                }
-                Divider()
-                HStack {
-                    Button {
-                        showCreate = true
-                    } label: {
-                        Label("新建实例", systemImage: "plus")
-                    }
-                    Spacer()
-                    Button {
+        VStack(alignment: .leading, spacing: LXSpace.md) {
+            LXPageHeader(
+                eyebrow: "LIBRARY / INSTANCES",
+                title: "游戏实例",
+                subtitle: "每个实例都有独立的版本、内存与游戏目录。"
+            ) {
+                HStack(spacing: 8) {
+                    LXIconButton(systemImage: "arrow.clockwise", label: "刷新实例") {
                         model.reloadInstances()
-                    } label: {
-                        Image(systemName: "arrow.clockwise")
                     }
-                    .help("刷新")
+                    LXButton("新建实例", systemImage: "plus", kind: .primary) {
+                        showCreate = true
+                    }
                 }
-                .padding(10)
+                .padding(.top, 3)
             }
-            .frame(minWidth: 280, maxWidth: 340)
 
-            Divider()
-
-            Group {
-                if let instance = model.selectedInstance {
-                    InstanceDetailView(
-                        instance: instance,
-                        onDelete: { pendingDelete = instance },
-                        onEditMemory: {
-                            memoryTarget = instance
-                            memoryText = instance.manifest.memoryMiB.map(String.init) ?? ""
-                        }
-                    )
-                } else {
-                    EmptyStateView(
-                        icon: "sidebar.left",
-                        title: "选择一个实例",
-                        message: "左侧列表显示所有本地实例；所有数据来自 LauncherCore 的 InstanceRepository。"
-                    )
-                }
+            HStack(alignment: .top, spacing: LXSpace.md) {
+                instanceList
+                    .frame(width: 300)
+                detailPane
+                    .frame(minWidth: 0, maxWidth: .infinity)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .sheet(isPresented: $showCreate) {
-            createSheet
-        }
-        .sheet(item: $memoryTarget) { instance in
-            memorySheet(instance)
-        }
+        .padding(.horizontal, LXSpace.xxl)
+        .padding(.vertical, LXSpace.xl)
+        .frame(maxWidth: 1240, maxHeight: .infinity, alignment: .topLeading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .background(theme.canvas)
+        .sheet(isPresented: $showCreate) { createSheet }
+        .sheet(item: $memoryTarget) { instance in memorySheet(instance) }
         .confirmationDialog(
             "删除实例？",
             isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
@@ -97,136 +56,441 @@ struct InstancesView: View {
             }
             Button("取消", role: .cancel) { pendingDelete = nil }
         } message: { instance in
-            Text("这会删除实例目录及其中的世界、配置和日志：\n\(instance.directory.path)\n此操作不可撤销。")
+            Text("这会删除实例元数据、隔离游戏目录及其中的世界、配置与日志：\n\(instance.directory.path)\n\(instance.gameDirectory.path)\n此操作不可撤销。")
+        }
+    }
+
+    private var instanceList: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                LXOverline(text: "ALL INSTANCES")
+                Spacer()
+                Text("\(model.instances.count)")
+                    .font(LXFont.monoSmall)
+                    .foregroundStyle(theme.textTertiary)
+            }
+            .padding(.horizontal, 2)
+            .padding(.bottom, LXSpace.sm)
+
+            if model.instances.isEmpty {
+                LXCard(padding: 0) {
+                    LXEmptyState(
+                        icon: "square.stack.3d.up",
+                        title: "还没有实例",
+                        message: "创建一个空实例，或到版本下载安装 Minecraft。",
+                        actionTitle: "安装版本"
+                    ) {
+                        model.section = .downloads
+                    }
+                }
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 7) {
+                        ForEach(model.instances) { instance in
+                            InstanceRow(
+                                instance: instance,
+                                selected: model.selectedInstanceID == instance.id,
+                                running: model.isGameRunning && model.selectedInstanceID == instance.id,
+                                onSelect: { model.selectedInstanceID = instance.id },
+                                onOpen: { model.openInstanceFolder(instance) },
+                                onMemory: {
+                                    memoryTarget = instance
+                                    memoryAutomatic = instance.manifest.memoryMiB == nil
+                                    memoryText = instance.manifest.memoryMiB.map(String.init) ?? ""
+                                },
+                                onDelete: { pendingDelete = instance },
+                                onLaunch: {
+                                    model.selectedInstanceID = instance.id
+                                    model.launchSelectedInstance()
+                                }
+                            )
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
+                .scrollIndicators(.never)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var detailPane: some View {
+        if let instance = model.selectedInstance {
+            InstanceDetailPane(
+                instance: instance,
+                onEditMemory: {
+                    memoryTarget = instance
+                    memoryAutomatic = instance.manifest.memoryMiB == nil
+                    memoryText = instance.manifest.memoryMiB.map(String.init) ?? ""
+                },
+                onDelete: { pendingDelete = instance }
+            )
+        } else {
+            LXCard(padding: 0) {
+                LXEmptyState(
+                    icon: "sidebar.left",
+                    title: "选择一个实例",
+                    message: "实例详情、内存与启动操作会显示在这里。"
+                )
+            }
+            .frame(maxHeight: .infinity)
         }
     }
 
     private var createSheet: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("新建游戏实例").font(.title3.weight(.semibold))
-            TextField("显示名称", text: $newName)
-            Picker("Minecraft 版本", selection: $newVersion) {
-                Text("稍后选择").tag("")
-                ForEach(model.installedVersionIDs, id: \.self) { version in
-                    Text(version).tag(version)
-                }
+        VStack(alignment: .leading, spacing: LXSpace.lg) {
+            HStack {
+                LXOverline(text: "NEW INSTANCE", color: theme.orange)
+                Spacer()
+                LXIconButton(systemImage: "xmark", label: "关闭") { showCreate = false }
             }
-            if model.installedVersionIDs.isEmpty {
-                Text("尚无可用的本地版本。请先在“版本下载”中安装一个版本。")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            Text("创建游戏实例")
+                .font(LXFont.display(26))
+                .foregroundStyle(theme.text)
+            Text("实例会在唯一 `.minecraft/versions/` 下获得独立隔离目录；版本可以稍后绑定。")
+                .font(LXFont.body)
+                .foregroundStyle(theme.textSecondary)
+            VStack(alignment: .leading, spacing: 6) {
+                Text("显示名称").font(LXFont.captionStrong).foregroundStyle(theme.textSecondary)
+                TextField("例如：Survival 1.20.1", text: $newName)
+                    .lxInput()
+            }
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Minecraft 版本").font(LXFont.captionStrong).foregroundStyle(theme.textSecondary)
+                Menu {
+                    Button("稍后绑定") { newVersion = "" }
+                    if !model.installedVersionIDs.isEmpty {
+                        Divider()
+                        ForEach(model.installedVersionIDs, id: \.self) { version in
+                            Button {
+                                newVersion = version
+                            } label: {
+                                if newVersion == version {
+                                    Label(version, systemImage: "checkmark")
+                                } else {
+                                    Text(version)
+                                }
+                            }
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 7) {
+                        Text(newVersion.isEmpty ? "稍后绑定" : newVersion)
+                            .font(LXFont.body)
+                            .foregroundStyle(theme.text)
+                        Spacer()
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(.system(size: 8, weight: .semibold))
+                            .foregroundStyle(theme.textTertiary)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .background(theme.canvas.opacity(theme.isDark ? 0.55 : 0.45), in: RoundedRectangle(cornerRadius: LXRadius.sm, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: LXRadius.sm, style: .continuous)
+                            .strokeBorder(theme.border, lineWidth: 0.8)
+                    )
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                if model.installedVersionIDs.isEmpty {
+                    Text("还没有本地版本；可先到版本下载安装。")
+                        .font(LXFont.caption)
+                        .foregroundStyle(theme.warning)
+                }
             }
             HStack {
                 Spacer()
-                Button("取消") { showCreate = false }
-                Button("创建") {
+                LXButton("取消", kind: .ghost) { showCreate = false }
+                LXButton("创建实例", systemImage: "plus", kind: .primary, isDisabled: newName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) {
                     model.createInstance(name: newName, versionID: newVersion.isEmpty ? nil : newVersion)
                     showCreate = false
                     newName = ""
                     newVersion = ""
                 }
-                .buttonStyle(.borderedProminent)
-                .disabled(newName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
-        .padding(22)
-        .frame(width: 420)
+        .padding(LXSpace.xl)
+        .frame(width: 460)
+        .background(theme.canvas)
+        .environment(\.lxTheme, theme)
     }
 
     private func memorySheet(_ instance: Instance) -> some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("JVM 内存上限").font(.title3.weight(.semibold))
-            Text("为实例 \(instance.manifest.displayName) 设置 -Xmx 值（256–65536 MiB）。留空表示不添加启动器参数。")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-            TextField("例如 4096", text: $memoryText)
-                .textFieldStyle(.roundedBorder)
+        VStack(alignment: .leading, spacing: LXSpace.lg) {
+            HStack {
+                LXOverline(text: "JVM MEMORY", color: theme.orange)
+                Spacer()
+                LXIconButton(systemImage: "xmark", label: "关闭") { memoryTarget = nil }
+            }
+            Text("内存上限")
+                .font(LXFont.display(26))
+                .foregroundStyle(theme.text)
+            Text("为 \(instance.manifest.displayName) 选择自动或手动堆上限。自动模式会按物理内存解析为具体 -Xmx，不会让 JVM 无界。")
+                .font(LXFont.body)
+                .foregroundStyle(theme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 6) {
+                LXChip(title: "自动分配", isSelected: memoryAutomatic) { memoryAutomatic = true }
+                LXChip(title: "手动", isSelected: !memoryAutomatic) { memoryAutomatic = false }
+                Spacer()
+            }
+            if memoryAutomatic {
+                HStack(spacing: 8) {
+                    Image(systemName: "wand.and.stars")
+                        .foregroundStyle(theme.orange)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("自动 · \(InstanceMemory.automaticMiB()) MiB")
+                            .font(LXFont.bodyStrong)
+                            .foregroundStyle(theme.text)
+                        Text("基于本机物理内存；后续可随时切换为手动。")
+                            .font(LXFont.caption)
+                            .foregroundStyle(theme.textTertiary)
+                    }
+                }
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(theme.orangeSoft, in: RoundedRectangle(cornerRadius: LXRadius.md, style: .continuous))
+            } else {
+                TextField("例如 4096", text: $memoryText)
+                    .lxInput()
+            }
             HStack {
                 Spacer()
-                Button("取消") { memoryTarget = nil }
-                Button("保存") {
-                    let value = Int(memoryText.trimmingCharacters(in: .whitespaces))
+                LXButton("取消", kind: .ghost) { memoryTarget = nil }
+                LXButton("保存", kind: .primary) {
+                    let value = memoryAutomatic ? nil : Int(memoryText.trimmingCharacters(in: .whitespacesAndNewlines))
                     model.setMemory(value, for: instance)
                     memoryTarget = nil
                 }
-                .buttonStyle(.borderedProminent)
             }
         }
-        .padding(22)
+        .padding(LXSpace.xl)
         .frame(width: 440)
+        .background(theme.canvas)
+        .environment(\.lxTheme, theme)
     }
 }
 
-private struct InstanceDetailView: View {
-    @EnvironmentObject private var model: AppModel
+// MARK: - Rows
+
+private struct InstanceRow: View {
+    @Environment(\.lxTheme) private var theme
+    @State private var hovering = false
+
     let instance: Instance
+    let selected: Bool
+    let running: Bool
+    let onSelect: () -> Void
+    let onOpen: () -> Void
+    let onMemory: () -> Void
     let onDelete: () -> Void
+    let onLaunch: () -> Void
+
+    var body: some View {
+        Button(action: onSelect) {
+            HStack(spacing: 10) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: LXRadius.sm, style: .continuous)
+                        .fill(selected ? theme.orangeSoft : theme.surfaceRaised)
+                    Image(systemName: "cube.fill")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(selected ? theme.orange : theme.textSecondary)
+                }
+                .frame(width: 34, height: 34)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 5) {
+                        Text(instance.manifest.displayName)
+                            .font(LXFont.bodyStrong)
+                            .foregroundStyle(theme.text)
+                            .lineLimit(1)
+                        if running {
+                            Circle().fill(theme.success).frame(width: 5, height: 5)
+                        }
+                    }
+                    Text("\(instance.manifest.versionID ?? "未绑定版本") · \(instance.id)")
+                        .font(LXFont.caption)
+                        .foregroundStyle(theme.textTertiary)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 4)
+                VStack(alignment: .trailing, spacing: 3) {
+                    Text(instance.manifest.memoryMiB.map { "\($0)M" } ?? "自动")
+                        .font(LXFont.monoSmall)
+                        .foregroundStyle(theme.textTertiary)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 8, weight: .semibold))
+                        .foregroundStyle(theme.textTertiary.opacity(0.7))
+                }
+            }
+            .padding(9)
+            .background(
+                RoundedRectangle(cornerRadius: LXRadius.md, style: .continuous)
+                    .fill(selected ? theme.sidebarActive : (hovering ? theme.surfaceHover : theme.surface))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: LXRadius.md, style: .continuous)
+                    .strokeBorder(selected ? theme.orange.opacity(0.55) : theme.border, lineWidth: selected ? 1.2 : 0.8)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .animation(.easeOut(duration: 0.12), value: hovering)
+        .contextMenu {
+            Button("启动此实例", action: onLaunch)
+            Button("编辑 JVM 内存…", action: onMemory)
+            Divider()
+            Button("打开实例文件夹", action: onOpen)
+            Button("删除实例…", role: .destructive, action: onDelete)
+        }
+        .accessibilityLabel("\(instance.manifest.displayName)，版本 \(instance.manifest.versionID ?? "未绑定")")
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+}
+
+private struct InstanceDetailPane: View {
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.lxTheme) private var theme
+
+    let instance: Instance
     let onEditMemory: () -> Void
+    let onDelete: () -> Void
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                HStack(alignment: .firstTextBaseline) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(instance.manifest.displayName)
-                            .font(.title2.weight(.semibold))
-                        Text(instance.id)
-                            .font(.caption.monospaced())
-                            .foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    StatusPill(
-                        text: instance.manifest.versionID ?? "未指定版本",
-                        color: instance.manifest.versionID == nil ? .orange : .secondary
-                    )
-                }
+            VStack(alignment: .leading, spacing: LXSpace.md) {
+                header
+                metadata
+                memory
+                actions
+                dangerZone
+            }
+            .padding(LXSpace.lg)
+            .frame(maxWidth: 760, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .scrollIndicators(.never)
+        .background(
+            RoundedRectangle(cornerRadius: LXRadius.lg, style: .continuous)
+                .fill(theme.surface)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: LXRadius.lg, style: .continuous)
+                .strokeBorder(theme.border, lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: LXRadius.lg, style: .continuous))
+        .frame(maxHeight: .infinity)
+    }
 
-                SectionCard(title: "路径") {
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                LXOverline(text: "INSTANCE DETAIL", color: theme.orange)
+                Spacer()
+                LXBadge(
+                    text: instance.manifest.versionID ?? "未绑定版本",
+                    tone: instance.manifest.versionID == nil ? .warning : .neutral
+                )
+            }
+            Text(instance.manifest.displayName)
+                .font(LXFont.display(30))
+                .foregroundStyle(theme.text)
+                .lineLimit(2)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("游戏目录 · \(instance.gameDirectory.path)")
+                    .font(LXFont.monoSmall)
+                    .foregroundStyle(theme.textSecondary)
+                    .textSelection(.enabled)
+                    .lineLimit(2)
+                    .truncationMode(.middle)
+                Text("实例元数据 · \(instance.directory.path)")
+                    .font(LXFont.monoSmall)
+                    .foregroundStyle(theme.textTertiary)
+                    .textSelection(.enabled)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+        }
+    }
+
+    private var metadata: some View {
+        LXCard(padding: LXSpace.md) {
+            VStack(alignment: .leading, spacing: 10) {
+                LXOverline(text: "RUNTIME PROFILE")
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: LXSpace.xl) {
+                        LXKeyValue(label: "Minecraft", value: instance.manifest.versionID ?? "未绑定")
+                        LXKeyValue(label: "Loader", value: "Vanilla")
+                        LXKeyValue(label: "最近启动", value: lastLaunch)
+                    }
                     VStack(alignment: .leading, spacing: 8) {
-                        LabeledValue(title: "实例目录", value: instance.directory.path)
-                        LabeledValue(title: "游戏目录", value: instance.gameDirectory.path)
+                        LXKeyValue(label: "Minecraft", value: instance.manifest.versionID ?? "未绑定")
+                        LXKeyValue(label: "Loader", value: "Vanilla")
+                        LXKeyValue(label: "最近启动", value: lastLaunch)
                     }
-                    HStack {
-                        Button("打开实例文件夹") { model.openInstanceFolder(instance) }
-                        Spacer()
-                    }
-                    .padding(.top, 6)
-                }
-
-                SectionCard(title: "JVM 内存") {
-                    HStack {
-                        Text(instance.manifest.memoryMiB.map { "\($0) MiB（-Xmx\($0)M）" } ?? "未设置")
-                        Spacer()
-                        Button("修改") { onEditMemory() }
-                    }
-                }
-
-                SectionCard(title: "最近启动") {
-                    if let date = instance.manifest.lastLaunchedAt {
-                        Text(date.formatted(date: .abbreviated, time: .standard))
-                        Text(instance.manifest.lastIdentityMode?.rawValue ?? "")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    } else {
-                        Text("尚未启动").foregroundStyle(.secondary)
-                    }
-                }
-
-                HStack {
-                    if model.selectedInstanceID == instance.id {
-                        Button {
-                            model.launchSelectedInstance()
-                        } label: {
-                            Label("启动此实例", systemImage: "play.fill")
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(model.isGameRunning || model.activeMicrosoftAccount == nil)
-                    }
-                    Spacer()
-                    Button("删除实例…", role: .destructive) { onDelete() }
                 }
             }
-            .padding(22)
         }
+    }
+
+    private var memory: some View {
+        LXCard(padding: LXSpace.md) {
+            HStack(alignment: .center, spacing: 12) {
+                Image(systemName: "memorychip.fill")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(theme.orange)
+                    .frame(width: 28, height: 28)
+                    .background(theme.orangeSoft, in: RoundedRectangle(cornerRadius: 7))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("JVM 内存")
+                        .font(LXFont.bodyStrong)
+                        .foregroundStyle(theme.text)
+                    Text(instance.manifest.memoryMiB.map { "\($0) MiB · -Xmx\($0)M（手动）" } ?? "自动 · \(InstanceMemory.automaticMiB()) MiB · -Xmx\(InstanceMemory.automaticMiB())M")
+                        .font(LXFont.caption)
+                        .foregroundStyle(theme.textSecondary)
+                }
+                Spacer()
+                LXButton("修改", kind: .secondary, action: onEditMemory)
+            }
+        }
+    }
+
+    private var actions: some View {
+        HStack(spacing: 8) {
+            LXButton("启动此实例", systemImage: "play.fill", kind: .primary, isDisabled: model.isGameRunning || model.activeMicrosoftAccount == nil) {
+                model.selectedInstanceID = instance.id
+                model.launchSelectedInstance()
+            }
+            LXButton("打开文件夹", systemImage: "folder", kind: .secondary) {
+                model.openInstanceFolder(instance)
+            }
+            Spacer()
+        }
+    }
+
+    private var dangerZone: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("危险操作")
+                    .font(LXFont.captionStrong)
+                    .foregroundStyle(theme.textSecondary)
+                Text("删除实例会同时删除其中的世界和配置。")
+                    .font(LXFont.caption)
+                    .foregroundStyle(theme.textTertiary)
+            }
+            Spacer()
+            LXButton("删除实例…", systemImage: "trash", kind: .destructive, action: onDelete)
+        }
+        .padding(.top, LXSpace.sm)
+    }
+
+    private var lastLaunch: String {
+        guard let date = instance.manifest.lastLaunchedAt else { return "尚未启动" }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "MM-dd HH:mm"
+        return formatter.string(from: date)
     }
 }

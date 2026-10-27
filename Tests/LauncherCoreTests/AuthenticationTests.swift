@@ -179,7 +179,7 @@ final class XboxMinecraftAuthenticationTests: XCTestCase {
                 return MicrosoftHTTPResponse(statusCode: 200, data: Data(#"{"items":[{"name":"product_minecraft"}]}"#.utf8))
             case "/minecraft/profile":
                 XCTAssertEqual(request.headers["Authorization"], "Bearer mc-access")
-                return MicrosoftHTTPResponse(statusCode: 200, data: Data(#"{"id":"069a79f444e94726a5befca90e38aaf5","name":"Notch"}"#.utf8))
+                return MicrosoftHTTPResponse(statusCode: 200, data: Data(#"{"id":"069a79f444e94726a5befca90e38aaf5","name":"Notch","skins":[{"state":"ACTIVE","url":"http://textures.minecraft.net/texture/skin","variant":"SLIM"}],"capes":[{"state":"ACTIVE","url":"http://textures.minecraft.net/texture/cape"}]}"#.utf8))
             default:
                 return MicrosoftHTTPResponse(statusCode: 404, data: Data())
             }
@@ -205,6 +205,9 @@ final class XboxMinecraftAuthenticationTests: XCTestCase {
         XCTAssertEqual(result.profile.id.uuidString.lowercased(), "069a79f4-44e9-4726-a5be-fca90e38aaf5")
         XCTAssertTrue(result.ownsGame)
         XCTAssertEqual(result.xuid, "123456789")
+        XCTAssertEqual(result.appearance?.skinModel, .slim)
+        XCTAssertEqual(result.appearance?.skinTextureURL?.absoluteString, "https://textures.minecraft.net/texture/skin")
+        XCTAssertEqual(result.appearance?.capeTextureURL?.absoluteString, "https://textures.minecraft.net/texture/cape")
     }
 
     func testXboxRestrictionMapsXErrToActionableError() async {
@@ -296,7 +299,12 @@ final class MicrosoftAuthenticationServiceTests: XCTestCase {
             accessToken: "mc-access-token",
             expiresAt: Date().addingTimeInterval(3600),
             xuid: "123456789",
-            ownsGame: true
+            ownsGame: true,
+            appearance: PlayerAppearance(
+                skinTextureURL: URL(string: "https://textures.minecraft.net/texture/service-skin"),
+                capeTextureURL: URL(string: "https://textures.minecraft.net/texture/service-cape"),
+                skinModel: .classic
+            )
         )
     }
 
@@ -343,6 +351,9 @@ final class MicrosoftAuthenticationServiceTests: XCTestCase {
         XCTAssertFalse(metadata.contains("access_token"))
         XCTAssertFalse(metadata.contains("token\""))
         XCTAssertTrue(metadata.contains("notch"))
+        XCTAssertTrue(metadata.contains("textures.minecraft.net"))
+        XCTAssertTrue(metadata.contains("service-skin"))
+        XCTAssertTrue(metadata.contains("service-cape"))
     }
 
     func testSessionUsesCacheThenRefreshesWithRefreshToken() async throws {

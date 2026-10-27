@@ -92,7 +92,7 @@ LINGXI_GAME_ROOT="$PWD/.dev-sandbox/mc" \
 | 首页 + 正版账户 + Java 17 自动选择 | `gui-home-microsoft.png` | 显示 `Ling_Xi_Fox · Microsoft`、Java 17.0.20.1 arm64 |
 | 账户页 | `gui-accounts-microsoft.png` | UUID、`所有权已验证`、最近验证时间；本地 DevPlayer 明确标注未验证且 GUI 不提供启动 |
 | GUI 内发起 Microsoft 登录 | 实际操作 | 浏览器完成 OAuth，状态依次经过 Xbox Live/XSTS/Minecraft/所有权，账户更新成功 |
-| 实例页 | `gui-instances-microsoft.png` | 实例详情、路径、内存入口、启动/删除 |
+| 实例页 | `gui-instances-microsoft.png` | 实例详情、单一 `.minecraft` 隔离路径、自动/手动内存入口、启动/删除 |
 | 下载页 | `gui-downloads-verify.png` | 官方 1.20.1 安装（缓存命中）后 **3636 个文件完整性验证通过** |
 | GUI 启动游戏 | `gui-logs-live-microsoft.png` | 直接从 GUI 启动，实时输出 `Setting user: Ling_Xi_Fox`；进程树为 GUI → java，无 `lingxi` 子进程 |
 | 正常退出 | `gui-logs-exit-0.png` | `Game exited with code 0 (exited)`，侧栏恢复“未运行” |
@@ -113,7 +113,7 @@ swift test
 Executed 231 tests, 0 failures
 ```
 
-覆盖：配置/内嵌注册、PKCE RFC 7636 向量、OAuth URL/表单、state 不匹配拒绝、真实 loopback 回调、Xbox/XSTS/Minecraft/所有权/403/404、refresh 过期、Keychain round-trip、账户元数据无 token、LaunchService 失败事件、实例内存/删除、M2.5 回归。
+覆盖：配置/内嵌注册、PKCE RFC 7636 向量、OAuth URL/表单、state 不匹配拒绝、真实 loopback 回调、Xbox/XSTS/Minecraft/所有权/403/404、refresh 过期、Keychain round-trip、账户元数据无 token、皮肤/披风 Profile 解析、LaunchService 失败事件、单一 `.minecraft` 迁移、自动/手动内存、M2.5 回归。
 
 ## 7. 已知限制（不得当作已验收）
 

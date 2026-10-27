@@ -1,18 +1,20 @@
 import Foundation
 
-/// A launcher instance: one isolated game directory plus the metadata describing it.
+/// A launcher instance: metadata plus one forced-isolation game directory.
+///
+/// The single `.minecraft` root lives at `<dataRoot>/.minecraft`; the instance's
+/// `gameDirectory` is `<dataRoot>/.minecraft/versions/<instance-id>`. It is deliberately not
+/// derived from `directory` (the metadata directory), so no second `.minecraft` can appear
+/// under `instances/`.
 public struct Instance: Sendable, Equatable, Identifiable {
     public let directory: URL
+    public let gameDirectory: URL
     public var manifest: InstanceManifest
 
-    public init(directory: URL, manifest: InstanceManifest) {
+    public init(directory: URL, gameDirectory: URL, manifest: InstanceManifest) {
         self.directory = directory
+        self.gameDirectory = gameDirectory
         self.manifest = manifest
-    }
-
-    /// `<instance>/.minecraft` — the only working directory the game may write saves into.
-    public var gameDirectory: URL {
-        directory.appendingPathComponent(".minecraft", isDirectory: true)
     }
 
     public var id: String { manifest.id }
@@ -29,7 +31,8 @@ public struct InstanceManifest: Codable, Sendable, Equatable {
     public var lastLaunchedAt: Date?
     /// Which identity mode was last used, for display only.
     public var lastIdentityMode: IdentityMode?
-    /// Per-instance JVM heap limit (`-Xmx<N>M`). Nil means no launcher-supplied limit.
+    /// Manual JVM heap limit (`-Xmx<N>M`). Nil means automatic allocation based on physical
+    /// memory; automatic never means "no -Xmx" at launch. See `InstanceMemory`.
     public var memoryMiB: Int?
 
     public init(
@@ -74,20 +77,9 @@ public struct InstanceRepository: Sendable {
         let trimmed = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
         let manifest = InstanceManifest(id: component, displayName: trimmed.isEmpty ? component : trimmed, versionID: versionID)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        try FileManager.default.createDirectory(
-            at: directory.appendingPathComponent(".minecraft", isDirectory: true),
-            withIntermediateDirectories: true
-        )
-        try FileManager.default.createDirectory(
-            at: directory.appendingPathComponent(".minecraft/logs", isDirectory: true),
-            withIntermediateDirectories: true
-        )
-        try FileManager.default.createDirectory(
-            at: directory.appendingPathComponent(".minecraft/crash-reports", isDirectory: true),
-            withIntermediateDirectories: true
-        )
+        let gameDirectory = try prepareGameDirectory(id: component, metadataDirectory: directory, allowMigration: false)
         try save(manifest, in: directory)
-        return Instance(directory: directory, manifest: manifest)
+        return Instance(directory: directory, gameDirectory: gameDirectory, manifest: manifest)
     }
 
     @discardableResult
@@ -100,20 +92,9 @@ public struct InstanceRepository: Sendable {
         let directory = try layout.instanceDirectory(id)
         let manifest = InstanceManifest(id: id, displayName: trimmed, versionID: versionID)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        try FileManager.default.createDirectory(
-            at: directory.appendingPathComponent(".minecraft", isDirectory: true),
-            withIntermediateDirectories: true
-        )
-        try FileManager.default.createDirectory(
-            at: directory.appendingPathComponent(".minecraft/logs", isDirectory: true),
-            withIntermediateDirectories: true
-        )
-        try FileManager.default.createDirectory(
-            at: directory.appendingPathComponent(".minecraft/crash-reports", isDirectory: true),
-            withIntermediateDirectories: true
-        )
+        let gameDirectory = try prepareGameDirectory(id: id, metadataDirectory: directory, allowMigration: false)
         try save(manifest, in: directory)
-        return Instance(directory: directory, manifest: manifest)
+        return Instance(directory: directory, gameDirectory: gameDirectory, manifest: manifest)
     }
 
     public func load(id: String) throws -> Instance {
@@ -139,7 +120,8 @@ public struct InstanceRepository: Sendable {
             guard manifest.id == id else {
                 throw LauncherError(.invalidMetadata, "instance.json id '\(manifest.id)' does not match directory '\(id)'")
             }
-            return Instance(directory: directory, manifest: manifest)
+            let gameDirectory = try prepareGameDirectory(id: id, metadataDirectory: directory, allowMigration: true)
+            return Instance(directory: directory, gameDirectory: gameDirectory, manifest: manifest)
         } catch let error as LauncherError {
             throw error
         } catch {
@@ -200,21 +182,62 @@ public struct InstanceRepository: Sendable {
         return instance
     }
 
-    /// Deletes an instance directory. Callers must confirm with the user first; this removes
-    /// worlds under the instance's `.minecraft` and is intentionally not exposed by the CLI.
+    /// Deletes the metadata directory and the forced-isolation game directory. Callers must
+    /// confirm with the user first; this removes worlds under the single `.minecraft` tree and
+    /// is intentionally not exposed by the CLI.
     public func delete(id: String) throws {
-        let directory = try layout.instanceDirectory(id)
-        guard FileManager.default.fileExists(atPath: directory.path) else {
-            throw LauncherError(.missingDependency, "Instance '\(id)' does not exist")
-        }
-        guard PathSafety.isContainedResolvingSymlinks(directory, inBase: layout.instancesDirectory) else {
+        let instance = try load(id: id)
+        guard PathSafety.isContainedResolvingSymlinks(instance.directory, inBase: layout.instancesDirectory) else {
             throw LauncherError(.pathEscapesRoot, "Instance '\(id)' resolves outside the instances directory")
         }
+        guard PathSafety.isContainedResolvingSymlinks(instance.gameDirectory, inBase: layout.minecraftDirectory) else {
+            throw LauncherError(.pathEscapesRoot, "Instance game directory '\(id)' resolves outside .minecraft")
+        }
         do {
-            try FileManager.default.removeItem(at: directory)
+            if FileManager.default.fileExists(atPath: instance.gameDirectory.path) {
+                try FileManager.default.removeItem(at: instance.gameDirectory)
+            }
+            try FileManager.default.removeItem(at: instance.directory)
         } catch {
             throw LauncherError(.ioFailure, "Cannot delete instance '\(id)': \(error.localizedDescription)")
         }
+    }
+
+    /// Creates the one shared `.minecraft` isolation tree for an instance. Legacy per-instance
+    /// `.minecraft` folders are migrated once (move, never copy-and-delete) so existing worlds
+    /// are not silently lost.
+    private func prepareGameDirectory(id: String, metadataDirectory: URL, allowMigration: Bool) throws -> URL {
+        let fm = FileManager.default
+        let target = try layout.instanceGameDirectory(id)
+        let legacy = metadataDirectory.appendingPathComponent(".minecraft", isDirectory: true)
+
+        if allowMigration, fm.fileExists(atPath: legacy.path) {
+            guard PathSafety.isContainedResolvingSymlinks(legacy, inBase: layout.instancesDirectory) else {
+                throw LauncherError(.pathEscapesRoot, "Legacy instance .minecraft resolves outside the instances directory")
+            }
+            if fm.fileExists(atPath: target.path) {
+                throw LauncherError(
+                    .ioFailure,
+                    "Both legacy and isolated game directories exist for instance '\(id)'; refusing to merge automatically",
+                    suggestion: "Move or remove one of: \(legacy.path), \(target.path)"
+                )
+            }
+            try fm.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+            do {
+                try fm.moveItem(at: legacy, to: target)
+            } catch {
+                throw LauncherError(.ioFailure, "Cannot migrate legacy .minecraft for instance '\(id)': \(error.localizedDescription)")
+            }
+        }
+
+        do {
+            try fm.createDirectory(at: target, withIntermediateDirectories: true)
+            try fm.createDirectory(at: target.appendingPathComponent("logs"), withIntermediateDirectories: true)
+            try fm.createDirectory(at: target.appendingPathComponent("crash-reports"), withIntermediateDirectories: true)
+        } catch {
+            throw LauncherError(.ioFailure, "Cannot prepare isolated game directory \(target.path): \(error.localizedDescription)")
+        }
+        return target
     }
 
     /// Records a successful launch for display purposes.
