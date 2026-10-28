@@ -1,0 +1,29 @@
+Real Modrinth modpack: Fabulously Optimized 5.4.1
+Project: 1KVo5zza / version 2ZbcYfCj
+Archive size: 58,960 bytes
+Minecraft: 1.20.1
+Fabric Loader: 0.14.23
+Manifest files: 51 external + 27 overrides
+External download size: 27.9 MB
+Java: system Microsoft 17.0.20.1 arm64 (selected by GUI/CLI)
+
+CLI install:
+  lingxi mrpack install --file Fabulously.Optimized-5.4.1.mrpack \
+    --name "FO 5.4.1 Real" --java <microsoft-17> \
+    --data-root .dev-sandbox/data --root .dev-sandbox/mc --source official
+
+Result:
+  instance: fo-541-real-031686bb
+  installed files: 78 (51 external + 27 overrides; client-only)
+  game directory: .dev-sandbox/data/.minecraft/versions/fo-541-real-031686bb
+  launch: lingxi launch --instance fo-541-real-031686bb --identity local:PackTester
+  game log: Loading 149 mods; Setting user: PackTester
+  reached Minecraft 1.20.1 / Fabric (Modded) main menu
+
+GUI import:
+  mrpack parsed: Fabulously Optimized / 5.4.1 / 1.20.1 / Fabric 0.14.23
+  mrpack install created instance: fabulously-optimized-b3d48319
+  committed files: 78
+  screenshots: 01-import-review.jpg, 02-import-complete.jpg, 03-pack-instances.jpg
+
+Cleanup after verification removed .dev-sandbox, downloaded pack/mod/game caches and test accounts.

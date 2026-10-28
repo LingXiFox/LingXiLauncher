@@ -258,7 +258,11 @@ public struct ModRepository: Sendable {
         do {
             for file in staged {
                 let name = try Self.validatedFileName(file.record.fileName)
-                let target = mods.appendingPathComponent(name)
+                let targetDirectory = file.record.enabled ? mods : disabled
+                let otherDirectory = file.record.enabled ? disabled : mods
+                try fm.createDirectory(at: targetDirectory, withIntermediateDirectories: true)
+                let target = targetDirectory.appendingPathComponent(name)
+                let otherTarget = otherDirectory.appendingPathComponent(name)
                 let old = records.first(where: {
                     $0.fileName == name || ($0.projectID != nil && $0.projectID == file.record.projectID)
                 })
@@ -266,29 +270,36 @@ public struct ModRepository: Sendable {
                     && (replacementNames.contains(name)
                         || (file.record.projectID != nil && replacementIDs.contains(file.record.projectID!)))
                 if fm.fileExists(atPath: target.path) && !shouldReplace {
-                    throw LauncherError(.usageError, "A different mod already uses the file name '\\(name)'")
+                    throw LauncherError(.usageError, "A mod already uses the file name '\(name)' in the target state")
                 }
-                if fm.fileExists(atPath: disabled.appendingPathComponent(name).path) && !shouldReplace {
-                    throw LauncherError(.usageError, "A disabled mod already uses the file name '\\(name)'")
+                if fm.fileExists(atPath: otherTarget.path) {
+                    // A tracked file in the other state was moved above. Anything left is
+                    // untracked and must not be shadowed or overwritten by an update.
+                    throw LauncherError(.usageError, "A mod already uses the file name '\(name)' in the other state")
                 }
 
                 if let old {
-                    if old.fileName != name || !old.enabled {
-                        let oldURL = old.enabled
-                            ? mods.appendingPathComponent(old.fileName)
-                            : disabled.appendingPathComponent(old.fileName)
+                    let oldURL = old.enabled
+                        ? mods.appendingPathComponent(old.fileName)
+                        : disabled.appendingPathComponent(old.fileName)
+                    if old.fileName != name || old.enabled != file.record.enabled {
                         if fm.fileExists(atPath: oldURL.path) {
-                            let backup = instance.directory.appendingPathComponent(".mods-backup-\\(UUID().uuidString)")
+                            let backup = instance.directory.appendingPathComponent(".mods-backup-\(UUID().uuidString)")
                             try fm.moveItem(at: oldURL, to: backup)
                             backups.append((oldURL, backup))
                         }
                         records.removeAll { $0.fileName == old.fileName }
                     } else if shouldReplace {
-                        let backup = instance.directory.appendingPathComponent(".mods-backup-\\(UUID().uuidString)")
+                        let backup = instance.directory.appendingPathComponent(".mods-backup-\(UUID().uuidString)")
                         try fm.moveItem(at: target, to: backup)
                         backups.append((target, backup))
                         records.removeAll { $0.fileName == old.fileName }
                     }
+                }
+                if fm.fileExists(atPath: target.path) {
+                    // The old same-state file should have been moved above; a remaining file is
+                    // an untracked conflict and must never be overwritten.
+                    throw LauncherError(.usageError, "A file already exists at \(target.path)")
                 }
 
                 try fm.moveItem(at: file.temporaryURL, to: target)

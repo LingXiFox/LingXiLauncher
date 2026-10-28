@@ -1,4 +1,4 @@
-# 开发说明（M1 + M2 + M2.5 + M3 + M5-Alpha + M6.1 + M6.1.1 + M6.2）
+# 开发说明（M1 + M2 + M2.5 + M3 + M5-Alpha + M6.1 + M6.1.1 + M6.2 + M6.2.1 + M6.3）
 
 本文记录实现约定、契约边界和验收方式。产品边界与安全披露见根目录 [README](../README.md)。
 
@@ -53,6 +53,7 @@ Sources/LauncherCore/
 │   ├── FabricInstaller.swift     # Fabric 官方 meta/profile/Maven，stage 安全提交
 │   ├── OneStopInstaller.swift    # GUI/CLI 统一的 Vanilla/Fabric 安装与目标策略
 │   ├── Modrinth/                 # M6.2 官方 API、依赖解析、mods 仓库、更新
+│   ├── Modpack/                  # M6.3 .mrpack 解析、安全 staging、事务安装
 │   └── InstallationVerifier.swift# 全量哈希校验
 ├── Apps/LingXiMac/               # M5 SwiftUI GUI（直接依赖 LauncherCore）
 │   ├── Info.plist
@@ -157,7 +158,7 @@ manifest（缓存）→ 版本 JSON（校验 manifest SHA-1）→ 依赖解析
 - **磁盘预检**：按待下载 size 之和 + 32MB 余量与目标卷可用空间比较，不足直接 `DISK_FULL`。
 - **缓存命中**：`Downloader` 对队列中的每个文件做 size（有 SHA-1 时也做哈希）检查；`DependencyResolver` 负责找出缺失/大小不符的文件。全量哈希由 `verify` 完成，避免每次 install 都扫描 700MB。
 - **安全解压**：`SafeZipExtractor` 自己解析 ZIP（stored/deflate，Compression 框架），拒绝 `../`、绝对路径、反斜杠、控制字符、符号链接条目、超限条目/总量；ZIP64 明确报不支持。归档本身在解压前已通过 SHA-1 校验。
-- **Java**：默认不自动安装；`JavaManager` 按版本/Loader 元数据选择兼容运行时。托管安装优先使用 Mojang 官方 `javaVersion.component` 的 macOS arm64 runtime（逐文件 SHA-1、固定的 runtime manifest/版本），不可用时才回退 Adoptium Temurin（SHA-256）。安装和启动会把来源/component/版本/artifact SHA 写入实例 `javaRuntime`；不修改系统 Java；手动 `--java` 始终优先。
+- **Java**：默认不自动安装；`JavaManager` 按版本/Loader 元数据选择兼容运行时；整合包导入会展示 Java 要求并自动匹配，缺少时可按确认安装托管 Java。托管安装优先使用 Mojang 官方 `javaVersion.component` 的 macOS arm64 runtime（逐文件 SHA-1、固定的 runtime manifest/版本），不可用时才回退 Adoptium Temurin（SHA-256）。安装和启动会把来源/component/版本/artifact SHA 写入实例 `javaRuntime`；不修改系统 Java；手动 `--java` 始终优先。
 - **实例**：`--instance <id>` 是稳定 id（路径安全校验）。GUI 安装向导默认创建新实例；更新已有实例必须显式选择、确认并备份 `instance.json`。显示名不参与路径拼接。
 - **Loader**：Fabric 子版本通过 `inheritsFrom` 合并 parent；client JAR/assets/natives 复用 parent，loader 库从 Fabric 官方 Maven 获取。
 
@@ -168,7 +169,7 @@ swift build
 swift test
 ```
 
-当前总计 **257 个测试**，全量运行 0 失败：
+当前总计 **270 个测试**，全量运行 0 失败：
 
 | 测试文件（用例数） | 覆盖 |
 |---|---|
@@ -190,7 +191,8 @@ swift test
 | `AuthenticationTests` (23) | 内嵌配置、PKCE RFC 向量、OAuth、state 拒绝、真实 loopback、Xbox/XSTS/Minecraft/所有权、Keychain |
 | `M6InstallTests` (10) | Fabric 兼容 Loader 端点、损坏目标 fail-closed、唯一备份、显式更新/存档保留、失败不创建目标、Java 无兼容运行时 |
 | `JavaManagerSafetyTests` (5) | 托管 JDK 最终 probe 失败回滚、成功替换清理 backup、Mojang runtime 完整安装/记录、Java 元数据兼容判断 |
-| `M6ModrinthTests` (5) | 真实 Modrinth 搜索/项目/版本解码、facets/User-Agent、本地 mods 生命周期、必需/固定版本依赖、不兼容依赖、更新哈希失败保留旧文件 |
+| `M6ModrinthTests` (10) | 真实 Modrinth 搜索/项目/版本解码、facets/User-Agent、本地 mods 生命周期、必需/固定版本依赖、启用/禁用/版本约束下的不兼容依赖、更新状态/渠道/降级、更新哈希失败保留旧文件 |
+| `MrpackTests` (8) | format 1 解析/客户端 overrides、ZIP 路径与哈希拒绝、真实合成安装、损坏/网络失败、重试、取消后无实例 |
 | `LaunchServiceTests` (2) | 启动失败事件、事件流终止与重复调用 |
 | `PathSafetyTests` (4) / `GameDataLayoutTests` (3) / `PlatformContextTests` (3) | 路径穿越、布局推导、平台上下文 |
 
@@ -217,10 +219,12 @@ swift test
 | M6.1 | 版本继承、Fabric、JavaManager、一站式安装向导 | ✅ 真实 Fabric 安装/启动；无系统 Java 的托管 Java 流程（见 VERIFICATION-M6.1.md） |
 | M6.1.1 | 安全 JDK 替换、向导 Java 重验、Fabric 兼容矩阵 | ✅ 257 tests（见 VERIFICATION-M6.2.md） |
 | M6.2 | Modrinth Fabric 搜索/安装/依赖/本地管理/更新 + 双视图 GUI | ✅ 真实 1.20.1 Fabric API/Sodium/Lithium 安装并进入主菜单（见 VERIFICATION-M6.2.md） |
+| M6.2.1 | 依赖冲突/禁用更新/更新渠道/Debug 安全 | ✅ 270 tests，Debug token/Release 编译验证 |
+| M6.3 | Modrinth `.mrpack` 解析/安全事务安装/GUI/CLI | ✅ 真实 Fabulously Optimized 5.4.1 安装并进入 149 mods 主菜单（见 VERIFICATION-M6.3.md） |
 
 ## 9. 剩余工作
 
-- **M6.3+**：Quilt/NeoForge/Forge 加载器、整合包、模组冲突可视化、Fabric 元数据镜像策略。
+- **M6.4+**：Quilt/NeoForge/Forge 加载器、CurseForge、模组冲突可视化、Fabric 元数据镜像策略。
 - **M5-B**：下载任务历史、更多诊断导出项。
 - 外观：皮肤/披风纹理缓存、Cape 动画与更多皮肤模型细节。
 - 真实大文件 GUI 下载中途取消、Intel Mac 托管 Java、Developer ID 签名/公证。

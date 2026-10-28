@@ -91,6 +91,8 @@ enum CLI {
             return try await runInstall(rest)
         case "mod":
             return try await runModCommand(rest)
+        case "mrpack":
+            return try await runMrpackCommand(rest)
         case "verify":
             return try await runVerify(rest)
         default:
@@ -895,6 +897,13 @@ enum CLI {
           mod updates --instance <id> [--json]
               Modrinth Fabric mod browsing/install with required-dependency resolution,
               SHA-1/SHA-512 verification and atomic local mod updates.
+
+          mrpack inspect --file <pack.mrpack> [--json]
+          mrpack install --file <pack.mrpack> [--name <name>] [--java <path>]
+                  [--root <path>] [--data-root <path>] [--source auto|official] [--json]
+              Validate a Modrinth .mrpack, download/verify its files through the
+              persistent cache, install Minecraft/Fabric and commit the pack into a
+              fresh isolated instance. Forge/NeoForge/Quilt are rejected explicitly.
 
           verify --instance <instance-id> [--json]
               Re-check every installed file against the metadata SHA-1/size.

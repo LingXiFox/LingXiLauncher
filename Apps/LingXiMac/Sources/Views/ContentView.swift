@@ -87,6 +87,11 @@ struct ContentView: View {
             model.openMods(instance: instance)
             return ["instance": id, "modsOpen": model.showModsForInstance?.id ?? ""]
         })
+        debugTokens.append(center.register("mrpack.open") { params in
+            let url = params["path"].flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0) }
+            model.openMrpackImport(url: url)
+            return ["mrpackOpen": model.showMrpackImport, "path": url?.path ?? ""]
+        })
     }
 
     private func unregisterDebugActions() {

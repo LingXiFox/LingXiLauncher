@@ -158,7 +158,7 @@ final class M6ModrinthTests: XCTestCase {
         XCTAssertEqual(try manager.installed(instanceID: instance.id).filter { $0.projectID == "dep" }.count, 1)
     }
 
-    func testIncompatibleDependencyIsRejectedBeforeDownload() async throws {
+    func testIncompatibleDependencyDoesNotBlockWhenProjectIsAbsent() async throws {
         let instance = try makeFabricInstance()
         let transport = ModrinthRoutingTransport()
         let fixtures = SyntheticModAPI()
@@ -169,13 +169,92 @@ final class M6ModrinthTests: XCTestCase {
             transport: transport
         )
         let manager = ModManager(layout: layout, transport: transport, client: client)
+        let report = try await manager.install(
+            ModInstallRequest(instanceID: instance.id, projectIDOrSlug: "testmod")
+        ) { _ in }
+        XCTAssertEqual(report.installed.map(\.projectID), ["testmod"])
+        XCTAssertEqual(try manager.installed(instanceID: instance.id).map(\.projectID), ["testmod"])
+    }
+
+    func testIncompatibleDependencyRejectsOnlyEnabledInstalledProject() async throws {
+        let instance = try makeFabricInstance()
+        let transport = ModrinthRoutingTransport()
+        let fixtures = SyntheticModAPI()
+        await fixtures.populate(transport)
+        let client = ModrinthClient(
+            baseURL: URL(string: "https://api.modrinth.test/v2")!,
+            transport: transport
+        )
+        let manager = ModManager(layout: layout, transport: transport, client: client)
+        _ = try await manager.install(
+            ModInstallRequest(instanceID: instance.id, projectIDOrSlug: "dep")
+        ) { _ in }
+        await fixtures.setIncompatible(transport)
         do {
-            _ = try await manager.install(ModInstallRequest(instanceID: instance.id, projectIDOrSlug: "testmod")) { _ in }
-            XCTFail("Expected incompatible dependency")
+            _ = try await manager.install(
+                ModInstallRequest(instanceID: instance.id, projectIDOrSlug: "testmod")
+            ) { _ in }
+            XCTFail("Expected enabled incompatible project to be rejected")
         } catch {
             XCTAssertEqual((error as? LauncherError)?.code, .usageError)
         }
-        XCTAssertTrue(try manager.installed(instanceID: instance.id).isEmpty)
+        XCTAssertEqual(try manager.installed(instanceID: instance.id).filter { $0.projectID == "testmod" }.count, 0)
+    }
+
+    func testIncompatibleDependencyHonorsVersionConstraint() async throws {
+        let instance = try makeFabricInstance()
+        let transport = ModrinthRoutingTransport()
+        let fixtures = SyntheticModAPI()
+        await fixtures.populate(transport)
+        let client = ModrinthClient(
+            baseURL: URL(string: "https://api.modrinth.test/v2")!,
+            transport: transport
+        )
+        let manager = ModManager(layout: layout, transport: transport, client: client)
+        _ = try await manager.install(
+            ModInstallRequest(instanceID: instance.id, projectIDOrSlug: "dep")
+        ) { _ in }
+
+        // A different pinned version is not a conflict.
+        await fixtures.setIncompatibleConstraint(transport, versionID: "dep-v2")
+        let report = try await manager.install(
+            ModInstallRequest(instanceID: instance.id, projectIDOrSlug: "testmod")
+        ) { _ in }
+        XCTAssertEqual(report.primary.projectID, "testmod")
+        try manager.remove(fileName: "testmod-v1.jar", instanceID: instance.id)
+
+        // The installed version matches the constraint, so the install must be rejected.
+        await fixtures.setIncompatibleConstraint(transport, versionID: "dep-v1")
+        do {
+            _ = try await manager.install(
+                ModInstallRequest(instanceID: instance.id, projectIDOrSlug: "testmod")
+            ) { _ in }
+            XCTFail("Expected pinned incompatible version to be rejected")
+        } catch {
+            XCTAssertEqual((error as? LauncherError)?.code, .usageError)
+        }
+    }
+
+    func testIncompatibleDependencyIsIgnoredWhenConflictIsDisabled() async throws {
+        let instance = try makeFabricInstance()
+        let transport = ModrinthRoutingTransport()
+        let fixtures = SyntheticModAPI()
+        await fixtures.populate(transport)
+        let client = ModrinthClient(
+            baseURL: URL(string: "https://api.modrinth.test/v2")!,
+            transport: transport
+        )
+        let manager = ModManager(layout: layout, transport: transport, client: client)
+        _ = try await manager.install(
+            ModInstallRequest(instanceID: instance.id, projectIDOrSlug: "dep")
+        ) { _ in }
+        _ = try manager.setEnabled(false, fileName: "dep-v1.jar", instanceID: instance.id)
+        await fixtures.setIncompatible(transport)
+        let report = try await manager.install(
+            ModInstallRequest(instanceID: instance.id, projectIDOrSlug: "testmod")
+        ) { _ in }
+        XCTAssertEqual(report.primary.projectID, "testmod")
+        XCTAssertFalse(try manager.installed(instanceID: instance.id).first { $0.projectID == "dep" }?.enabled ?? true)
     }
 
     func testFailedUpdateLeavesOldJarAndMetadata() async throws {
@@ -203,6 +282,74 @@ final class M6ModrinthTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: instance.gameDirectory.appendingPathComponent("mods/testmod-v1.jar")), old)
         let mods = try manager.installed(instanceID: instance.id)
         XCTAssertEqual(mods.first { $0.projectID == "testmod" }?.fileName, "testmod-v1.jar")
+    }
+
+    func testUpdatingDisabledModPreservesDisabledState() async throws {
+        let instance = try makeFabricInstance()
+        let transport = ModrinthRoutingTransport()
+        let fixtures = SyntheticModAPI()
+        await fixtures.populate(transport)
+        let client = ModrinthClient(
+            baseURL: URL(string: "https://api.modrinth.test/v2")!,
+            transport: transport
+        )
+        let manager = ModManager(layout: layout, transport: transport, client: client)
+        _ = try await manager.install(
+            ModInstallRequest(instanceID: instance.id, projectIDOrSlug: "testmod")
+        ) { _ in }
+        _ = try manager.setEnabled(false, fileName: "testmod-v1.jar", instanceID: instance.id)
+        await fixtures.setValidUpdate(transport)
+        let report = try await manager.install(
+            ModInstallRequest(
+                instanceID: instance.id,
+                projectIDOrSlug: "testmod",
+                versionID: "testmod-v2",
+                allowReplace: true
+            )
+        ) { _ in }
+        XCTAssertFalse(report.primary.enabled)
+        let all = try manager.installed(instanceID: instance.id)
+        let updated = try XCTUnwrap(all.first { $0.projectID == "testmod" })
+        XCTAssertEqual(updated.versionID, "testmod-v2")
+        XCTAssertFalse(updated.enabled)
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: instance.directory.appendingPathComponent("mods-disabled/testmod-v2.jar").path
+        ))
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: instance.gameDirectory.appendingPathComponent("mods/testmod-v2.jar").path
+        ))
+    }
+
+    func testUpdateDetectionUsesChannelAndVersionNotDate() async throws {
+        let instance = try makeFabricInstance()
+        let transport = ModrinthRoutingTransport()
+        let fixtures = SyntheticModAPI()
+        await fixtures.populate(transport)
+        let client = ModrinthClient(
+            baseURL: URL(string: "https://api.modrinth.test/v2")!,
+            transport: transport
+        )
+        let manager = ModManager(layout: layout, transport: transport, client: client)
+        _ = try await manager.install(
+            ModInstallRequest(instanceID: instance.id, projectIDOrSlug: "testmod")
+        ) { _ in }
+
+        // A newer date does not make a beta eligible for a release installation.
+        await fixtures.setVersions(transport, versions: [fixtures.currentRelease, fixtures.newerBeta])
+        let betaUpdates = try await manager.updates(instanceID: instance.id)
+        XCTAssertTrue(betaUpdates.isEmpty)
+
+        // A newer release is eligible.
+        await fixtures.setVersions(transport, versions: [fixtures.currentRelease, fixtures.newerRelease])
+        let updates = try await manager.updates(instanceID: instance.id)
+        XCTAssertEqual(updates.count, 1)
+        XCTAssertEqual(updates.first?.latestVersionID, "testmod-v2")
+        XCTAssertEqual(updates.first?.latestVersionType, .release)
+
+        // A release published later but carrying an older version number must not downgrade.
+        await fixtures.setVersions(transport, versions: [fixtures.currentRelease, fixtures.olderRelease])
+        let olderUpdates = try await manager.updates(instanceID: instance.id)
+        XCTAssertTrue(olderUpdates.isEmpty)
     }
 
     // MARK: - Fixtures
@@ -250,6 +397,32 @@ private struct SyntheticModAPI {
         await transport.setAPI(path: "/v2/project/testmod/version", data: json([incompatibleVersion]))
     }
 
+    func setIncompatibleConstraint(_ transport: ModrinthRoutingTransport, versionID: String?) async {
+        var value = version
+        value["dependencies"] = [[
+            "project_id": "dep",
+            "version_id": versionID.map { $0 as Any } ?? NSNull(),
+            "file_name": NSNull(), "dependency_type": "incompatible",
+        ]]
+        await transport.setAPI(path: "/v2/project/testmod/version", data: json([value]))
+    }
+
+    func setValidUpdate(_ transport: ModrinthRoutingTransport) async {
+        await transport.setAPI(path: "/v2/project/testmod/version", data: json([goodUpdateVersion]))
+        await transport.setAPI(path: "/v2/version/testmod-v2", data: json(goodUpdateVersion))
+        await transport.setFile(path: "/testmod-v2.jar", data: testV2)
+    }
+
+    func setVersions(_ transport: ModrinthRoutingTransport, versions: [[String: Any]]) async {
+        await transport.setAPI(path: "/v2/project/testmod/version", data: json(versions))
+    }
+
+    var currentRelease: [String: Any] { version }
+    var newerBeta: [String: Any] { version(id: "testmod-beta", number: "2.0-beta", date: "2026-03-01T00:00:00Z", type: "beta", fileData: testV1, fileName: "testmod-beta.jar") }
+    var newerRelease: [String: Any] { version(id: "testmod-v2", number: "2.0", date: "2026-02-01T00:00:00Z", type: "release", fileData: testV2, fileName: "testmod-v2.jar") }
+    var olderRelease: [String: Any] { version(id: "testmod-old", number: "0.9", date: "2026-04-01T00:00:00Z", type: "release", fileData: testV1, fileName: "testmod-old.jar") }
+    var goodUpdateVersion: [String: Any] { newerRelease }
+
     func setBadUpdate(_ transport: ModrinthRoutingTransport) async {
         await transport.setAPI(path: "/v2/project/testmod/version", data: json([badUpdateVersion]))
         await transport.setAPI(path: "/v2/version/testmod-v2", data: json(badUpdateVersion))
@@ -278,6 +451,22 @@ private struct SyntheticModAPI {
             "dependencies": [], "game_versions": ["1.20.1"], "version_type": "release", "loaders": ["fabric"],
             "date_published": "2026-01-01T00:00:00Z", "downloads": 1, "status": "listed",
             "files": [file(name: "dep-v1.jar", data: depV1)],
+        ]
+    }
+
+    private func version(
+        id: String,
+        number: String,
+        date: String,
+        type: String,
+        fileData: Data,
+        fileName: String
+    ) -> [String: Any] {
+        [
+            "id": id, "project_id": "testmod", "name": number, "version_number": number,
+            "dependencies": [], "game_versions": ["1.20.1"], "version_type": type, "loaders": ["fabric"],
+            "date_published": date, "downloads": 1, "status": "listed",
+            "files": [file(name: fileName, data: fileData)],
         ]
     }
 

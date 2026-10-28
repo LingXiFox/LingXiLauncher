@@ -1,6 +1,8 @@
 # GUI debug automation（仅调试）
 
-默认完全关闭。只有显式设置 `LINGXI_DEBUG_AUTOMATION=1` 或传入 `--debug-automation` 才会启动本机回环 TCP 控制接口。
+默认完全关闭。只有 **Debug 构建**并显式设置 `LINGXI_DEBUG_AUTOMATION=1` 或传入 `--debug-automation` 才会启动本机回环 TCP 控制接口。Release 构建在编译期完全移除该实现，不包含监听器或 action registry。
+
+每次启动生成一个随机会话 token，打印在 stderr；每个请求必须携带该 token。也可以通过 `LINGXI_DEBUG_AUTOMATION_TOKEN` 显式提供临时 token（仅调试环境使用，不要写入仓库或日志）。
 
 ## 启动
 
@@ -15,7 +17,7 @@ LINGXI_GAME_ROOT="$PWD/.dev-sandbox/mc" \
 监听地址：`127.0.0.1:59321`（不接受非 loopback 连接）。协议为每行一个 JSON：
 
 ```json
-{"action":"mods.state","params":{}}
+{"action":"mods.state","params":{},"token":"<printed-session-token>"}
 ```
 
 响应是一行 JSON，带 `ok` 和真实执行后的状态。
@@ -45,15 +47,23 @@ LINGXI_GAME_ROOT="$PWD/.dev-sandbox/mc" \
 | `mods.checkUpdates` | — | 调用真实更新检测 |
 | `mods.update` | `projectID` | 调用真实更新流程并等待结束 |
 | `mods.close` | — | 关闭模组管理 sheet |
+| `mrpack.open` | `path?` | 打开导入整合包 sheet |
+| `mrpack.parse` | `path` | 调用真实导入视图解析 `.mrpack` |
+| `mrpack.install` | — | 调用真实安装按钮流程并等待完成 |
+| `mrpack.state` | — | 解析/安装/Java/错误状态 |
+| `mrpack.close` | — | 关闭导入 sheet |
 
 示例：
 
 ```bash
+export TOKEN="<printed-session-token>"
 python3 - <<'PY'
-import json, socket
+import json, socket, os
+TOKEN=os.environ["TOKEN"]
 def call(action, **params):
     s = socket.create_connection(("127.0.0.1", 59321), timeout=60)
-    s.sendall((json.dumps({"action": action, "params": params}) + "\n").encode())
+    # TOKEN comes from the app's stderr startup line.
+    s.sendall((json.dumps({"action": action, "params": params, "token": TOKEN}) + "\n").encode())
     print(s.recv(1 << 20).decode())
     s.close()
 call("mods.open", instanceID="fabric-mods")

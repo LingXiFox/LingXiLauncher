@@ -21,5 +21,9 @@ used to assert explicit error reporting.
 JAR, a stored (uncompressed) archive, traversal/absolute/symlink attack cases, a corrupt file,
 and arm64/x86_64/fat Mach-O payloads. None of them contains real Mojang binaries.
 
+`mrpack/` holds synthetic Modrinth format-1 packs used for parser/transaction tests, including
+bad format/path/hash/CDN/loader cases. They contain no real third-party mod binaries and are not
+shipped in the launcher.
+
 These files are test input only. Nothing here may be shipped inside the launcher, and no game
 JAR, asset or library is redistributed in this repository.

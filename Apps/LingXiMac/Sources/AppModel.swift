@@ -136,6 +136,8 @@ final class AppModel: ObservableObject {
     @Published var showInstallWizard = false
     @Published var installWizardInitialVersion: String?
     @Published var showModsForInstance: Instance?
+    @Published var showMrpackImport = false
+    @Published var mrpackImportURL: URL?
 
     // MARK: - Services
 
@@ -688,6 +690,16 @@ final class AppModel: ObservableObject {
 
     func makeModManager() -> ModManager {
         ModManager(layout: layout, transport: URLSessionTransport())
+    }
+
+    func makeMrpackInstaller() throws -> MrpackInstaller {
+        MrpackInstaller(layout: layout, transport: URLSessionTransport(), mirror: try mirrorConfiguration())
+    }
+
+    func openMrpackImport(url: URL? = nil) {
+        mrpackImportURL = url
+        showMrpackImport = true
+        section = .instances
     }
 
     func recordJavaRuntime(instanceID: String, runtime: JavaRuntime) {

@@ -1,0 +1,9 @@
+Real Fabulously Optimized 5.4.1 launch (Minecraft 1.20.1 / Fabric 0.14.23)
+Identity: local-offline PackTester (technical verification; no Microsoft account in clean test data)
+Java: system Microsoft 17.0.20.1 arm64
+
+ - 'Minecraft' (minecraft) 1.20.1 recommends any version after 5.4.1 of Fabulously Optimized, which is missing!
+	 - You should install any version after 5.4.1 of Fabulously Optimized for the optimal experience.
+[22:34:14] [main/INFO]: Loading 149 mods:
+[22:34:21] [Render thread/INFO]: Setting user: PackTester
+[22:34:23] [Render thread/WARN]: Game took 12.955 seconds to start

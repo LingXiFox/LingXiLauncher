@@ -50,6 +50,7 @@ public struct MissingDependency: Sendable, Equatable, CustomStringConvertible {
         case assetObject = "asset-object"
         case loggingConfig = "logging-config"
         case javaRuntime = "java-runtime"
+        case modpackFile = "modpack-file"
     }
 
     public enum Reason: String, Sendable, Equatable, Codable {

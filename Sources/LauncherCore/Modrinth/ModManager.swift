@@ -58,6 +58,31 @@ public struct ModUpdate: Sendable, Equatable {
     public let latestFile: ModrinthFile
     public let license: String?
     public let iconURL: String?
+    public let latestVersionType: ModrinthVersionType
+
+    public init(
+        projectID: String,
+        title: String,
+        currentVersionID: String?,
+        currentVersionNumber: String?,
+        latestVersionID: String,
+        latestVersionNumber: String,
+        latestFile: ModrinthFile,
+        license: String?,
+        iconURL: String?,
+        latestVersionType: ModrinthVersionType = .unknown
+    ) {
+        self.projectID = projectID
+        self.title = title
+        self.currentVersionID = currentVersionID
+        self.currentVersionNumber = currentVersionNumber
+        self.latestVersionID = latestVersionID
+        self.latestVersionNumber = latestVersionNumber
+        self.latestFile = latestFile
+        self.license = license
+        self.iconURL = iconURL
+        self.latestVersionType = latestVersionType
+    }
 }
 
 public struct ModInstallRequest: Sendable {
@@ -275,6 +300,9 @@ public struct ModManager: Sendable {
             }
             progress(ModInstallProgress(phase: .verifying, message: "校验 \(fileName)", completed: index, total: total, currentFile: fileName))
             try verify(file: file, at: destination)
+            // An explicit update must not silently re-enable a disabled mod. Dependencies
+            // that are newly added remain enabled; the primary keeps its previous state.
+            let keepDisabled = primaryRecord?.enabled == false && modProject.id == project.id
             let record = InstalledMod(
                 projectID: modProject.id,
                 slug: modProject.slug,
@@ -284,7 +312,7 @@ public struct ModManager: Sendable {
                 fileName: fileName,
                 sha1: file.hashes.sha1,
                 sha512: file.hashes.sha512,
-                enabled: true,
+                enabled: !keepDisabled,
                 source: "modrinth",
                 license: modProject.license?.displayName,
                 iconURL: modProject.iconURL
@@ -342,10 +370,12 @@ public struct ModManager: Sendable {
                 gameVersion: compatibility.gameVersion,
                 loader: compatibility.loader.rawValue
             ).filter { $0.isCompatible(gameVersion: compatibility.gameVersion, loader: compatibility.loader.rawValue) }
-            let latest = versions.max { lhs, rhs in
-                lhs.datePublished < rhs.datePublished
-            }
-            guard let latest, latest.id != currentVersionID, let file = latest.primaryJar else { continue }
+            // The current version must itself be present in the compatible set. If it vanished
+            // or is no longer compatible, we cannot make a reliable comparison and deliberately
+            // report no update rather than guessing from dates.
+            guard let current = versions.first(where: { $0.id == currentVersionID }),
+                  let latest = selectUpdate(current: current, from: versions),
+                  let file = latest.primaryJar else { continue }
             updates.append(ModUpdate(
                 projectID: project.id,
                 title: project.title,
@@ -355,7 +385,8 @@ public struct ModManager: Sendable {
                 latestVersionNumber: latest.versionNumber,
                 latestFile: file,
                 license: project.license?.displayName,
-                iconURL: project.iconURL
+                iconURL: project.iconURL,
+                latestVersionType: latest.versionType
             ))
         }
         return updates
@@ -397,12 +428,20 @@ public struct ModManager: Sendable {
             let (dependency, parent) = queue.removeFirst()
             switch dependency.type {
             case .incompatible:
-                let target = dependency.projectID ?? dependency.versionID ?? dependency.fileName ?? "未知项目"
-                throw LauncherError(
-                    .usageError,
-                    "\(parent) 声明与 \(target) 不兼容",
-                    suggestion: "取消安装该模组，或先在 Modrinth 项目页确认替代版本。"
-                )
+                // Modrinth lists incompatible projects/versions as metadata, not as a
+                // mandatory dependency. Only an actually active (enabled) installed or
+                // planned version that matches the constraint blocks the install.
+                if let conflict = activeIncompatibility(
+                    dependency,
+                    installed: installed,
+                    planned: resolved
+                ) {
+                    throw LauncherError(
+                        .usageError,
+                        "\(parent) 与已启用的 \(conflict.title) \(conflict.versionNumber ?? conflict.fileName) 不兼容",
+                        suggestion: "先禁用或移除冲突模组，或改用与之兼容的版本。"
+                    )
+                }
             case .embedded:
                 if let id = dependency.projectID {
                     plan.embedded.append(ModDependencyInfo(projectID: id, title: id, versionID: dependency.versionID, versionNumber: nil))
@@ -492,6 +531,121 @@ public struct ModManager: Sendable {
             }
         }
         return plan
+    }
+
+    private func activeIncompatibility(
+        _ dependency: ModrinthDependency,
+        installed: [InstalledMod],
+        planned: [String: ModrinthVersion]
+    ) -> InstalledMod? {
+        let configuredProject = dependency.projectID
+        let configuredVersion = dependency.versionID
+        let configuredFile = dependency.fileName
+        // A constraint with no target cannot safely identify a conflict. Let it through
+        // rather than rejecting an install based on incomplete metadata.
+        guard configuredProject != nil || configuredVersion != nil || configuredFile != nil else {
+            return nil
+        }
+
+        for record in installed where record.enabled {
+            guard configuredProject == nil || record.projectID == configuredProject else { continue }
+            if let configuredVersion {
+                guard record.versionID == configuredVersion else { continue }
+            }
+            if let configuredFile, record.fileName != configuredFile { continue }
+            return record
+        }
+
+        for (projectID, version) in planned {
+            guard configuredProject == nil || projectID == configuredProject else { continue }
+            if let configuredVersion, version.id != configuredVersion { continue }
+            if let configuredFile, version.primaryJar?.filename != configuredFile { continue }
+            let record = InstalledMod(
+                projectID: projectID,
+                title: projectID,
+                versionID: version.id,
+                versionNumber: version.versionNumber,
+                fileName: version.primaryJar?.filename ?? version.id,
+                enabled: true,
+                source: "modrinth"
+            )
+            return record
+        }
+        return nil
+    }
+
+    private func compareVersionNumbers(_ lhs: String, _ rhs: String) -> Int {
+        // Natural, token-wise comparison. Modrinth version numbers are not guaranteed to be
+        // SemVer (e.g. `mc1.20.1-0.5.13-fabric`), so numeric runs are compared numerically and
+        // text runs lexicographically. This prevents a newly published old build from appearing
+        // as an update merely because its date is newer.
+        let left = versionTokens(lhs)
+        let right = versionTokens(rhs)
+        let count = max(left.count, right.count)
+        for index in 0..<count {
+            switch (index < left.count ? left[index] : .numeric(0),
+                    index < right.count ? right[index] : .numeric(0)) {
+            case let (.numeric(a), .numeric(b)):
+                if a != b { return a < b ? -1 : 1 }
+            case let (.text(a), .text(b)):
+                if a != b { return a < b ? -1 : 1 }
+            case (.numeric, .text), (.text, .numeric):
+                // Different token shapes are not comparable; fall back to a deterministic
+                // textual comparison instead of claiming one is newer.
+                return lhs.localizedCaseInsensitiveCompare(rhs) == .orderedAscending ? -1 : 1
+            }
+        }
+        return 0
+    }
+
+    private enum VersionToken: Equatable {
+        case numeric(Int)
+        case text(String)
+    }
+
+    private func versionTokens(_ value: String) -> [VersionToken] {
+        var result: [VersionToken] = []
+        var current = ""
+        var currentIsDigit: Bool?
+        for character in value.lowercased() {
+            let isDigit = character.isNumber
+            if currentIsDigit != nil, currentIsDigit != isDigit {
+                result.append(currentIsDigit == true
+                    ? .numeric(Int(current) ?? 0)
+                    : .text(String(current)))
+                current = ""
+            }
+            current.append(character)
+            currentIsDigit = isDigit
+        }
+        if !current.isEmpty {
+            result.append(currentIsDigit == true
+                ? .numeric(Int(current) ?? 0)
+                : .text(String(current)))
+        }
+        return result
+    }
+
+    private func allowedVersionTypes(for current: ModrinthVersion) -> Set<ModrinthVersionType> {
+        switch current.versionType {
+        case .release: return [.release]
+        case .beta: return [.release, .beta]
+        case .alpha: return [.release, .beta, .alpha]
+        case .unknown: return [.release, .beta, .alpha]
+        }
+    }
+
+    private func selectUpdate(
+        current: ModrinthVersion,
+        from versions: [ModrinthVersion]
+    ) -> ModrinthVersion? {
+        let allowed = allowedVersionTypes(for: current)
+        let candidates = versions.filter {
+            $0.id != current.id && allowed.contains($0.versionType) && $0.primaryJar != nil
+        }
+        return candidates
+            .filter { compareVersionNumbers($0.versionNumber, current.versionNumber) > 0 }
+            .max { compareVersionNumbers($0.versionNumber, $1.versionNumber) < 0 }
     }
 
     // MARK: - Verification / paths

@@ -1,6 +1,6 @@
 # LingXi Launcher
 
-macOS Apple Silicon 原生 **Minecraft: Java Edition** 启动器。当前进度：**M0 + M1 + M2 + M2.5 + M3 + M5-Alpha + M6.1 + M6.1.1 + M6.2**。
+macOS Apple Silicon 原生 **Minecraft: Java Edition** 启动器。当前进度：**M0 + M1 + M2 + M2.5 + M3 + M5-Alpha + M6.1 + M6.1.1 + M6.2 + M6.2.1 + M6.3**。
 
 - **M3 Microsoft 正版认证已实现并通过真机验证**：OAuth 2.0 Authorization Code + PKCE S256、系统浏览器、localhost 回调、Xbox Live → XSTS → Minecraft Services → 所有权/档案、Keychain 存储与刷新。
 - **M5-Alpha SwiftUI GUI 可用**：首页 / 游戏实例 / 版本下载 / 账户管理 / 运行日志 / 设置，直接调用 LauncherCore，不执行 CLI。
@@ -8,9 +8,11 @@ macOS Apple Silicon 原生 **Minecraft: Java Edition** 启动器。当前进度�
 - **M6.1 一站式安装**：VersionResolver 支持 `inheritsFrom` 合并；Fabric Loader（官方 meta/Maven）安装；JavaManager 按元数据检测/下载托管 Temurin；GUI 安装向导默认创建新实例，更新现有实例需显式确认并备份。
 - **M6.2 Modrinth 模组管理**：Fabric 实例的 Modrinth 搜索、兼容性过滤、依赖自动解析、JAR 哈希校验、本地启用/禁用/删除、更新检测与原子更新；GUI 实例详情提供双视图。
 - **M6.1.1 稳定性**：托管 JDK 完整校验后安全替换（失败恢复旧版本）；向导切换版本/Loader 后即时重验 Java；补充 Fabric 1.16.5/1.20.1/1.21.11/26.3 真实元数据矩阵。
+- **M6.2.1 模组稳定性**：依赖冲突只在启用的实际版本上判定；更新保留禁用状态；更新检测按渠道和自然版本号而非仅日期；DebugAutomation 仅 Debug + 会话 token。
+- **M6.3 整合包**：按 Modrinth format 1 解析 `.mrpack`，安全 ZIP/overrides、外部文件哈希下载、OneStop 安装、独立新实例、失败/取消清理和缓存重试；GUI/Finder 拖放导入。
 - Fabric（Forge/NeoForge/Quilt 未实现）已通过真实 1.20.1 + Loader 0.20.1 安装与启动验证；本地离线身份仅保留给 CLI 技术验证，GUI 不提供绕过所有权的启动入口。
 
-详见 [docs/VERIFICATION-M6.2.md](docs/VERIFICATION-M6.2.md)、[docs/VERIFICATION-M6.1.md](docs/VERIFICATION-M6.1.md)、[docs/VERIFICATION-M3-M5.md](docs/VERIFICATION-M3-M5.md) 与 [docs/VERIFICATION-M2.5.md](docs/VERIFICATION-M2.5.md)。调试 GUI 可使用 [docs/DEBUG-AUTOMATION.md](docs/DEBUG-AUTOMATION.md) 的 opt-in 接口。这是一个**开发中**项目，不是已发布产品。
+详见 [docs/VERIFICATION-M6.3.md](docs/VERIFICATION-M6.3.md)、[docs/VERIFICATION-M6.2.md](docs/VERIFICATION-M6.2.md)、[docs/VERIFICATION-M6.1.md](docs/VERIFICATION-M6.1.md)、[docs/VERIFICATION-M3-M5.md](docs/VERIFICATION-M3-M5.md) 与 [docs/VERIFICATION-M2.5.md](docs/VERIFICATION-M2.5.md)。调试 GUI 可使用 [docs/DEBUG-AUTOMATION.md](docs/DEBUG-AUTOMATION.md) 的 opt-in 接口。这是一个**开发中**项目，不是已发布产品。
 
 ## 设计边界
 
@@ -33,6 +35,7 @@ LingXiMac (SwiftUI)              lingxi (CLI)
    LaunchService · VanillaInstaller · FabricInstaller · OneStopInstaller
    JavaManager · InstallationVerifier
    ModrinthClient · ModManager · ModRepository
+   Modpack/MrpackParser · Modpack/MrpackInstaller
 ```
 
 ## 快速开始
@@ -104,6 +107,9 @@ lingxi mod install --instance <id> --project sodium
 lingxi mod list --instance <id>
 lingxi mod updates --instance <id>
 lingxi mod enable|disable|remove --instance <id> --file <mod.jar>
+
+lingxi mrpack inspect --file <pack.mrpack>
+lingxi mrpack install --file <pack.mrpack> --name <display-name> --java <jdk>
 ```
 
 流程：官方 manifest（或已验证缓存）→ 版本 JSON（校验 manifest 内 SHA-1）→ client JAR / libraries / asset index / **全部 asset objects** → `.part` 临时文件 → SHA-1 + size 校验 → 原子落盘 → legacy natives 安全解压 → 生成 `instance.json` → 依赖完整性检查。**每一步都不需要 Microsoft 会话。**
@@ -156,6 +162,7 @@ Minecraft AppID 已于 **2026-10-26** 通过 Mojang 官方审核并加入 API Al
 - **游戏实例**：列表、创建、删除（需确认）、打开隔离游戏目录、自动/手动 JVM 内存设置、启动。
 - **版本下载 / 安装向导**：官方/可信镜像清单、Release/Snapshot 过滤；M6.1 向导依次选择 Minecraft → Vanilla/Fabric → Java → 新/现有实例 → 确认 → 下载校验；进度/取消/重试，默认新实例，更新现有实例需显式确认并备份 manifest。
 - **模组管理**：实例详情打开「模组管理」双视图；已安装页管理本地模组、检测更新；浏览页搜索 Modrinth、查看项目/版本/依赖并安装。M6.2 仅 Fabric；GUI 通过 Core 的 `ModManager` 访问网络。
+- **整合包导入**：实例页「导入整合包」支持 `.mrpack` 文件选择与 Finder 拖放；展示解析结果、Java 与文件清单后，通过 Core 的 `MrpackInstaller` 创建全新实例。M6.3 仅 Vanilla/Fabric；Forge/NeoForge/Quilt/CurseForge 明确不支持。
 - **账户管理**：Microsoft 登录进度、UUID、所有权、真实皮肤/披风纹理与头像裁剪、切换、验证、退出；本地身份只读并明确标注未验证。
 - **运行日志**：LauncherCore 事件、Java stdout/stderr、游戏输出、退出码；搜索、复制、自动滚动、脱敏诊断导出、打开 Minecraft `latest.log`。
 - **设置**：Java 检测/选择、下载源/镜像配置、数据/游戏目录、内嵌认证状态。
@@ -181,13 +188,15 @@ GUI 使用 `LaunchService` 启动：`resolve → dependencies → preflight → 
 ├── java/                                  # 用户确认后下载的托管 JDK（可选）
 ├── .minecraft/                            # 唯一的游戏数据根
 │   └── versions/<instance-id>/            # 隔离游戏目录（mods/存档/配置/日志）
-├── accounts/local/<name>.json           # 本地离线账户（无令牌字段，显式 unverified）
-├── accounts/microsoft/<uuid>.json       # 仅元数据：UUID/name/xuid/ownership/时间/公开皮肤披风 URL
+├── cache/
+│   ├── manifests/version_manifest_v2.json
+│   └── mrpack/<archive-sha256>/           # 整合包外部文件已验证缓存
+├── accounts/local/<name>.json            # 本地离线账户（无令牌字段，显式 unverified）
+├── accounts/microsoft/<uuid>.json        # 仅元数据：UUID/name/xuid/ownership/时间/公开皮肤披风 URL
 ├── accounts/active.json
-├── natives/<version-id>/<arch>/         # legacy natives 解压缓存
-├── cache/manifests/version_manifest_v2.json
-├── logs/launcher/launch-*.log           # CLI，脱敏 argv
-└── logs/launcher/gui-launch-*.log       # GUI，脱敏 argv
+├── natives/<version-id>/<arch>/          # legacy natives 解压缓存
+├── logs/launcher/launch-*.log            # CLI，脱敏 argv
+└── logs/launcher/gui-launch-*.log        # GUI，脱敏 argv
 ```
 
 macOS Keychain（不落盘到上述目录）：

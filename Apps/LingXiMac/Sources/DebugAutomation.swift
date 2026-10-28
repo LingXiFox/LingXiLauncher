@@ -1,11 +1,14 @@
 import Foundation
+
+#if DEBUG
 import Network
 
-/// Opt-in, loopback-only automation for debugging the real SwiftUI actions.
+/// Debug-only, loopback-only automation for exercising the real SwiftUI actions.
 ///
-/// It is disabled unless `LINGXI_DEBUG_AUTOMATION=1` (or `--debug-automation` is passed).
-/// Views register the exact action they bind to their visible controls; the debug server never
-/// fabricates a separate business path. The protocol is one JSON object per line over TCP.
+/// Disabled entirely in Release builds by `#if DEBUG`. In Debug builds it still requires
+/// `LINGXI_DEBUG_AUTOMATION=1` (or `--debug-automation`) and a per-process session token.
+/// Views register the exact action they bind to visible controls; no parallel business path is
+/// implemented here. The token is printed once to stderr and is never persisted.
 @MainActor
 final class DebugAutomationCenter {
     static let shared = DebugAutomationCenter()
@@ -14,17 +17,22 @@ final class DebugAutomationCenter {
     private struct Command: Decodable {
         let action: String
         let params: [String: String]?
+        let token: String?
     }
     private struct Registration {
         let name: String
         let handler: Handler
     }
 
+    private let sessionToken: String
     private var listener: NWListener?
     private var handlers: [UUID: Registration] = [:]
     private var started = false
 
-    private init() {}
+    private init() {
+        let configured = ProcessInfo.processInfo.environment["LINGXI_DEBUG_AUTOMATION_TOKEN"]
+        sessionToken = (configured?.isEmpty == false) ? configured! : UUID().uuidString
+    }
 
     var isEnabled: Bool {
         ProcessInfo.processInfo.environment["LINGXI_DEBUG_AUTOMATION"] == "1"
@@ -50,7 +58,7 @@ final class DebugAutomationCenter {
             }
             listener.start(queue: .main)
             self.listener = listener
-            fputs("debug automation listening on 127.0.0.1:\(portValue)\n", stderr)
+            fputs("debug automation listening on 127.0.0.1:\(portValue) token=\(sessionToken)\n", stderr)
         } catch {
             fputs("debug automation failed to start: \(error)\n", stderr)
         }
@@ -104,6 +112,10 @@ final class DebugAutomationCenter {
             respond(["ok": false, "error": "invalid JSON command"], to: connection)
             return
         }
+        guard let token = command.token, constantTimeEqual(token, sessionToken) else {
+            respond(["ok": false, "error": "unauthorized debug session"], to: connection)
+            return
+        }
         if command.action == "debug.actions" {
             respond(["ok": true, "actions": handlers.values.map(\.name).sorted()], to: connection)
             return
@@ -120,6 +132,15 @@ final class DebugAutomationCenter {
         }
     }
 
+    private func constantTimeEqual(_ lhs: String, _ rhs: String) -> Bool {
+        let a = Array(lhs.utf8)
+        let b = Array(rhs.utf8)
+        guard a.count == b.count else { return false }
+        var difference: UInt8 = 0
+        for index in a.indices { difference |= a[index] ^ b[index] }
+        return difference == 0
+    }
+
     private func respond(_ object: [String: Any], to connection: NWConnection) {
         guard JSONSerialization.isValidJSONObject(object),
               let data = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]) else {
@@ -131,3 +152,21 @@ final class DebugAutomationCenter {
         connection.send(content: line, completion: .contentProcessed { _ in connection.cancel() })
     }
 }
+#else
+/// Release builds contain no socket listener and no action registry at all.
+@MainActor
+final class DebugAutomationCenter {
+    static let shared = DebugAutomationCenter()
+    var isEnabled: Bool { false }
+
+    private init() {}
+    func startIfEnabled() {}
+    @discardableResult
+    func register(_ name: String, handler: @escaping @MainActor (_ params: [String: String]) async -> [String: Any]) -> UUID {
+        _ = name
+        _ = handler
+        return UUID()
+    }
+    func unregister(_ token: UUID) { _ = token }
+}
+#endif

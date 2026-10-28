@@ -1,5 +1,6 @@
 import LauncherCore
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct InstancesView: View {
     @EnvironmentObject private var model: AppModel
@@ -12,6 +13,7 @@ struct InstancesView: View {
     @State private var memoryTarget: Instance?
     @State private var memoryText = ""
     @State private var memoryAutomatic = true
+    @State private var isMrpackDropTargeted = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: LXSpace.md) {
@@ -23,6 +25,9 @@ struct InstancesView: View {
                 HStack(spacing: 8) {
                     LXIconButton(systemImage: "arrow.clockwise", label: "刷新实例") {
                         model.reloadInstances()
+                    }
+                    LXButton("导入整合包", systemImage: "shippingbox", kind: .ghost) {
+                        model.openMrpackImport()
                     }
                     LXButton("新建实例", systemImage: "plus", kind: .primary) {
                         showCreate = true
@@ -49,6 +54,43 @@ struct InstancesView: View {
             ModsView(instance: instance, model: model)
                 .environmentObject(model)
                 .environment(\.lxTheme, theme)
+        }
+        .sheet(isPresented: $model.showMrpackImport) {
+            MrpackImportView()
+                .environmentObject(model)
+                .environment(\.lxTheme, theme)
+        }
+        .onDrop(of: [UTType.fileURL.identifier], isTargeted: $isMrpackDropTargeted) { providers in
+            guard let provider = providers.first else { return false }
+            provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, _ in
+                let url: URL?
+                if let data = item as? Data {
+                    url = URL(dataRepresentation: data, relativeTo: nil)
+                } else {
+                    url = item as? URL
+                }
+                guard let url, url.pathExtension.lowercased() == "mrpack" else {
+                    Task { @MainActor in model.lastError = "请拖入扩展名为 .mrpack 的 Modrinth 整合包" }
+                    return
+                }
+                Task { @MainActor in model.openMrpackImport(url: url) }
+            }
+            return true
+        }
+        .overlay {
+            if isMrpackDropTargeted {
+                RoundedRectangle(cornerRadius: LXRadius.lg, style: .continuous)
+                    .strokeBorder(theme.orange, style: StrokeStyle(lineWidth: 2, dash: [8, 5]))
+                    .padding(10)
+                    .allowsHitTesting(false)
+                    .overlay {
+                        Text("松开以导入 .mrpack")
+                            .font(LXFont.bodyStrong)
+                            .foregroundStyle(theme.orange)
+                            .padding(14)
+                            .background(theme.canvas.opacity(0.92), in: Capsule())
+                    }
+            }
         }
         .confirmationDialog(
             "删除实例？",
