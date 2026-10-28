@@ -4,6 +4,7 @@ struct ContentView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var debugTokens: [UUID] = []
 
     private var theme: LXTheme { LXTheme(colorScheme: colorScheme) }
 
@@ -56,6 +57,41 @@ struct ContentView: View {
                 .environmentObject(model)
                 .environment(\.lxTheme, theme)
         }
+        .task { registerDebugActions() }
+        .onDisappear { unregisterDebugActions() }
+    }
+
+    private func registerDebugActions() {
+        let center = DebugAutomationCenter.shared
+        center.startIfEnabled()
+        guard center.isEnabled else { return }
+        debugTokens.append(center.register("app.state") { _ in
+            [
+                "section": model.section.rawValue,
+                "selectedInstance": model.selectedInstanceID ?? "",
+                "modsOpen": model.showModsForInstance?.id ?? "",
+                "instances": model.instances.map { ["id": $0.id, "name": $0.manifest.displayName, "version": $0.manifest.versionID ?? ""] },
+            ]
+        })
+        debugTokens.append(center.register("app.section") { params in
+            guard let raw = params["section"], let section = AppModel.Section(rawValue: raw) else {
+                return ["ok": false, "error": "unknown section"]
+            }
+            model.section = section
+            return ["section": model.section.rawValue]
+        })
+        debugTokens.append(center.register("mods.open") { params in
+            guard let id = params["instanceID"], let instance = model.instances.first(where: { $0.id == id }) else {
+                return ["ok": false, "error": "instance not found"]
+            }
+            model.openMods(instance: instance)
+            return ["instance": id, "modsOpen": model.showModsForInstance?.id ?? ""]
+        })
+    }
+
+    private func unregisterDebugActions() {
+        for token in debugTokens { DebugAutomationCenter.shared.unregister(token) }
+        debugTokens.removeAll()
     }
 
     @ViewBuilder

@@ -135,6 +135,7 @@ final class AppModel: ObservableObject {
     @Published var settings: Settings
     @Published var showInstallWizard = false
     @Published var installWizardInitialVersion: String?
+    @Published var showModsForInstance: Instance?
 
     // MARK: - Services
 
@@ -311,6 +312,12 @@ final class AppModel: ObservableObject {
         } catch {
             setError(error)
         }
+    }
+
+    func openMods(instance: Instance) {
+        section = .instances
+        selectedInstanceID = instance.id
+        showModsForInstance = instance
     }
 
     func openInstanceFolder(_ instance: Instance) {
@@ -677,6 +684,20 @@ final class AppModel: ObservableObject {
 
     func makeJavaManager() -> JavaManager {
         JavaManager(layout: layout, transport: URLSessionTransport())
+    }
+
+    func makeModManager() -> ModManager {
+        ModManager(layout: layout, transport: URLSessionTransport())
+    }
+
+    func recordJavaRuntime(instanceID: String, runtime: JavaRuntime) {
+        let record = makeJavaManager().runtimeRecord(for: runtime)
+        do {
+            _ = try InstanceRepository(layout: layout).setJavaRuntime(id: instanceID, record: record)
+            appendLine("Java record: \(record.source) \(record.version) sha=\(record.artifactSHA1 ?? record.artifactSHA256 ?? record.executableSHA256 ?? "?")", source: "java")
+        } catch {
+            appendLine("Unable to record Java runtime for \(instanceID): \(Self.describe(error))", source: "java", level: .warning)
+        }
     }
 
     func saveSettings() {

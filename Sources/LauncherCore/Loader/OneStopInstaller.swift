@@ -120,7 +120,8 @@ public struct OneStopInstaller: Sendable {
         case let .newInstance(id, name):
             targetID = id
             displayName = name
-            guard (try? registry.load(id: id)) == nil else {
+            let directory = try layout.instanceDirectory(id)
+            guard !FileManager.default.fileExists(atPath: directory.path) else {
                 throw LauncherError(.usageError, "Instance '\(id)' already exists; choose update mode explicitly")
             }
         case let .existingInstance(id):
@@ -152,6 +153,7 @@ public struct OneStopInstaller: Sendable {
                 ),
                 progress: progress
             )
+            recordJava(instanceID: report.instanceID, executable: request.javaExecutable)
             return OneStopInstallReport(
                 instanceID: report.instanceID,
                 minecraftVersionID: request.minecraftVersionID,
@@ -200,6 +202,7 @@ public struct OneStopInstaller: Sendable {
             backup = try registry.backupManifest(id: targetID)
             target = try registry.assignVersion(id: targetID, versionID: request.minecraftVersionID)
         }
+        recordJava(instanceID: target.id, executable: request.javaExecutable)
         return OneStopInstallReport(
             instanceID: target.id,
             minecraftVersionID: request.minecraftVersionID,
@@ -210,5 +213,11 @@ public struct OneStopInstaller: Sendable {
             downloadedFiles: report.downloadedFiles,
             downloadedBytes: report.downloadedBytes
         )
+    }
+
+    private func recordJava(instanceID: String, executable: URL) {
+        guard let runtime = try? JavaRuntimeInspector().inspect(executable: executable) else { return }
+        let record = JavaManager(layout: layout).runtimeRecord(for: runtime)
+        try? InstanceRepository(layout: layout).setJavaRuntime(id: instanceID, record: record)
     }
 }

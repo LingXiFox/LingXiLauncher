@@ -59,3 +59,30 @@ public enum SHA256Digest {
         return hasher.finalize().map { String(format: "%02x", $0) }.joined()
     }
 }
+
+/// SHA-512 helpers for Modrinth file hashes when the API supplies them.
+public enum SHA512Digest {
+    public static func hexDigest(_ data: Data) -> String {
+        CryptoKit.SHA512.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+
+    public static func hexDigest(ofFileAt url: URL, chunkSize: Int = 1 << 20) throws -> String {
+        let handle: FileHandle
+        do {
+            handle = try FileHandle(forReadingFrom: url)
+        } catch {
+            throw LauncherError(.ioFailure, "Cannot read \(url.path): \(error.localizedDescription)")
+        }
+        defer { try? handle.close() }
+        var hasher = CryptoKit.SHA512()
+        do {
+            while true {
+                guard let chunk = try handle.read(upToCount: chunkSize), !chunk.isEmpty else { break }
+                hasher.update(data: chunk)
+            }
+        } catch {
+            throw LauncherError(.ioFailure, "Cannot read \(url.path): \(error.localizedDescription)")
+        }
+        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+    }
+}

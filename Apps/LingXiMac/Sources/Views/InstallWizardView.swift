@@ -76,6 +76,11 @@ struct InstallWizardView: View {
         javaRuntimes.first { $0.executable.path == selectedJavaPath }
     }
 
+    private var chosenJavaIsCompatible: Bool {
+        guard let chosenRuntime, let required = javaRequirement?.majorVersion else { return false }
+        return chosenRuntime.majorVersion >= required
+    }
+
     private var loaderChoice: InstallLoaderChoice {
         switch loader {
         case .vanilla: return .vanilla
@@ -215,13 +220,13 @@ struct InstallWizardView: View {
         switch step {
         case .version: return !selectedVersion.isEmpty
         case .loader: return loader == .vanilla || selectedLoaderVersion != nil
-        case .java: return chosenRuntime != nil
+        case .java: return chosenJavaIsCompatible
         case .target:
             if targetMode == .newInstance {
                 return !newInstanceName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !newInstanceID.isEmpty
             }
             return existingInstanceID != nil && updateConfirmed
-        case .confirm: return true
+        case .confirm: return chosenJavaIsCompatible
         default: return false
         }
     }
@@ -284,7 +289,14 @@ struct InstallWizardView: View {
                     ScrollView {
                         LazyVStack(spacing: 0) {
                             ForEach(filteredVersions, id: \.id) { entry in
-                                Button { selectedVersion = entry.id } label: {
+                                Button {
+                                    if selectedVersion != entry.id {
+                                        selectedVersion = entry.id
+                                        selectedLoaderVersion = nil
+                                        fabricLoaders = []
+                                        invalidateJavaSelection()
+                                    }
+                                } label: {
                                     HStack {
                                         VStack(alignment: .leading, spacing: 2) {
                                             Text(entry.id).font(LXFont.bodyStrong).foregroundStyle(theme.text)
@@ -329,8 +341,11 @@ struct InstallWizardView: View {
             HStack(spacing: LXSpace.sm) {
                 ForEach(LoaderKind.allCases) { kind in
                     Button {
-                        loader = kind
-                        if kind == .fabric { Task { await loadFabricLoaders() } }
+                        if loader != kind {
+                            loader = kind
+                            invalidateJavaSelection()
+                            if kind == .fabric { Task { await loadFabricLoaders() } }
+                        }
                     } label: {
                         VStack(alignment: .leading, spacing: 5) {
                             Image(systemName: kind == .vanilla ? "cube.fill" : "square.stack.3d.up.fill")
@@ -369,7 +384,10 @@ struct InstallWizardView: View {
                             Menu {
                                 ForEach(fabricLoaders) { loader in
                                     Button {
-                                        selectedLoaderVersion = loader.version
+                                        if selectedLoaderVersion != loader.version {
+                                            selectedLoaderVersion = loader.version
+                                            invalidateJavaSelection()
+                                        }
                                     } label: {
                                         if selectedLoaderVersion == loader.version {
                                             Label("\(loader.version)\(loader.stable ? " · stable" : "")", systemImage: "checkmark")
@@ -426,7 +444,7 @@ struct InstallWizardView: View {
                         Text("本机未安装满足 Java \(javaRequirement?.majorVersion ?? 0)+ 的运行时。下载托管 Temurin JDK，或手动选择已有 java。")
                             .font(LXFont.body).foregroundStyle(theme.textSecondary)
                         HStack(spacing: 7) {
-                            LXButton("下载 \(JavaManager.managedSourceName) \(javaRequirement?.majorVersion.map(String.init) ?? "所需版本")", systemImage: "arrow.down.circle", kind: .primary) {
+                            LXButton("安装 Java \(javaRequirement?.majorVersion.map(String.init) ?? "")", systemImage: "arrow.down.circle", kind: .primary) {
                                 showJavaConfirmation = true
                             }
                             LXButton("选择 java…", systemImage: "folder", kind: .secondary) { chooseJavaFile() }
@@ -489,11 +507,11 @@ struct InstallWizardView: View {
                     Text("下载托管 Java？").font(LXFont.headline).foregroundStyle(theme.text)
                     Spacer()
                 }
-                Text("\(JavaManager.managedSourceName) \(javaRequirement?.majorVersion.map(String.init) ?? "所需版本") · macOS arm64")
+                Text("Java \(javaRequirement?.majorVersion.map(String.init) ?? "所需版本") · macOS arm64")
                     .font(LXFont.bodyStrong).foregroundStyle(theme.text)
-                Text("来源：Adoptium Temurin · 许可：\(JavaManager.managedLicense)")
+                Text("优先 Mojang 官方 java-runtime（\(javaRequirement?.component ?? "版本 component")）；不可用时回退 Eclipse Temurin")
                     .font(LXFont.caption).foregroundStyle(theme.textSecondary)
-                Text("下载约 180 MB，会校验发布方 SHA-256，并安装到启动器私有目录；不会修改系统 Java。")
+                Text("会校验 Mojang manifest SHA-1 或 Temurin SHA-256，并安装到启动器私有目录；不会修改系统 Java。")
                     .font(LXFont.caption).foregroundStyle(theme.textTertiary)
                 HStack(spacing: 7) {
                     LXButton("取消", kind: .secondary) { showJavaConfirmation = false }
@@ -748,8 +766,12 @@ struct InstallWizardView: View {
         let manager = model.makeJavaManager()
         javaRuntimes = manager.detectRuntimes()
         managedJava = manager.managedRuntimes()
-        if selectedJavaPath.isEmpty || !javaRuntimes.contains(where: { $0.executable.path == selectedJavaPath }) {
-            selectedJavaPath = manager.selectCompatible(requirement: javaRequirement ?? JavaVersionRequirement(majorVersion: 8))?.executable.path ?? ""
+        let requirement = javaRequirement ?? JavaVersionRequirement(majorVersion: 8)
+        if let selected = javaRuntimes.first(where: { $0.executable.path == selectedJavaPath }),
+           manager.isCompatible(selected, requirement: requirement) {
+            // Keep the user's explicit runtime only while it still satisfies metadata.
+        } else {
+            selectedJavaPath = manager.selectCompatible(requirement: requirement)?.executable.path ?? ""
         }
     }
 
@@ -781,7 +803,8 @@ struct InstallWizardView: View {
         javaTask = Task {
             do {
                 let manager = model.makeJavaManager()
-                let managed = try await manager.installManagedJava(majorVersion: major) { event in
+                let requirement = javaRequirement ?? JavaVersionRequirement(majorVersion: major)
+                let managed = try await manager.installManagedJava(requirement: requirement, minecraftVersionID: selectedVersion) { event in
                     Task { @MainActor in
                         if case let .downloading(total) = event {
                             progress.phase = "下载托管 Java\(total.map { " · \(compactBytes($0))" } ?? "")"
@@ -800,7 +823,7 @@ struct InstallWizardView: View {
     }
 
     private func startInstall() {
-        guard let runtime = chosenRuntime else { return }
+        guard let runtime = chosenRuntime, chosenJavaIsCompatible else { return }
         isWorking = true
         progress = ProgressState()
         report = nil
@@ -831,6 +854,9 @@ struct InstallWizardView: View {
                     Task { @MainActor in applyProgress(event) }
                 }
                 report = result
+                if let runtime = chosenRuntime {
+                    model.recordJavaRuntime(instanceID: result.instanceID, runtime: runtime)
+                }
                 model.reloadInstances()
                 model.selectedInstanceID = result.instanceID
                 model.section = .home
@@ -876,6 +902,12 @@ struct InstallWizardView: View {
     }
 
     // MARK: - Target helpers
+
+    private func invalidateJavaSelection() {
+        javaRequirement = nil
+        selectedJavaPath = ""
+        showJavaConfirmation = false
+    }
 
     private func prepareNewTargetIfNeeded() {
         if newInstanceName.isEmpty {

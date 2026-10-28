@@ -129,7 +129,16 @@ public struct FabricInstaller: Sendable {
     ) async throws -> FabricInstallReport {
         try Task.checkCancellation()
         let registry = InstanceRepository(layout: layout)
-        let targetExists = (try? registry.load(id: request.instanceID)) != nil
+        let targetDirectory = try layout.instanceDirectory(request.instanceID)
+        let targetExists = FileManager.default.fileExists(atPath: targetDirectory.path)
+        let existingTarget: Instance?
+        if targetExists {
+            // Load/validate before any network or staging work. A corrupt manifest must fail
+            // closed instead of being mistaken for an absent instance.
+            existingTarget = try registry.load(id: request.instanceID)
+        } else {
+            existingTarget = nil
+        }
         if targetExists && !request.updateExistingInstance {
             throw LauncherError(
                 .usageError,
@@ -271,7 +280,7 @@ public struct FabricInstaller: Sendable {
         progress(.phase(.finalizing, "Committing Fabric instance"))
         let target: Instance
         var backup: URL?
-        if let existing = try? registry.load(id: request.instanceID) {
+        if let existing = existingTarget {
             guard request.updateExistingInstance else {
                 throw LauncherError(.usageError, "Instance appeared during installation; refusing to overwrite it")
             }

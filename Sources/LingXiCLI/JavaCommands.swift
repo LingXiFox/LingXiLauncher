@@ -40,17 +40,17 @@ extension CLI {
 
     private static func runJavaInstall(_ arguments: [String]) async throws -> Int32 {
         let spec = ArgumentParser.Spec(
-            valueOptions: ["major", "data-root", "root"],
+            valueOptions: ["major", "component", "minecraft-version", "data-root", "root"],
             flagOptions: ["yes", "help"]
         )
         let input = try ArgumentParser.parse(arguments, spec: spec)
         if input.has("help") {
             print("""
-            usage: lingxi java install --major <version> --yes [--data-root <path>]
+            usage: lingxi java install --major <version> [--component <id>] --yes [--data-root <path>]
 
-            Downloads Eclipse Temurin for macOS arm64 into <dataRoot>/java, verifies its
-            published SHA-256 and leaves system Java untouched. --yes is required because this
-            is a multi-hundred-megabyte download.
+            Prefers Mojang's official java-runtime component for macOS arm64; when no component
+            is supplied/unavailable it downloads Eclipse Temurin. Files are checksum-verified and
+            installed into <dataRoot>/java; system Java is untouched. --yes is required.
             """)
             return ExitStatus.success.rawValue
         }
@@ -61,12 +61,16 @@ extension CLI {
         }
         let layout = try resolveLayout(input, requireGameRoot: false)
         let manager = JavaManager(layout: layout, transport: URLSessionTransport())
-        print("Source: \(JavaManager.managedSourceName) (\(JavaManager.adoptiumAPI.absoluteString))/\(major)/hotspot")
-        print("License: \(JavaManager.managedLicense)")
-        let managed = try await manager.installManagedJava(majorVersion: major) { event in
+        print("Preferred source: Mojang java-runtime component (fallback: \(JavaManager.managedSourceName))")
+        print("License: Mojang Java Runtime / OpenJDK terms, or \(JavaManager.managedLicense)")
+        let requirement = JavaVersionRequirement(component: input.value("component"), majorVersion: major)
+        let managed = try await manager.installManagedJava(
+            requirement: requirement,
+            minecraftVersionID: input.value("minecraft-version")
+        ) { event in
             switch event {
             case let .metadata(message): CLIOutput.fail("[java] \(message)")
-            case let .downloading(total): CLIOutput.fail("[java] downloading Temurin \(major)\(total.map { " (\(Downloader.format(bytes: $0)))" } ?? "")…")
+            case let .downloading(total): CLIOutput.fail("[java] downloading Java \(major)\(total.map { " (\(Downloader.format(bytes: $0)))" } ?? "")…")
             case let .verifying(checksum): CLIOutput.fail("[java] verifying SHA-256 \(checksum.prefix(16))…")
             case let .extracting(name): CLIOutput.fail("[java] extracting \(name)…")
             case let .ready(url): CLIOutput.fail("[java] ready: \(url.path)")
@@ -76,6 +80,9 @@ extension CLI {
         CLIOutput.field("runtime", managed.runtime.displayDescription)
         CLIOutput.field("path", managed.runtime.executable.path)
         CLIOutput.field("source", managed.source)
+        CLIOutput.field("component", managed.component ?? "—")
+        CLIOutput.field("artifact sha1", managed.artifactSHA1 ?? "—")
+        CLIOutput.field("artifact sha256", managed.artifactSHA256 ?? "—")
         CLIOutput.field("license", managed.license)
         CLIOutput.field("storage", managed.storage.path)
         return ExitStatus.success.rawValue

@@ -45,6 +45,11 @@ struct InstancesView: View {
         .background(theme.canvas)
         .sheet(isPresented: $showCreate) { createSheet }
         .sheet(item: $memoryTarget) { instance in memorySheet(instance) }
+        .sheet(item: $model.showModsForInstance) { instance in
+            ModsView(instance: instance, model: model)
+                .environmentObject(model)
+                .environment(\.lxTheme, theme)
+        }
         .confirmationDialog(
             "删除实例？",
             isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
@@ -99,6 +104,7 @@ struct InstancesView: View {
                                     memoryText = instance.manifest.memoryMiB.map(String.init) ?? ""
                                 },
                                 onDelete: { pendingDelete = instance },
+                                onMods: { model.openMods(instance: instance) },
                                 onLaunch: {
                                     model.selectedInstanceID = instance.id
                                     model.launchSelectedInstance()
@@ -123,7 +129,8 @@ struct InstancesView: View {
                     memoryAutomatic = instance.manifest.memoryMiB == nil
                     memoryText = instance.manifest.memoryMiB.map(String.init) ?? ""
                 },
-                onDelete: { pendingDelete = instance }
+                onDelete: { pendingDelete = instance },
+                onMods: { model.openMods(instance: instance) }
             )
         } else {
             LXCard(padding: 0) {
@@ -285,6 +292,7 @@ private struct InstanceRow: View {
     let onOpen: () -> Void
     let onMemory: () -> Void
     let onDelete: () -> Void
+    let onMods: () -> Void
     let onLaunch: () -> Void
 
     var body: some View {
@@ -340,6 +348,7 @@ private struct InstanceRow: View {
         .animation(.easeOut(duration: 0.12), value: hovering)
         .contextMenu {
             Button("启动此实例", action: onLaunch)
+            Button("模组管理…", action: onMods)
             Button("编辑 JVM 内存…", action: onMemory)
             Divider()
             Button("打开实例文件夹", action: onOpen)
@@ -357,6 +366,7 @@ private struct InstanceDetailPane: View {
     let instance: Instance
     let onEditMemory: () -> Void
     let onDelete: () -> Void
+    let onMods: () -> Void
 
     var body: some View {
         ScrollView {
@@ -421,17 +431,29 @@ private struct InstanceDetailPane: View {
                 LXOverline(text: "RUNTIME PROFILE")
                 ViewThatFits(in: .horizontal) {
                     HStack(spacing: LXSpace.xl) {
-                        LXKeyValue(label: "Minecraft", value: instance.manifest.versionID ?? "未绑定")
-                        LXKeyValue(label: "Loader", value: "Vanilla")
+                        LXKeyValue(label: "Minecraft", value: compatibility?.gameVersion ?? instance.manifest.versionID ?? "未绑定")
+                        LXKeyValue(label: "Loader", value: loaderLabel)
                         LXKeyValue(label: "最近启动", value: lastLaunch)
                     }
                     VStack(alignment: .leading, spacing: 8) {
-                        LXKeyValue(label: "Minecraft", value: instance.manifest.versionID ?? "未绑定")
-                        LXKeyValue(label: "Loader", value: "Vanilla")
+                        LXKeyValue(label: "Minecraft", value: compatibility?.gameVersion ?? instance.manifest.versionID ?? "未绑定")
+                        LXKeyValue(label: "Loader", value: loaderLabel)
                         LXKeyValue(label: "最近启动", value: lastLaunch)
                     }
                 }
             }
+        }
+    }
+
+    private var compatibility: ModCompatibility? {
+        try? ModCompatibilityResolver.resolve(instance: instance, layout: model.layout)
+    }
+
+    private var loaderLabel: String {
+        switch compatibility?.loader {
+        case .fabric: return "Fabric"
+        case .vanilla: return "Vanilla"
+        case nil: return "未知"
         }
     }
 
@@ -462,6 +484,9 @@ private struct InstanceDetailPane: View {
             LXButton("启动此实例", systemImage: "play.fill", kind: .primary, isDisabled: model.isGameRunning || model.activeMicrosoftAccount == nil) {
                 model.selectedInstanceID = instance.id
                 model.launchSelectedInstance()
+            }
+            LXButton("模组管理", systemImage: "puzzlepiece.extension", kind: .secondary) {
+                model.openMods(instance: instance)
             }
             LXButton("打开文件夹", systemImage: "folder", kind: .secondary) {
                 model.openInstanceFolder(instance)

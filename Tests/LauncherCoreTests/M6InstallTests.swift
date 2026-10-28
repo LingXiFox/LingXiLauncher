@@ -71,6 +71,39 @@ final class M6InstallTests: XCTestCase {
         XCTAssertEqual(after.manifest.versionID, "1.20.1")
     }
 
+    func testCorruptExistingTargetFailsClosedBeforeInstallation() async throws {
+        let registry = InstanceRepository(layout: layout)
+        let instance = try registry.create(id: "corrupt", displayName: "Corrupt", versionID: "1.20.1")
+        try Data("{not-json".utf8).write(to: instance.directory.appendingPathComponent("instance.json"))
+        let before = try Data(contentsOf: instance.directory.appendingPathComponent("instance.json"))
+        let installer = FabricInstaller(layout: layout, transport: StubTransport())
+        do {
+            _ = try await installer.install(
+                FabricInstallRequest(
+                    minecraftVersionID: "1.20.1",
+                    instanceID: "corrupt",
+                    updateExistingInstance: true,
+                    javaExecutable: URL(fileURLWithPath: "/definitely/not/java")
+                ),
+                progress: { _ in }
+            )
+            XCTFail("Expected corrupt manifest failure")
+        } catch {
+            XCTAssertEqual((error as? LauncherError)?.code, .invalidMetadata)
+        }
+        XCTAssertEqual(try Data(contentsOf: instance.directory.appendingPathComponent("instance.json")), before)
+    }
+
+    func testBackupManifestNamesAreUnique() throws {
+        let registry = InstanceRepository(layout: layout)
+        let instance = try registry.create(id: "backup", displayName: "Backup", versionID: "1.20.1")
+        let first = try registry.backupManifest(id: instance.id)
+        let second = try registry.backupManifest(id: instance.id)
+        XCTAssertNotEqual(first, second)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: first.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: second.path))
+    }
+
     func testOneStopExplicitUpdateBacksUpManifestAndPreservesWorldData() async throws {
         guard let java = try? JavaRuntimeInspector().discoverDefaultExecutable() else {
             throw XCTSkip("No Java runtime available for the synthetic OneStop update test")
@@ -97,6 +130,8 @@ final class M6InstallTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: report.backupManifest!.path))
         let updated = try registry.load(id: "existing")
         XCTAssertEqual(updated.manifest.versionID, fixture.versionID)
+        XCTAssertNotNil(updated.manifest.javaRuntime)
+        XCTAssertNotNil(updated.manifest.javaRuntime?.executableSHA256)
         XCTAssertEqual(try Data(contentsOf: updated.gameDirectory.appendingPathComponent("level.dat")), Data("world".utf8))
     }
 

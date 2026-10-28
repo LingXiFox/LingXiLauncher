@@ -96,6 +96,11 @@ public actor LaunchService {
             continuation.yield(.phase("Checking Java runtime"))
             let runtime = try javaInspector.inspect(executable: request.javaExecutable)
             let platform = try PlatformContext.forJVM(runtime)
+            // Keep the reproducible Java record in instance metadata even when the user
+            // launches without reinstalling. A failed record write must not block launch.
+            if let record = try? JavaManager(layout: layout).runtimeRecord(for: runtime) {
+                try? InstanceRepository(layout: layout).setJavaRuntime(id: request.instance.id, record: record)
+            }
 
             continuation.yield(.phase("Resolving Minecraft \(versionID)"))
             let version = try VersionResolver().resolve(versionID: versionID, from: layout.gameRoot)

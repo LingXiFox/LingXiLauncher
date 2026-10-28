@@ -216,6 +216,45 @@ final class VersionResolverTests: XCTestCase {
         XCTAssertTrue(resolved.jvmArguments.contains(.argument("-cp")))
     }
 
+    func testRealFabricCompatibilityMatrix() throws {
+        // Official metadata snapshots fetched on 2026-10-27. 26.3 is the current Mojang
+        // release at that time; 1.21.11 covers the 1.21.x line.
+        let cases: [(minecraft: String, java: Int, assets: String)] = [
+            ("1.16.5", 8, "1.16"),
+            ("1.20.1", 17, "5"),
+            ("1.21.11", 21, "29"),
+            ("26.3", 25, "34"),
+        ]
+        for item in cases {
+            let root = try FixtureLoader.temporaryDirectory("lingxi-fabric-matrix-\(item.minecraft)")
+            defer { try? FileManager.default.removeItem(at: root) }
+            let profileID = "fabric-loader-0.20.1-\(item.minecraft)"
+            for (id, fixture) in [
+                (item.minecraft, "versions/\(item.minecraft).json"),
+                (profileID, "versions/\(profileID).json"),
+            ] {
+                let directory = root.appendingPathComponent("versions/\(id)", isDirectory: true)
+                try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+                try FileManager.default.copyItem(
+                    at: try FixtureLoader.url(fixture),
+                    to: directory.appendingPathComponent("\(id).json")
+                )
+            }
+            let resolved = try VersionResolver().resolve(versionID: profileID, from: root)
+            XCTAssertEqual(resolved.mainClass, "net.fabricmc.loader.impl.launch.knot.KnotClient", item.minecraft)
+            XCTAssertEqual(resolved.inheritsFrom, item.minecraft)
+            XCTAssertEqual(resolved.clientJarVersionID, item.minecraft)
+            XCTAssertEqual(resolved.nativesVersionID, item.minecraft)
+            XCTAssertEqual(resolved.assetIndexID, item.assets, item.minecraft)
+            XCTAssertEqual(resolved.javaRequirement.majorVersion, item.java, item.minecraft)
+            XCTAssertEqual(resolved.compatibility, .modern, item.minecraft)
+            XCTAssertNotNil(resolved.clientJar, item.minecraft)
+            XCTAssertTrue(resolved.gameArguments.contains(.argument("--username")), item.minecraft)
+            XCTAssertTrue(resolved.libraries.contains { $0.name.hasPrefix("net.fabricmc:fabric-loader:") }, item.minecraft)
+            XCTAssertEqual(resolved.libraries.filter { $0.name.hasPrefix("org.ow2.asm:asm:") }.count, 1, item.minecraft)
+        }
+    }
+
     func testMissingParentIsExplicit() throws {
         let root = try makeGameRoot(fixturePath: "invalid/version_inherits.json", versionID: "synthetic-inherits")
         defer { try? FileManager.default.removeItem(at: root) }

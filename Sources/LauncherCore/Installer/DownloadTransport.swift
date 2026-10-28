@@ -41,9 +41,19 @@ public protocol DownloadTransport: Sendable {
     /// Fetches a small resource (manifest, version JSON, asset index) into memory.
     func fetch(from url: URL) async throws -> Data
 
+    /// Fetches a resource with explicit request headers (Modrinth requires a unique User-Agent).
+    /// The default keeps existing test transports source-compatible.
+    func fetch(from url: URL, headers: [String: String]) async throws -> Data
+
     /// Downloads `url` into the file at `destination` (which the caller owns and may delete).
     /// Implementations must not write a partial body to `destination` on failure.
     func download(from url: URL, to destination: URL) async throws
+}
+
+public extension DownloadTransport {
+    func fetch(from url: URL, headers: [String: String]) async throws -> Data {
+        try await fetch(from: url)
+    }
 }
 
 /// Real HTTPS transport built on URLSession.
@@ -60,8 +70,15 @@ public struct URLSessionTransport: DownloadTransport, @unchecked Sendable {
     }
 
     public func fetch(from url: URL) async throws -> Data {
+        try await fetch(from: url, headers: [:])
+    }
+
+    public func fetch(from url: URL, headers: [String: String]) async throws -> Data {
         var request = URLRequest(url: url)
         request.setValue(URLSessionTransport.userAgent, forHTTPHeaderField: "User-Agent")
+        for (key, value) in headers {
+            request.setValue(value, forHTTPHeaderField: key)
+        }
         do {
             let (data, response) = try await session.data(for: request)
             try validate(response)
@@ -97,7 +114,7 @@ public struct URLSessionTransport: DownloadTransport, @unchecked Sendable {
         }
     }
 
-    static let userAgent = "LingXiLauncher/\(LauncherInfo.version) (macOS; +https://github.com/)"
+    static let userAgent = "LingXiFox/LingXiLauncher/\(LauncherInfo.version) (macOS; +https://github.com/LingXiFox/LingXiLauncher)"
 
     private func validate(_ response: URLResponse) throws {
         guard let http = response as? HTTPURLResponse else {

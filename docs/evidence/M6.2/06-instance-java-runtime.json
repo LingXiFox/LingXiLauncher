@@ -1,0 +1,8 @@
+{
+  "source": "Mojang java-runtime",
+  "component": "java-runtime-gamma",
+  "version": "17.0.15",
+  "architecture": "arm64",
+  "artifactSHA1": "e0c8d5ccfe8cfb38075ff1b7f6352d7b03fd7868",
+  "executableSHA256": "743f63633c1be457a05b7b0bc4b9960c1de479a14b0f8a277c7c1d261d19ffca"
+}

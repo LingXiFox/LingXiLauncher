@@ -89,6 +89,8 @@ enum CLI {
             return try runInstanceCommand(rest)
         case "install":
             return try await runInstall(rest)
+        case "mod":
+            return try await runModCommand(rest)
         case "verify":
             return try await runVerify(rest)
         default:
@@ -415,6 +417,10 @@ enum CLI {
             javaURL = try services.javaInspector.discoverDefaultExecutable()
         }
         let runtime = try services.javaInspector.inspect(executable: javaURL)
+        if let instance {
+            let record = JavaManager(layout: layout).runtimeRecord(for: runtime)
+            try? registry.setJavaRuntime(id: instance.id, record: record)
+        }
         // Rules, natives selection and natives cache paths must follow the JVM, not the launcher.
         let jvmPlatform = try PlatformContext.forJVM(runtime)
 
@@ -880,6 +886,15 @@ enum CLI {
           java install --major <version> --yes [--data-root <path>]
               Detect Java runtimes; optionally download a verified Eclipse Temurin
               JDK into <dataRoot>/java without touching system Java.
+
+          mod search --instance <id> [--query <text>] [--category a,b]
+                     [--sort relevance|downloads|follows|newest|updated] [--json]
+          mod install --instance <id> --project <id|slug> [--version <id>] [--replace]
+          mod list --instance <id> [--json]
+          mod enable|disable|remove --instance <id> --file <mod.jar>
+          mod updates --instance <id> [--json]
+              Modrinth Fabric mod browsing/install with required-dependency resolution,
+              SHA-1/SHA-512 verification and atomic local mod updates.
 
           verify --instance <instance-id> [--json]
               Re-check every installed file against the metadata SHA-1/size.

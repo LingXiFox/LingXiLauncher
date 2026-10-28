@@ -1,0 +1,21 @@
+Real Minecraft 1.20.1 + Fabric Loader 0.20.1 launch (local-offline technical identity)
+Instance: fabric-mods
+Java: Mojang java-runtime-gamma 17.0.15 (macOS arm64)
+
+Game log:
+[21:06:04] [main/INFO]: Loading Minecraft 1.20.1 with Fabric Loader 0.20.1
+[21:06:04] [main/INFO]: Loading 60 mods:
+	- fabric-api 0.92.12+1.20.1
+	- lithium 0.11.4
+	- sodium 0.5.13+mc1.20.1
+...
+Minecraft 1.20.1 / Fabric (Modded) main menu reached.
+The process was force-stopped after the screenshot; exit code 143 is expected cleanup, not a launch failure.
+
+Selected log lines:
+[21:46:29] [main/INFO]: Loading Minecraft 1.20.1 with Fabric Loader 0.20.1
+[21:46:29] [main/INFO]: Loading 60 mods:
+	- fabric-api 0.92.12+1.20.1
+	- lithium 0.11.4
+	- sodium 0.5.13+mc1.20.1
+[21:46:33] [Render thread/INFO]: Setting user: ModTester

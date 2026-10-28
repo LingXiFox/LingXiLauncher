@@ -34,6 +34,8 @@ public struct InstanceManifest: Codable, Sendable, Equatable {
     /// Manual JVM heap limit (`-Xmx<N>M`). Nil means automatic allocation based on physical
     /// memory; automatic never means "no -Xmx" at launch. See `InstanceMemory`.
     public var memoryMiB: Int?
+    /// Reproducible Java selection/installation record (version + published checksum).
+    public var javaRuntime: JavaRuntimeRecord?
 
     public init(
         id: String,
@@ -42,7 +44,8 @@ public struct InstanceManifest: Codable, Sendable, Equatable {
         createdAt: Date = Date(),
         lastLaunchedAt: Date? = nil,
         lastIdentityMode: IdentityMode? = nil,
-        memoryMiB: Int? = nil
+        memoryMiB: Int? = nil,
+        javaRuntime: JavaRuntimeRecord? = nil
     ) {
         self.id = id
         self.displayName = displayName
@@ -51,6 +54,7 @@ public struct InstanceManifest: Codable, Sendable, Equatable {
         self.lastLaunchedAt = lastLaunchedAt
         self.lastIdentityMode = lastIdentityMode
         self.memoryMiB = memoryMiB
+        self.javaRuntime = javaRuntime
     }
 }
 
@@ -153,7 +157,8 @@ public struct InstanceRepository: Sendable {
             createdAt: instance.manifest.createdAt,
             lastLaunchedAt: instance.manifest.lastLaunchedAt,
             lastIdentityMode: instance.manifest.lastIdentityMode,
-            memoryMiB: instance.manifest.memoryMiB
+            memoryMiB: instance.manifest.memoryMiB,
+            javaRuntime: instance.manifest.javaRuntime
         )
         try save(updated, in: instance.directory)
         instance.manifest = updated
@@ -175,7 +180,8 @@ public struct InstanceRepository: Sendable {
             createdAt: instance.manifest.createdAt,
             lastLaunchedAt: instance.manifest.lastLaunchedAt,
             lastIdentityMode: instance.manifest.lastIdentityMode,
-            memoryMiB: memoryMiB
+            memoryMiB: memoryMiB,
+            javaRuntime: instance.manifest.javaRuntime
         )
         try save(updated, in: instance.directory)
         instance.manifest = updated
@@ -240,6 +246,28 @@ public struct InstanceRepository: Sendable {
         return target
     }
 
+    /// Persists the actual Java runtime used by an instance. Callers should pass the record
+    /// produced by `JavaManager.runtimeRecord(for:)` after a managed install or an explicit
+    /// user selection.
+    @discardableResult
+    public func setJavaRuntime(id: String, record: JavaRuntimeRecord?) throws -> Instance {
+        var instance = try load(id: id)
+        guard instance.manifest.javaRuntime != record else { return instance }
+        let updated = InstanceManifest(
+            id: instance.manifest.id,
+            displayName: instance.manifest.displayName,
+            versionID: instance.manifest.versionID,
+            createdAt: instance.manifest.createdAt,
+            lastLaunchedAt: instance.manifest.lastLaunchedAt,
+            lastIdentityMode: instance.manifest.lastIdentityMode,
+            memoryMiB: instance.manifest.memoryMiB,
+            javaRuntime: record
+        )
+        try save(updated, in: instance.directory)
+        instance.manifest = updated
+        return instance
+    }
+
     /// Backs up only the small instance manifest before an explicit version update. Worlds,
     /// options, mods and logs are not touched by a version-pointer update.
     @discardableResult
@@ -247,7 +275,8 @@ public struct InstanceRepository: Sendable {
         let instance = try load(id: id)
         let source = instance.directory.appendingPathComponent("instance.json", isDirectory: false)
         let stamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
-        let destination = instance.directory.appendingPathComponent("instance.json.backup-\(stamp)", isDirectory: false)
+        let nonce = UUID().uuidString.prefix(8).lowercased()
+        let destination = instance.directory.appendingPathComponent("instance.json.backup-\(stamp)-\(nonce)", isDirectory: false)
         do {
             try FileManager.default.copyItem(at: source, to: destination)
             return destination
