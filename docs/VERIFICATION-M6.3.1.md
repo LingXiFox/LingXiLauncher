@@ -111,4 +111,12 @@ codesign --verify --deep --strict --verbose=2 dist/LingXiMac.app
 
 ## 6. 范围与后续
 
-本阶段没有新增 Forge/NeoForge/Quilt/CurseForge；没有改动 Microsoft 认证、Keychain、系统 Java 或正式发行签名。真实 CI 运行链接在首次 push 后补充到 Actions 页面和 README 徽章。
+本阶段没有新增 Forge/NeoForge/Quilt/CurseForge；没有改动 Microsoft 认证、Keychain、系统 Java 或正式发行签名。
+
+## 7. GitHub Actions 实跑结果
+
+- 运行：[CI #40822071444](https://github.com/LingXiFox/LingXiLauncher/actions/runs/40822071444)（commit `a92f626`，`xcode-27` Apple Silicon Runner）— **success**。
+- Debug build、完整测试、Release CLI/GUI、App Bundle、Info.plist/arm64/ad-hoc 签名、Artifact 上传全部成功。
+- 测试日志：**275 tests, 0 failures, 0 unexpected**；无 XCTest skip。
+- Artifact：`LingXiMac-ci-a92f626aba1649b6c996c27be9d9e3c41ae3c705`（约 3.3 MB，保留 7 天）。
+- 首轮运行 [CI #40821586995](https://github.com/LingXiFox/LingXiLauncher/actions/runs/40821586995) 亦通过，用于确认工作流初始配置。
