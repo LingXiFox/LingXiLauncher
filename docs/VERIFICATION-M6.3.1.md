@@ -52,7 +52,7 @@ testExistingInstanceIsNeverTouchedByNewPackInstall
 - `raw.githubusercontent.com`
 - `gitlab.com`
 
-每个候选 URL 必须满足：HTTPS、无 user/password、端口为空或 443、host 在允许集合中。下载仍由 `Downloader` 执行大小限制、SHA-512 优先 / SHA-1 回退校验，并经过重定向安全策略（拒绝非 HTTPS、凭据、非标准端口和超过 3 次跳转）。解析器只接受带有至少一种哈希和明确 `fileSize` 的文件。
+每个候选 URL 必须满足：HTTPS、无 user/password、端口为空或 443、host 在允许集合中。下载仍由 `Downloader` 执行大小限制、SHA-512 优先 / SHA-1 回退校验，并经过重定向安全策略（拒绝非 HTTPS、凭据、非标准端口和超过 5 次跳转）。解析器只接受带有至少一种哈希和明确 `fileSize` 的文件。
 
 ### optional 客户端文件
 
