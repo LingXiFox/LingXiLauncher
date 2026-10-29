@@ -35,10 +35,12 @@ public struct ModrinthClient: Sendable {
         }
 
         var facets: [[String]] = [
-            ["project_type:mod"],
-            ["categories:\(query.loader)"],
+            ["project_type:\(query.projectType)"],
             ["versions:\(query.gameVersion)"],
         ]
+        if query.includeLoaderFacet {
+            facets.insert(["categories:\(query.loader)"], at: 1)
+        }
         for category in query.categories where !category.isEmpty {
             facets.append(["categories:\(category)"])
         }
@@ -72,17 +74,20 @@ public struct ModrinthClient: Sendable {
     public func versions(
         projectID: String,
         gameVersion: String,
-        loader: String = "fabric"
+        loader: String? = "fabric"
     ) async throws -> [ModrinthVersion] {
         var components = URLComponents(
             url: baseURL.appendingPathComponent("project").appendingPathComponent(projectID).appendingPathComponent("version"),
             resolvingAgainstBaseURL: false
         )!
-        components.queryItems = [
+        var items = [
             URLQueryItem(name: "game_versions", value: Self.encode([gameVersion])),
-            URLQueryItem(name: "loaders", value: Self.encode([loader])),
             URLQueryItem(name: "include_changelog", value: "false"),
         ]
+        if let loader {
+            items.append(URLQueryItem(name: "loaders", value: Self.encode([loader])))
+        }
+        components.queryItems = items
         let data = try await get(components.url!, label: "Modrinth versions")
         return try decode([ModrinthVersion].self, from: data, context: "Modrinth versions for '\(projectID)'")
     }

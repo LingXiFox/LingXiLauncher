@@ -26,6 +26,10 @@ public struct ModrinthSearchQuery: Sendable, Equatable {
     public var sort: ModrinthSort
     public var offset: Int
     public var limit: Int
+    /// Modrinth project type facet. Mods use `mod`; shader packs use `shader`.
+    public var projectType: String
+    /// Loader facet is meaningful for mods, but not for shader packs.
+    public var includeLoaderFacet: Bool
 
     public init(
         query: String = "",
@@ -34,7 +38,9 @@ public struct ModrinthSearchQuery: Sendable, Equatable {
         categories: [String] = [],
         sort: ModrinthSort = .relevance,
         offset: Int = 0,
-        limit: Int = 20
+        limit: Int = 20,
+        projectType: String = "mod",
+        includeLoaderFacet: Bool = true
     ) {
         self.query = query
         self.gameVersion = gameVersion
@@ -43,6 +49,8 @@ public struct ModrinthSearchQuery: Sendable, Equatable {
         self.sort = sort
         self.offset = max(0, offset)
         self.limit = min(100, max(1, limit))
+        self.projectType = projectType
+        self.includeLoaderFacet = includeLoaderFacet
     }
 }
 
@@ -235,6 +243,7 @@ public struct ModrinthFile: Decodable, Sendable, Equatable {
     }
 
     public var isJar: Bool { filename.lowercased().hasSuffix(".jar") }
+    public var isZip: Bool { filename.lowercased().hasSuffix(".zip") }
     public var downloadURL: URL? { URL(string: url) }
 }
 
@@ -300,6 +309,18 @@ public struct ModrinthVersion: Decodable, Sendable, Equatable, Identifiable {
     public var primaryJar: ModrinthFile? {
         let jars = files.filter(\.isJar)
         return jars.first(where: \.primary) ?? jars.first
+    }
+
+    public var primaryZip: ModrinthFile? {
+        let zips = files.filter(\.isZip)
+        return zips.first(where: \.primary) ?? zips.first
+    }
+
+    /// Shader packs are selected by Minecraft version only; their loader field describes
+    /// supported shader mods (iris/optifine/canvas), not the Minecraft mod loader.
+    public func isCompatibleForShader(gameVersion: String) -> Bool {
+        let listed = status.map { $0 == "listed" } ?? true
+        return listed && gameVersions.contains(gameVersion) && primaryZip != nil
     }
 }
 

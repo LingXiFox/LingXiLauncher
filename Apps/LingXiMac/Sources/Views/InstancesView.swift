@@ -55,6 +55,11 @@ struct InstancesView: View {
                 .environmentObject(model)
                 .environment(\.lxTheme, theme)
         }
+        .sheet(item: $model.showGraphicsForInstance) { instance in
+            GraphicsView(instance: instance, model: model)
+                .environmentObject(model)
+                .environment(\.lxTheme, theme)
+        }
         .sheet(isPresented: $model.showMrpackImport) {
             MrpackImportView()
                 .environmentObject(model)
@@ -529,6 +534,9 @@ private struct InstanceDetailPane: View {
             }
             LXButton("模组管理", systemImage: "puzzlepiece.extension", kind: .secondary) {
                 model.openMods(instance: instance)
+            }
+            LXButton("图形与光影", systemImage: "sparkles", kind: .secondary) {
+                model.openGraphics(instance: instance)
             }
             LXButton("打开文件夹", systemImage: "folder", kind: .secondary) {
                 model.openInstanceFolder(instance)

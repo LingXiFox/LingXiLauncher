@@ -10,16 +10,18 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   build-test-package:
     name: Build, test and package (Apple Silicon)
     runs-on: xcode-27
-    timeout-minutes: 60
+    timeout-minutes: 30
     env:
       SWIFT_DETERMINISTIC_HASHING: "1"
+      NSUnbufferedIO: "YES"
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -27,41 +29,42 @@ jobs:
           persist-credentials: false
           fetch-depth: 1
 
-      - name: Toolchain info
+      - name: Show toolchain
         run: |
           set -euo pipefail
-          uname -m
-          swift --version
+          sw_vers
           xcodebuild -version
+          swift --version
+          uname -m
 
       - name: Debug build
-        run: |
-          set -euo pipefail
-          swift build
+        run: swift build
 
       - name: Unit tests
+        shell: bash
         run: |
           set -euo pipefail
           swift test 2>&1 | tee "$RUNNER_TEMP/swift-test.log"
-          if grep -q 'skipped' "$RUNNER_TEMP/swift-test.log"; then
-            echo "XCTest reported skips; inspect the log artifact for details." >> "$GITHUB_STEP_SUMMARY"
+          SUMMARY="$(grep -E 'Executed [0-9]+ tests?, with [0-9]+ failures?' "$RUNNER_TEMP/swift-test.log" | tail -n 1)"
+          test -n "$SUMMARY"
+          echo "$SUMMARY" >> "$GITHUB_STEP_SUMMARY"
+          if grep -qi 'skipped' "$RUNNER_TEMP/swift-test.log"; then
+            echo "XCTest reported skipped tests; inspect the full log." >> "$GITHUB_STEP_SUMMARY"
           else
-            echo "XCTest skips: 0 (no skipped tests in the full log)." >> "$GITHUB_STEP_SUMMARY"
+            echo "XCTest skips: 0 (no skip marker in the full log)." >> "$GITHUB_STEP_SUMMARY"
           fi
-          grep -E 'Executed [0-9]+ tests' "$RUNNER_TEMP/swift-test.log" | tail -n 1 >> "$GITHUB_STEP_SUMMARY" || true
 
-      - name: Release CLI and GUI builds
-        run: |
-          set -euo pipefail
-          swift build -c release --product lingxi
-          swift build -c release --product LingXiMac
+      - name: Release CLI build
+        run: swift build -c release --product lingxi
 
-      - name: Package app bundle (ad-hoc, CI only)
-        run: |
-          set -euo pipefail
-          Scripts/build-app.sh --release
+      - name: Release GUI build
+        run: swift build -c release --product LingXiMac
 
-      - name: Verify app bundle and signature
+      - name: Package app bundle (ad-hoc signed)
+        run: Scripts/build-app.sh --release
+
+      - name: Verify app bundle and ad-hoc signature
+        shell: bash
         run: |
           set -euo pipefail
           APP="dist/LingXiMac.app"
@@ -71,7 +74,9 @@ jobs:
           test -f "$APP/Contents/Resources/AppIcon.icns"
           plutil -lint "$APP/Contents/Info.plist"
           test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Contents/Info.plist")" = "com.lingxifox.LingXiLauncher"
-          lipo -info "$APP/Contents/MacOS/LingXiMac" | grep -q arm64
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP/Contents/Info.plist")" = "LingXiMac"
+          lipo -info "$APP/Contents/MacOS/LingXiMac" | tee "$RUNNER_TEMP/lipo.txt"
+          grep -q 'arm64' "$RUNNER_TEMP/lipo.txt"
           codesign --verify --deep --strict --verbose=2 "$APP"
           codesign -dv --verbose=4 "$APP" 2>&1 | tee "$RUNNER_TEMP/codesign.txt"
           grep -q 'Signature=adhoc' "$RUNNER_TEMP/codesign.txt"
@@ -82,7 +87,7 @@ jobs:
           set -euo pipefail
           ditto -c -k --sequesterRsrc --keepParent "dist/LingXiMac.app" "dist/LingXiMac-${GITHUB_SHA}.zip"
 
-      - name: Upload CI artifact
+      - name: Upload CI-only app artifact
         uses: actions/upload-artifact@v4
         with:
           name: LingXiMac-ci-${{ github.sha }}

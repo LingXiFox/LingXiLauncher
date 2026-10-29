@@ -136,6 +136,7 @@ final class AppModel: ObservableObject {
     @Published var showInstallWizard = false
     @Published var installWizardInitialVersion: String?
     @Published var showModsForInstance: Instance?
+    @Published var showGraphicsForInstance: Instance?
     @Published var showMrpackImport = false
     @Published var mrpackImportURL: URL?
 
@@ -320,6 +321,12 @@ final class AppModel: ObservableObject {
         section = .instances
         selectedInstanceID = instance.id
         showModsForInstance = instance
+    }
+
+    func openGraphics(instance: Instance) {
+        section = .instances
+        selectedInstanceID = instance.id
+        showGraphicsForInstance = instance
     }
 
     func openInstanceFolder(_ instance: Instance) {
@@ -690,6 +697,14 @@ final class AppModel: ObservableObject {
 
     func makeModManager() -> ModManager {
         ModManager(layout: layout, transport: URLSessionTransport())
+    }
+
+    func makeGraphicsSetupManager() -> GraphicsSetupManager {
+        GraphicsSetupManager(layout: layout, transport: URLSessionTransport())
+    }
+
+    func makeShaderPackManager() -> ShaderPackManager {
+        ShaderPackManager(layout: layout, transport: URLSessionTransport())
     }
 
     func makeMrpackInstaller() throws -> MrpackInstaller {

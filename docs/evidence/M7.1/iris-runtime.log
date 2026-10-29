@@ -1,0 +1,30 @@
+# M7.1 Iris runtime evidence (selected lines)
+
+[18:19:54] [Render thread/INFO]: Backend library: LWJGL version 3.3.1 SNAPSHOT
+[18:19:54] [Render thread/INFO]: OpenGL Vendor: Apple
+[18:19:54] [Render thread/INFO]: OpenGL Renderer: Apple M5
+[18:19:54] [Render thread/INFO]: OpenGL Version: 4.1 Metal - 91.7
+[18:19:54] [Render thread/WARN]: Failed sysctl call: hw.cpufrequency, Error code: 2
+[18:19:54] [Render thread/INFO]: Debug functionality is disabled.
+[18:19:54] [Render thread/INFO]: DSA support not detected.
+[18:19:54] [Render thread/INFO]: Profile: HIGH (+0 options changed by user)
+[18:19:55] [Render thread/INFO]: Using shaderpack: ComplementaryReimagined_r5.9.3.zip
+[18:19:55] [Render thread/INFO]: Hardware information:
+[18:19:55] [Render thread/INFO]: CPU: 10x Apple M5
+[18:19:55] [Render thread/INFO]: GPU: Apple M5 (Supports OpenGL 4.1 Metal - 91.7)
+[18:19:55] [Render thread/INFO]: OS: Mac OS X (27.2)
+[18:19:55] [Render thread/INFO]: Reloading ResourceManager: vanilla, fabric (fabric-api-base, fabric-block-view-api-v2, fabric-key-binding-api-v1, fabric-rendering-data-attachment-v1, fabric-rendering-fluids-v1, fabric-resource-loader-v0, fabricloader, iris, sodium)
+
+# First custom-uniform warning (non-fatal)
+	at kroppeb.stareval.resolver.ExpressionResolver.resolveCallExpression(ExpressionResolver.java:140) ~[iris-1.7.6+mc1.20.1.jar:?]
+	at kroppeb.stareval.resolver.ExpressionResolver.resolveCallExpression(ExpressionResolver.java:127) ~[iris-1.7.6+mc1.20.1.jar:?]
+	at kroppeb.stareval.resolver.ExpressionResolver.resolveExpressionInternal(ExpressionResolver.java:194) ~[iris-1.7.6+mc1.20.1.jar:?]
+	at kroppeb.stareval.resolver.ExpressionResolver.resolveCallExpressionInternal(ExpressionResolver.java:81) ~[iris-1.7.6+mc1.20.1.jar:?]
+	at kroppeb.stareval.resolver.ExpressionResolver.resolveCallExpression(ExpressionResolver.java:140) ~[iris-1.7.6+mc1.20.1.jar:?]
+	at kroppeb.stareval.resolver.ExpressionResolver.resolveExpressionInternal(ExpressionResolver.java:194) ~[iris-1.7.6+mc1.20.1.jar:?]
+	at kroppeb.stareval.resolver.ExpressionResolver.resolveExpression(ExpressionResolver.java:50) ~[iris-1.7.6+mc1.20.1.jar:?]
+	at net.irisshaders.iris.uniforms.custom.CustomUniforms.<init>(CustomUniforms.java:62) ~[iris-1.7.6+mc1.20.1.jar:?]
+	at net.irisshaders.iris.uniforms.custom.CustomUniforms$Builder.build(CustomUniforms.java:333) ~[iris-1.7.6+mc1.20.1.jar:?]
+	at net.irisshaders.iris.uniforms.custom.CustomUniforms$Builder.build(CustomUniforms.java:344) ~[iris-1.7.6+mc1.20.1.jar:?]
+	at net.irisshaders.iris.pipeline.IrisRenderingPipeline.<init>(IrisRenderingPipeline.java:267) ~[iris-1.7.6+mc1.20.1.jar:?]
+	at net.irisshaders.iris.Iris.createPipeline(Iris.java:594) ~[iris-1.7.6+mc1.20.1.jar:?]

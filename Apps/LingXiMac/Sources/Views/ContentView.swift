@@ -92,6 +92,13 @@ struct ContentView: View {
             model.openMrpackImport(url: url)
             return ["mrpackOpen": model.showMrpackImport, "path": url?.path ?? ""]
         })
+        debugTokens.append(center.register("graphics.open") { params in
+            guard let id = params["instanceID"], let instance = model.instances.first(where: { $0.id == id }) else {
+                return ["ok": false, "error": "instance not found"]
+            }
+            model.openGraphics(instance: instance)
+            return ["graphicsOpen": model.showGraphicsForInstance?.id ?? "", "instance": id]
+        })
     }
 
     private func unregisterDebugActions() {

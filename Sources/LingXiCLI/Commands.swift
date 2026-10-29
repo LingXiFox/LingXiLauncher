@@ -93,6 +93,10 @@ enum CLI {
             return try await runModCommand(rest)
         case "mrpack":
             return try await runMrpackCommand(rest)
+        case "graphics":
+            return try await runGraphicsCommand(rest)
+        case "shader":
+            return try await runShaderCommand(rest)
         case "verify":
             return try await runVerify(rest)
         default:
@@ -904,6 +908,25 @@ enum CLI {
               Validate a Modrinth .mrpack, download/verify its files through the
               persistent cache, install Minecraft/Fabric and commit the pack into a
               fresh isolated instance. Forge/NeoForge/Quilt are rejected explicitly.
+
+          graphics status --instance <id> [--json]
+          graphics setup --instance <id> [--replace] [--json]
+              Resolve and install a compatible Iris + Sodium pair from Modrinth.
+              Existing mismatched mods require --replace; no loader is installed.
+
+          shader search --instance <id> [--query <text>] [--category a,b]
+                  [--sort relevance|downloads|follows|newest|updated] [--json]
+          shader install --instance <id> --project <id|slug> [--version <id>]
+                  [--replace <old-file>] [--json]
+          shader import --instance <id> --file <pack.zip> [--json]
+          shader list --instance <id> [--json]
+          shader updates --instance <id> [--json]
+          shader enable --instance <id> --file <pack.zip> [--json]
+          shader disable --instance <id> [--json]
+          shader remove --instance <id> --file <pack.zip>
+              Browse/install verified shader packs into instance-local shaderpacks/,
+              and only rewrite the verified Iris shaderPack/enableShaders keys when
+              enabling/disabling. Shader installation never implies activation.
 
           verify --instance <instance-id> [--json]
               Re-check every installed file against the metadata SHA-1/size.

@@ -1,4 +1,4 @@
-# 开发说明（M1 + M2 + M2.5 + M3 + M5-Alpha + M6.1 + M6.1.1 + M6.2 + M6.2.1 + M6.3）
+# 开发说明（M1 + M2 + M2.5 + M3 + M5-Alpha + M6.1 + M6.1.1 + M6.2 + M6.2.1 + M6.3 + M6.3.1 + M7.1）
 
 本文记录实现约定、契约边界和验收方式。产品边界与安全披露见根目录 [README](../README.md)。
 
@@ -54,10 +54,11 @@ Sources/LauncherCore/
 │   ├── OneStopInstaller.swift    # GUI/CLI 统一的 Vanilla/Fabric 安装与目标策略
 │   ├── Modrinth/                 # M6.2 官方 API、依赖解析、mods 仓库、更新
 │   ├── Modpack/                  # M6.3 .mrpack 解析、安全 staging、事务安装
+│   ├── Shader/                   # M7.1 光影包仓库、Iris 配置、Iris+Sodium 安装
 │   └── InstallationVerifier.swift# 全量哈希校验
 ├── Apps/LingXiMac/               # M5 SwiftUI GUI（直接依赖 LauncherCore）
 │   ├── Info.plist
-│   └── Sources/                  # AppModel + Views
+│   └── Sources/                  # AppModel + Views（含 M7.1 GraphicsStore/GraphicsView）
 ├── Scripts/build-app.sh          # SwiftPM → dist/LingXiMac.app（ad-hoc）
 └── Sources/LingXiCLI/            # 薄外壳：argv 解析、Core 调用、退出码映射
 Tests/LauncherCoreTests/
@@ -193,6 +194,7 @@ swift test
 | `JavaManagerSafetyTests` (5) | 托管 JDK 最终 probe 失败回滚、成功替换清理 backup、Mojang runtime 完整安装/记录、Java 元数据兼容判断 |
 | `M6ModrinthTests` (11) | 真实 Modrinth 搜索/项目/版本解码、facets/User-Agent、本地 mods 生命周期、必需/固定版本依赖、启用/禁用/版本约束下的不兼容依赖、更新状态/渠道/降级、更新哈希失败保留旧文件、mrpack 哈希来源追踪 |
 | `MrpackTests` (12) | format 1 解析/客户端 overrides、ZIP 路径与哈希拒绝、可信域/重定向、可选客户端文件、真实合成安装、损坏/网络失败、连续取消与重试、已有实例保护 |
+| `M7GraphicsTests` (7) | Iris/Sodium 固定依赖安装、显式替换、光影安装+启用、哈希失败保护存档/配置、非 Fabric 拒绝、游戏运行时拒绝切换、畸形本地 ZIP 拒绝 |
 | `LaunchServiceTests` (2) | 启动失败事件、事件流终止与重复调用 |
 | `PathSafetyTests` (4) / `GameDataLayoutTests` (3) / `PlatformContextTests` (3) | 路径穿越、布局推导、平台上下文 |
 
@@ -222,10 +224,12 @@ CI（`.github/workflows/ci.yml`）在 `xcode-27` Apple Silicon Runner 上运行 
 | M6.2 | Modrinth Fabric 搜索/安装/依赖/本地管理/更新 + 双视图 GUI | ✅ 真实 1.20.1 Fabric API/Sodium/Lithium 安装并进入主菜单（见 VERIFICATION-M6.2.md） |
 | M6.2.1 | 依赖冲突/禁用更新/更新渠道/Debug 安全 | ✅ 270 tests，Debug token/Release 编译验证 |
 | M6.3 | Modrinth `.mrpack` 解析/安全事务安装/GUI/CLI | ✅ 真实 Fabulously Optimized 5.4.1 安装并进入 149 mods 主菜单（见 VERIFICATION-M6.3.md） |
+| M6.3.1 | 重试生命周期、来源追踪、可信域/可选文件、CI | ✅ 275 tests，CI #40822071444 success（见 VERIFICATION-M6.3.1.md） |
+| M7.1 | Iris/Sodium、光影搜索/安装/启用/更新、macOS OpenGL 提示 | ✅ 282 tests；真实 1.20.1 Fabric + Iris 1.7.6 + Sodium 0.5.12 + Complementary r5.9.3 进入世界（见 VERIFICATION-M7.1.md） |
 
 ## 9. 剩余工作
 
-- **M6.4+**：Quilt/NeoForge/Forge 加载器、CurseForge、模组冲突可视化、Fabric 元数据镜像策略。
+- **M7.2+**：更多 Minecraft/Fabric/Iris/Sodium 组合矩阵、光影性能基准、forks/备份策略；暂不做新 Mod Loader。
 - **M5-B**：下载任务历史、更多诊断导出项。
 - 外观：皮肤/披风纹理缓存、Cape 动画与更多皮肤模型细节。
 - 真实大文件 GUI 下载中途取消、Intel Mac 托管 Java、Developer ID 签名/公证。
