@@ -168,17 +168,18 @@ Signature=adhoc
 
 CI 工作流：`.github/workflows/ci.yml`，使用 GitHub 官方 `xcode-27` Apple Silicon Runner；push main、PR、workflow_dispatch；仅 `contents: read`；30 分钟超时；Debug build、完整 XCTest、Release CLI/GUI、`Scripts/build-app.sh`、Info.plist/arm64/ad-hoc 签名校验、ZIP Artifact 上传。CI 不执行 Microsoft 登录、真实 Minecraft 下载或图形桌面启动，Artifact 不是公证发行版。
 
-## 8. 边界与后续
+## 8. GitHub Actions 实跑结果
+
+- 运行：[CI #40859865613](https://github.com/LingXiFox/LingXiLauncher/actions/runs/40859865613)（commit `c9f46ae`，`xcode-27` Apple Silicon Runner）— **success**，耗时约 3 分 34 秒。
+- Debug build、完整 **283 tests / 0 failures / 0 unexpected**、Release CLI/GUI、`Scripts/build-app.sh`、Info.plist/arm64/ad-hoc 签名校验全部通过。
+- Artifact：`LingXiMac-ci-c9f46aeee2535cbd695543c38c25102a98e19a31`，约 **3.70 MB**，保留 7 天；仅用于测试，不是公证发行版。
+- 首次 M7.1 CI 运行 [#40859308536](https://github.com/LingXiFox/LingXiLauncher/actions/runs/40859308536)（commit `138bffa`）也通过，覆盖最初的 282 项测试。
+- CI 未执行 Microsoft 登录、真实 Minecraft 下载或图形桌面游戏启动；真实游戏验证是本地独立步骤。
+
+## 9. 边界与后续
 
 - 真实游戏验证使用本地技术身份 + CLI 启动；GUI 的真实启动按钮仍要求已登录账号，本阶段没有重新执行 Microsoft 登录流程。
 - macOS 只有 OpenGL 4.1（Metal 转译），复杂光影在 Apple Silicon 上可能掉帧；启动器只提示，不承诺帧率，也不宣传“RTX”。
 - Complementary r5.9.3 在 Iris 1.7.6 下有未知 custom uniform 警告；未做所有光影包兼容性矩阵。
 - 未测试 Intel Mac；`.app` 为 ad-hoc 签名，不是 Developer ID 签名或公证发行版。
 - Modrinth、Iris、Sodium 和光影包的许可证/署名仍由各自项目提供；启动器不重新分发这些文件。
-
-### GitHub Actions 实跑结果
-
-- 运行：[CI #40859308536](https://github.com/LingXiFox/LingXiLauncher/actions/runs/40859308536)（commit `138bffa`，`xcode-27` Apple Silicon Runner）— **success**，耗时约 2 分 20 秒。
-- Debug build、完整 **283 tests / 0 failures / 0 unexpected**、Release CLI/GUI、`Scripts/build-app.sh`、Info.plist/arm64/ad-hoc 签名校验全部通过。
-- Artifact：`LingXiMac-ci-138bffa7b023cf1af6ce0cca5ebb460e3fa2e32e`，约 **3.70 MB**，保留 7 天；仅用于测试，不是公证发行版。
-- CI 未执行 Microsoft 登录、真实 Minecraft 下载或图形桌面游戏启动；真实游戏验证是本地独立步骤。

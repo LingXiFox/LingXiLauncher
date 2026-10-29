@@ -52,6 +52,19 @@ LINGXI_GAME_ROOT="$PWD/.dev-sandbox/mc" \
 | `mrpack.install` | — | 调用真实安装按钮流程并等待完成 |
 | `mrpack.state` | — | 解析/安装/Java/错误状态 |
 | `mrpack.close` | — | 关闭导入 sheet |
+| `graphics.open` | `instanceID` | 打开指定实例的图形与光影（与按钮共用 `AppModel.openGraphics`） |
+| `graphics.state` | — | 当前 tab、环境、已安装光影、搜索/版本/更新/错误 |
+| `graphics.tab` | `tab=installed|browse|setup` | 切换光影工作台页签 |
+| `graphics.setup` | `replace=true?` | 调用真实 Iris+Sodium 安装流程 |
+| `graphics.search` | `query`, `sort`, `offset?` | 搜索 Modrinth 光影 |
+| `graphics.select` | `projectID` | 打开光影详情与兼容版本 |
+| `graphics.install` | `versionID?`, `replaceFile?` | 下载、校验并安装所选光影版本 |
+| `graphics.import` | `path` | 导入本地 ZIP（与导入按钮同一方法） |
+| `graphics.activate` | `file` | 写入 Iris `shaderPack`/`enableShaders` |
+| `graphics.deactivate` | — | 安全关闭 Iris 光影 |
+| `graphics.update` | `projectID` | 检查并安装真实更新 |
+| `graphics.remove` | `file` | 删除确认后的光影文件 |
+| `graphics.close` | — | 关闭图形与光影 sheet |
 
 示例：
 
