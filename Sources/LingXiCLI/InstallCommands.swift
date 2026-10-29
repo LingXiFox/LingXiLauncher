@@ -49,10 +49,13 @@ extension CLI {
         if loader == "fabric" {
             return try await runFabricInstall(Array(arguments.dropFirst()))
         }
+        if loader == "neoforge" {
+            return try await runNeoForgeInstall(Array(arguments.dropFirst()))
+        }
         guard loader == "vanilla" else {
             throw LauncherError(
                 .notImplemented,
-                "Only vanilla and Fabric installation are implemented; '\(loader)' is not supported",
+                "Only vanilla, Fabric and NeoForge installation are implemented; '\(loader)' is not supported",
                 suggestion: "Use `lingxi install vanilla ...` or `lingxi install fabric ...`."
             )
         }
@@ -202,6 +205,71 @@ extension CLI {
         let report = try await installer.install(request, progress: { printer.handle($0) })
         printer.finish()
         CLIOutput.header("Fabric install complete")
+        CLIOutput.field("profile", report.installedVersionID)
+        CLIOutput.field("instance", "\(report.instanceID)  \(report.gameDirectory.path)")
+        if let backup = report.backupManifest {
+            CLIOutput.field("backup", backup.path)
+        }
+        CLIOutput.field("downloaded", "\(report.downloadedFiles) file(s), \(Downloader.format(bytes: report.downloadedBytes))")
+        print("Next: lingxi launch --instance \(report.instanceID) --identity <identity> --java <path> --root \(layout.gameRoot.path) --data-root \(layout.dataRoot.path)")
+        return ExitStatus.success.rawValue
+    }
+
+
+    static func runNeoForgeInstall(_ arguments: [String]) async throws -> Int32 {
+        let spec = ArgumentParser.Spec(
+            valueOptions: ["version", "instance", "name", "loader", "root", "data-root", "source", "mirror-config", "concurrency", "java"],
+            flagOptions: ["update", "help"]
+        )
+        let input = try ArgumentParser.parse(arguments, spec: spec)
+        if input.has("help") {
+            print("""
+            usage: lingxi install neoforge --version <minecraft-id> --instance <instance-id> [options]
+
+              --loader <version>      NeoForge version (default: newest compatible)
+              --instance <id>         new instance id, or existing id with --update
+              --update                explicitly update an existing instance (manifest backup first)
+              --name "<label>"        display name for a new instance
+              --source <policy>       official | mirror | auto | local-cache-only
+              --java <path>           Java 21+ runtime used for install and preflight
+              --root / --data-root    game and launcher data roots
+            """)
+            return ExitStatus.success.rawValue
+        }
+        let versionID = try input.requireValue("version")
+        let instanceID = try input.requireValue("instance")
+        let layout = try resolveLayout(input)
+        let policy = try sourcePolicy(input)
+        let mirror = try mirrorConfiguration(input)
+        let concurrency = Int(input.value("concurrency") ?? "4") ?? 4
+        guard (1...32).contains(concurrency) else {
+            throw LauncherError(.usageError, "--concurrency must be between 1 and 32")
+        }
+        let javaURL: URL
+        if let raw = input.value("java") {
+            javaURL = URL(fileURLWithPath: (raw as NSString).expandingTildeInPath)
+        } else {
+            javaURL = try JavaRuntimeInspector().discoverDefaultExecutable()
+        }
+        let target: InstallTargetChoice = input.has("update")
+            ? .existingInstance(id: instanceID)
+            : .newInstance(id: instanceID, displayName: input.value("name") ?? instanceID)
+        let request = OneStopInstallRequest(
+            minecraftVersionID: versionID,
+            loader: .neoforge(loaderVersion: input.value("loader")),
+            target: target,
+            javaExecutable: javaURL,
+            sourcePolicy: policy,
+            concurrency: concurrency
+        )
+        let installer = OneStopInstaller(layout: layout, transport: URLSessionTransport(), mirror: mirror)
+        let printer = InstallProgressPrinter()
+        CLIOutput.header("Installing NeoForge for Minecraft \(versionID)")
+        CLIOutput.field("instance", instanceID)
+        CLIOutput.field("target", input.has("update") ? "update existing (manifest backup)" : "new instance")
+        let report = try await installer.install(request, progress: { printer.handle($0) })
+        printer.finish()
+        CLIOutput.header("NeoForge install complete")
         CLIOutput.field("profile", report.installedVersionID)
         CLIOutput.field("instance", "\(report.instanceID)  \(report.gameDirectory.path)")
         if let backup = report.backupManifest {

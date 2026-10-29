@@ -41,6 +41,7 @@ public actor LaunchService {
     private let dependencyResolver: DependencyResolver
     private let planBuilder: LaunchPlanBuilder
     private let processController: GameProcessController
+    private let runtimeRegistry: InstanceRuntimeRegistry
 
     private var runningGame: RunningGame?
     private var launching = false
@@ -58,6 +59,7 @@ public actor LaunchService {
             argumentResolver: argumentResolver ?? ArgumentResolver(ruleEvaluator: ruleEvaluator)
         )
         self.processController = GameProcessController()
+        self.runtimeRegistry = InstanceRuntimeRegistry(layout: layout)
     }
 
     public func isRunning() -> Bool {
@@ -85,8 +87,7 @@ public actor LaunchService {
 
     private func run(_ request: LaunchServiceRequest, continuation: AsyncStream<LaunchServiceEvent>.Continuation) async {
         defer {
-            launching = false
-            runningGame = nil
+            finishingLaunch(instanceID: request.instance.id)
         }
         do {
             guard let versionID = request.instance.manifest.versionID else {
@@ -151,6 +152,11 @@ public actor LaunchService {
             continuation.yield(.phase("Starting Java process"))
             let running = try await processController.start(plan)
             runningGame = running
+            try? runtimeRegistry.markRunning(
+                instanceID: request.instance.id,
+                pid: running.processIdentifier,
+                executable: request.javaExecutable
+            )
             continuation.yield(.started(processIdentifier: running.processIdentifier))
             let logURL = makeLogURL()
             continuation.yield(.logFile(logURL))
@@ -184,6 +190,12 @@ public actor LaunchService {
             continuation.yield(.failed(LauncherError(.launchFailed, error.localizedDescription)))
             continuation.finish()
         }
+    }
+
+    private func finishingLaunch(instanceID: String) {
+        runtimeRegistry.clear(instanceID: instanceID)
+        launching = false
+        runningGame = nil
     }
 
     // MARK: - Logging

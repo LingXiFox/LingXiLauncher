@@ -1,4 +1,4 @@
-# 开发说明（M1 + M2 + M2.5 + M3 + M5-Alpha + M6.1 + M6.1.1 + M6.2 + M6.2.1 + M6.3 + M6.3.1 + M7.1）
+# 开发说明（M1 + M2 + M2.5 + M3 + M5-Alpha + M6.1 + M6.1.1 + M6.2 + M6.2.1 + M6.3 + M6.3.1 + M7.1 + M7.1.1 + M7.2）
 
 本文记录实现约定、契约边界和验收方式。产品边界与安全披露见根目录 [README](../README.md)。
 
@@ -51,14 +51,15 @@ Sources/LauncherCore/
 │   ├── SafeZipExtractor.swift    # 最小 ZIP 读取 + Zip Slip/symlink 防护
 │   ├── VanillaInstaller.swift    # 安装编排（按选定 JVM 架构）
 │   ├── FabricInstaller.swift     # Fabric 官方 meta/profile/Maven，stage 安全提交
-│   ├── OneStopInstaller.swift    # GUI/CLI 统一的 Vanilla/Fabric 安装与目标策略
+│   ├── NeoForgeInstaller.swift   # NeoForge Maven + 隔离官方 installer + 文件事务
+│   ├── OneStopInstaller.swift    # GUI/CLI 统一的 Vanilla/Fabric/NeoForge 安装与目标策略
 │   ├── Modrinth/                 # M6.2 官方 API、依赖解析、mods 仓库、更新
 │   ├── Modpack/                  # M6.3 .mrpack 解析、安全 staging、事务安装
-│   ├── Shader/                   # M7.1 光影包仓库、Iris 配置、Iris+Sodium 安装
+│   ├── Shader/                   # 光影包仓库、Iris 配置、Iris+Sodium 安装、运行时保护
 │   └── InstallationVerifier.swift# 全量哈希校验
 ├── Apps/LingXiMac/               # M5 SwiftUI GUI（直接依赖 LauncherCore）
 │   ├── Info.plist
-│   └── Sources/                  # AppModel + Views（含 M7.1 GraphicsStore/GraphicsView）
+│   └── Sources/                  # AppModel + Views（含 GraphicsStore/GraphicsView）
 ├── Scripts/build-app.sh          # SwiftPM → dist/LingXiMac.app（ad-hoc）
 └── Sources/LingXiCLI/            # 薄外壳：argv 解析、Core 调用、退出码映射
 Tests/LauncherCoreTests/
@@ -161,7 +162,7 @@ manifest（缓存）→ 版本 JSON（校验 manifest SHA-1）→ 依赖解析
 - **安全解压**：`SafeZipExtractor` 自己解析 ZIP（stored/deflate，Compression 框架），拒绝 `../`、绝对路径、反斜杠、控制字符、符号链接条目、超限条目/总量；ZIP64 明确报不支持。归档本身在解压前已通过 SHA-1 校验。
 - **Java**：默认不自动安装；`JavaManager` 按版本/Loader 元数据选择兼容运行时；整合包导入会展示 Java 要求并自动匹配，缺少时可按确认安装托管 Java。托管安装优先使用 Mojang 官方 `javaVersion.component` 的 macOS arm64 runtime（逐文件 SHA-1、固定的 runtime manifest/版本），不可用时才回退 Adoptium Temurin（SHA-256）。安装和启动会把来源/component/版本/artifact SHA 写入实例 `javaRuntime`；不修改系统 Java；手动 `--java` 始终优先。
 - **实例**：`--instance <id>` 是稳定 id（路径安全校验）。GUI 安装向导默认创建新实例；更新已有实例必须显式选择、确认并备份 `instance.json`。显示名不参与路径拼接。
-- **Loader**：Fabric 子版本通过 `inheritsFrom` 合并 parent；client JAR/assets/natives 复用 parent，loader 库从 Fabric 官方 Maven 获取。
+- **Loader**：Fabric 子版本通过 `inheritsFrom` 合并 parent；NeoForge 官方 installer 在隔离 staging 中生成 profile/libraries/patched client，再由文件事务合并到共享根。client JAR/assets/natives 复用 parent。
 
 ## 7. 测试
 
@@ -194,7 +195,7 @@ swift test
 | `JavaManagerSafetyTests` (5) | 托管 JDK 最终 probe 失败回滚、成功替换清理 backup、Mojang runtime 完整安装/记录、Java 元数据兼容判断 |
 | `M6ModrinthTests` (11) | 真实 Modrinth 搜索/项目/版本解码、facets/User-Agent、本地 mods 生命周期、必需/固定版本依赖、启用/禁用/版本约束下的不兼容依赖、更新状态/渠道/降级、更新哈希失败保留旧文件、mrpack 哈希来源追踪 |
 | `MrpackTests` (12) | format 1 解析/客户端 overrides、ZIP 路径与哈希拒绝、可信域/重定向、可选客户端文件、真实合成安装、损坏/网络失败、连续取消与重试、已有实例保护 |
-| `M7GraphicsTests` (8) | Iris/Sodium 固定依赖安装、显式替换、光影安装+启用、哈希失败保护存档/配置、非 Fabric 拒绝、游戏运行时拒绝切换、macOS OpenGL 不可用提示、畸形本地 ZIP 拒绝 |
+| `M7GraphicsTests` (10) | Iris/Sodium 固定依赖安装、显式替换、升级失败恢复两旧模组、光影仓库回滚、安装+启用、哈希失败保护存档/配置、非 Fabric 拒绝、游戏运行时拒绝切换、macOS OpenGL 不可用提示、畸形本地 ZIP 拒绝 |
 | `LaunchServiceTests` (2) | 启动失败事件、事件流终止与重复调用 |
 | `PathSafetyTests` (4) / `GameDataLayoutTests` (3) / `PlatformContextTests` (3) | 路径穿越、布局推导、平台上下文 |
 
@@ -226,10 +227,12 @@ CI（`.github/workflows/ci.yml`）在 `xcode-27` Apple Silicon Runner 上运行 
 | M6.3 | Modrinth `.mrpack` 解析/安全事务安装/GUI/CLI | ✅ 真实 Fabulously Optimized 5.4.1 安装并进入 149 mods 主菜单（见 VERIFICATION-M6.3.md） |
 | M6.3.1 | 重试生命周期、来源追踪、可信域/可选文件、CI | ✅ 275 tests，CI #40822071444 success（见 VERIFICATION-M6.3.1.md） |
 | M7.1 | Iris/Sodium、光影搜索/安装/启用/更新、macOS OpenGL 提示 | ✅ 283 tests；真实 1.20.1 Fabric + Iris 1.7.6 + Sodium 0.5.12 + Complementary r5.9.3 进入世界（见 VERIFICATION-M7.1.md） |
+| M7.1.1 | 图形 pair 事务、运行时写保护、光影替换回滚、统一更新动作 | ✅ 290 tests（见 VERIFICATION-M7.2.md） |
+| M7.2 | NeoForge 安装/Modrinth/mrpack/GUI、官方 installer 安全 | ✅ 真实 1.21.1 + NeoForge 21.1.265 + JEI 主菜单；290 tests（见 VERIFICATION-M7.2.md） |
 
 ## 9. 剩余工作
 
-- **M7.2+**：更多 Minecraft/Fabric/Iris/Sodium 组合矩阵、光影性能基准、forks/备份策略；暂不做新 Mod Loader。
+- **M7.3+**：更多 Minecraft/NeoForge/Iris/Sodium 组合矩阵、真实大型 modpack、光影性能基准、备份策略与发行签名；暂不扩展 Forge/Quilt。
 - **M5-B**：下载任务历史、更多诊断导出项。
 - 外观：皮肤/披风纹理缓存、Cape 动画与更多皮肤模型细节。
 - 真实大文件 GUI 下载中途取消、Intel Mac 托管 Java、Developer ID 签名/公证。

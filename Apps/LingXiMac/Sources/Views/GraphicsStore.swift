@@ -59,14 +59,12 @@ final class GraphicsStore: ObservableObject {
 
     private let setupManager: GraphicsSetupManager
     private let shaderManager: ShaderPackManager
-    private let isGameRunning: () -> Bool
     private var searchGeneration = 0
 
-    init(instance: Instance, model: AppModel) {
+    init(instance: Instance, setupManager: GraphicsSetupManager, shaderManager: ShaderPackManager) {
         self.instance = instance
-        self.setupManager = model.makeGraphicsSetupManager()
-        self.shaderManager = model.makeShaderPackManager()
-        self.isGameRunning = { [weak model] in model?.isGameRunning ?? false }
+        self.setupManager = setupManager
+        self.shaderManager = shaderManager
         do {
             self.compatibility = try shaderManager.compatibility(for: instance)
             self.compatibilityError = nil
@@ -77,7 +75,9 @@ final class GraphicsStore: ObservableObject {
         self.capabilities = GraphicsCapabilities.current()
     }
 
-    var isFabric: Bool { compatibility != nil }
+    var isFabric: Bool { compatibility?.loader == .fabric }
+    var isNeoForge: Bool { compatibility?.loader == .neoforge }
+    var loaderName: String { compatibility?.loader.displayName ?? "Mod Loader" }
     var gameVersion: String { compatibility?.gameVersion ?? instance.manifest.versionID ?? "未知" }
     var loaderVersion: String? { compatibility?.loaderVersion }
     var selectedVersion: ModrinthVersion? {
@@ -90,7 +90,7 @@ final class GraphicsStore: ObservableObject {
     }
 
     func load() async {
-        guard isFabric else { return }
+        guard isFabric || isNeoForge else { return }
         isLoading = true
         errorMessage = nil
         defer { isLoading = false }
@@ -140,7 +140,7 @@ final class GraphicsStore: ObservableObject {
     }
 
     func search(reset: Bool = true) async {
-        guard isFabric else { return }
+        guard isFabric || isNeoForge else { return }
         if reset { searchOffset = 0; selectedProject = nil; searchGeneration += 1 }
         let generation = searchGeneration
         isSearching = true
@@ -278,8 +278,7 @@ final class GraphicsStore: ObservableObject {
         do {
             let result = try shaderManager.activate(
                 fileName: pack.fileName,
-                instanceID: instance.id,
-                gameRunning: isGameRunning()
+                instanceID: instance.id
             )
             activationState = try shaderManager.activationState(instanceID: instance.id)
             notice = result.message
@@ -292,7 +291,7 @@ final class GraphicsStore: ObservableObject {
         errorMessage = nil
         notice = nil
         do {
-            let result = try shaderManager.deactivate(instanceID: instance.id, gameRunning: isGameRunning())
+            let result = try shaderManager.deactivate(instanceID: instance.id)
             activationState = try shaderManager.activationState(instanceID: instance.id)
             notice = result.message
         } catch {
@@ -351,6 +350,8 @@ final class GraphicsStore: ObservableObject {
             "gameVersion": gameVersion,
             "tab": tab.rawValue,
             "fabric": isFabric,
+            "neoforge": isNeoForge,
+            "loader": compatibility?.loader.displayName ?? "unknown",
             "busy": isInstallingGraphics || isInstallingShader || isSearching || isLoadingDetail,
             "searching": isSearching,
             "installingGraphics": isInstallingGraphics,

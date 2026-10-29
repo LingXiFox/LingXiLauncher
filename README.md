@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/LingXiFox/LingXiLauncher/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/LingXiFox/LingXiLauncher/actions/workflows/ci.yml)
 
-macOS Apple Silicon 原生 **Minecraft: Java Edition** 启动器。当前进度：**M0 + M1 + M2 + M2.5 + M3 + M5-Alpha + M6.1 + M6.1.1 + M6.2 + M6.2.1 + M6.3 + M6.3.1 + M7.1**。
+macOS Apple Silicon 原生 **Minecraft: Java Edition** 启动器。当前进度：**M0 + M1 + M2 + M2.5 + M3 + M5-Alpha + M6.1 + M6.1.1 + M6.2 + M6.2.1 + M6.3 + M6.3.1 + M7.1 + M7.1.1 + M7.2**。
 
 - **M3 Microsoft 正版认证已实现并通过真机验证**：OAuth 2.0 Authorization Code + PKCE S256、系统浏览器、localhost 回调、Xbox Live → XSTS → Minecraft Services → 所有权/档案、Keychain 存储与刷新。
 - **M5-Alpha SwiftUI GUI 可用**：首页 / 游戏实例 / 版本下载 / 账户管理 / 运行日志 / 设置，直接调用 LauncherCore，不执行 CLI。
@@ -13,10 +13,12 @@ macOS Apple Silicon 原生 **Minecraft: Java Edition** 启动器。当前进度�
 - **M6.2.1 模组稳定性**：依赖冲突只在启用的实际版本上判定；更新保留禁用状态；更新检测按渠道和自然版本号而非仅日期；DebugAutomation 仅 Debug + 会话 token。
 - **M6.3 整合包**：按 Modrinth format 1 解析 `.mrpack`，安全 ZIP/overrides、外部文件哈希下载、OneStop 安装、独立新实例；M6.3.1 修复失败/取消后的同包重试，支持官方下载域、可选客户端文件和 Modrinth 哈希来源追踪；GUI/Finder 拖放导入。
 - **M7.1 图形与光影**：Fabric 1.20.1 上可安装兼容的 Iris + Sodium；独立的 `shaderpacks/` 管理器支持 Modrinth 搜索、版本选择、哈希校验、启用/停用、替换/更新和本地 ZIP 导入。Iris 配置只修改 `config/iris.properties` 的 `shaderPack` / `enableShaders`，并保留注释和未知键；macOS 的 OpenGL 4.1 限制会在 GUI 中明确提示，不宣传不存在的 Metal 光追。
-- Fabric（Forge/NeoForge/Quilt 未实现）已通过真实 1.20.1 + Loader 0.20.1 安装与启动验证；本地离线身份仅保留给 CLI 技术验证，GUI 不提供绕过所有权的启动入口。
-- **GitHub Actions CI**：Debug 构建、**283 项**完整 XCTest、Release CLI/GUI、App Bundle 与 ad-hoc 签名校验、ZIP Artifact 上传；不执行真实登录、游戏下载或图形启动。Artifact 仅用于测试，不是公证发行版。
+- **M7.1.1 图形稳定性**：Iris + Sodium 安装使用模组目录事务快照；Sodium 替换后 Iris 下载/校验失败会恢复两者旧版本。光影更新在游戏运行时拒绝；同一项目的 `已安装` 与 `可更新` 汇成一个更新动作，替换前完整下载校验并保留旧 ZIP；Core 的运行时注册表让 CLI/GUI 共享同一保护逻辑。
+- **M7.2 NeoForge 与稳定性**：安装向导支持 NeoForge 官方 Maven 版本选择；隔离 staging 中调用官方 `--install-client`，验证生成 profile、runtime libraries 和 patched client JAR 后再事务提交。Modrinth 搜索/安装/更新、`.mrpack` 的 `neoforge` 依赖、图形/光影 loader 过滤均支持 NeoForge。真实 1.21.1 + NeoForge 21.1.265 + JEI 已验证到主菜单。
+- Fabric 与 NeoForge 已通过真实安装/启动验证；Forge/Quilt 未实现。本地离线身份仅保留给 CLI 技术验证，GUI 不提供绕过所有权的启动入口。
+- **GitHub Actions CI**：Debug 构建、**290 项**完整 XCTest、Release CLI/GUI、App Bundle 与 ad-hoc 签名校验、ZIP Artifact 上传；不执行真实登录、游戏下载或图形启动。Artifact 仅用于测试，不是公证发行版。
 
-详见 [docs/VERIFICATION-M7.1.md](docs/VERIFICATION-M7.1.md)、[docs/VERIFICATION-M6.3.md](docs/VERIFICATION-M6.3.md)、[docs/VERIFICATION-M6.2.md](docs/VERIFICATION-M6.2.md)、[docs/VERIFICATION-M6.1.md](docs/VERIFICATION-M6.1.md)、[docs/VERIFICATION-M3-M5.md](docs/VERIFICATION-M3-M5.md) 与 [docs/VERIFICATION-M2.5.md](docs/VERIFICATION-M2.5.md)。调试 GUI 可使用 [docs/DEBUG-AUTOMATION.md](docs/DEBUG-AUTOMATION.md) 的 opt-in 接口。这是一个**开发中**项目，不是已发布产品。
+详见 [docs/VERIFICATION-M7.2.md](docs/VERIFICATION-M7.2.md)、[docs/VERIFICATION-M7.1.md](docs/VERIFICATION-M7.1.md)、[docs/VERIFICATION-M6.3.md](docs/VERIFICATION-M6.3.md)、[docs/VERIFICATION-M6.2.md](docs/VERIFICATION-M6.2.md)、[docs/VERIFICATION-M6.1.md](docs/VERIFICATION-M6.1.md)、[docs/VERIFICATION-M3-M5.md](docs/VERIFICATION-M3-M5.md) 与 [docs/VERIFICATION-M2.5.md](docs/VERIFICATION-M2.5.md)。调试 GUI 可使用 [docs/DEBUG-AUTOMATION.md](docs/DEBUG-AUTOMATION.md) 的 opt-in 接口。这是一个**开发中**项目，不是已发布产品。
 
 ## 设计边界
 
@@ -36,7 +38,7 @@ LingXiMac (SwiftUI)              lingxi (CLI)
    GameProcessController · InstanceRepository
    MicrosoftOAuthClient · XboxMinecraftAuthenticator
    KeychainRefreshTokenStore · MicrosoftAuthenticationService
-   LaunchService · VanillaInstaller · FabricInstaller · OneStopInstaller
+   LaunchService · VanillaInstaller · FabricInstaller · NeoForgeInstaller · OneStopInstaller
    JavaManager · InstallationVerifier
    ModrinthClient · ModManager · ModRepository
    Modpack/MrpackParser · Modpack/MrpackInstaller
@@ -135,6 +137,8 @@ lingxi shader remove --instance <id> --file <pack.zip>
 
 Fabric 流程：官方兼容 Loader 查询 → 官方 profile（`inheritsFrom`）→ 先完成 vanilla stage → Fabric Maven 依赖 → 原子写 profile → 成功后才创建/更新实例。目标已存在时 Fabric CLI 默认拒绝，必须显式 `--update`（GUI 向导同样要求确认并备份 manifest）。
 
+NeoForge 流程：官方 Maven metadata（按 Minecraft 版本严格映射）→ 下载并校验 installer → 隔离 staging 中运行官方 `--install-client` → 校验 `neoforge-<version>` profile / 生成库 / patched client JAR → 文件级事务合并到共享根 → 创建/更新实例。安装器进程有 900 秒超时和取消终止；目标实例不会作为 installer 工作目录。
+
 - **源策略**：`official` 仅 Mojang 端点；`mirror` 仅显式配置的可信镜像；`auto` 官方优先、明确失败后切镜像；`local-cache-only` 完全不发网络请求。
 - **镜像不是"官方授权"的同义词**：默认不内置任何镜像。使用需提供显式 host 映射 JSON（见 [docs/mirror-config.example.json](docs/mirror-config.example.json)），只允许 HTTPS，不做任意 URL 字符串替换。若评估 BMCLAPI，需自行核实其当前接口前缀、署名/使用规范、稳定性与 Minecraft EULA 要求。
 - **校验**：以元数据的 SHA-1 + size 为准；校验失败的文件立即删除，绝不落盘为"已完成"。SHA-1 是与 Mojang 元数据兼容的校验和，不等同于现代数字签名。
@@ -143,9 +147,9 @@ Fabric 流程：官方兼容 Loader 查询 → 官方 profile（`inheritsFrom`�
 - **原子落盘**：下载写入同目录 `.part` 文件，SHA-1 + size 校验通过后才用 `rename(2)` 原子替换目标；替换失败时已有完整文件保持不变。
 - **JVM 架构感知**：`--java`（或安装时探测到的默认 JVM）决定 rules、natives 选择与 natives 缓存目录（`natives/<version>/<jvm-arch>`），而不是启动器进程架构。x86_64 JVM 在 Apple Silicon 上会被标记为 Rosetta；legacy natives 会读取 Mach-O 头校验真实架构，不匹配即阻断启动。
 - **Java 可选托管安装**：`JavaManager` 优先使用 Mojang 官方 `javaVersion.component` 对应的 macOS arm64 `java-runtime`，逐个校验 manifest/文件 SHA-1；仅当官方不可用时回退 Adoptium Temurin。安装/启动后把来源、component、版本、artifact SHA 写入实例 `javaRuntime` 元数据。不修改系统 Java；更新托管 JDK 时新树完整 probe 后才切换，失败恢复旧版本。也可继续用 `--java`/设置页手动选择。
-- **Modrinth**：搜索固定 `project_type:mod` + `categories:fabric` + 当前 Minecraft 版本；必需依赖递归安装，可选依赖只标识；文件从 `cdn.modrinth.com` 下载，优先 SHA-512、回退 SHA-1，并校验 size。更新先下载校验再替换，失败保留旧 JAR。详见 [docs/MODRINTH-API.md](docs/MODRINTH-API.md)。
-- **Iris + Sodium**：`GraphicsSetupManager` 先解析 Iris 的 Fabric 版本及其 Sodium 依赖；若元数据固定 Sodium 版本则使用固定版本，否则选择最新兼容版。已安装不同版本时计划会标记 `requiresReplacement`，只有 `--replace` / GUI 二次确认后才替换；失败回滚本次新增模组，不触碰其他模组。
-- **光影包**：`ShaderPackManager` 只把 ZIP 写入实例隔离目录的 `shaderpacks/`，元数据写入实例目录 `shaderpacks.json`；项目/版本/哈希来自 Modrinth，更新先完整下载校验再原子替换。启用/停用只改写经版本白名单验证的 Iris `config/iris.properties` 中的 `shaderPack` 与 `enableShaders`，保留注释和未知键，并在写入前备份、写入后校验；游戏运行时拒绝改写。`env.client=optional` 的文件默认不安装，GUI 必须逐个勾选。
+- **Modrinth**：搜索固定 `project_type:mod` + `categories:<fabric|neoforge>` + 当前 Minecraft 版本；必需依赖递归安装，可选依赖只标识；文件从 `cdn.modrinth.com` 下载，优先 SHA-512、回退 SHA-1，并校验 size。更新先下载校验再替换，失败保留旧 JAR。详见 [docs/MODRINTH-API.md](docs/MODRINTH-API.md)。
+- **Iris + Sodium**：`GraphicsSetupManager` 先解析当前实例 Fabric/NeoForge 的 Iris 版本及其 Sodium 依赖；若元数据固定 Sodium 版本则使用固定版本，否则选择最新兼容版。已安装不同版本时计划会标记 `requiresReplacement`，只有 `--replace` / GUI 二次确认后才替换；整个 pair 使用有界目录快照，Sodium 替换后 Iris 失败会完整恢复旧文件与记录，不触碰其他模组。
+- **光影包**：`ShaderPackManager` 只把 ZIP 写入实例隔离目录的 `shaderpacks/`，元数据写入实例目录 `shaderpacks.json`；项目/版本/哈希来自 Modrinth，更新先完整下载校验再原子替换。替换同时备份旧 ZIP 和 `shaderpacks.json`，任一步失败恢复旧文件/旧记录。启用/停用只改写经版本白名单验证的 Iris `config/iris.properties` 中的 `shaderPack` 与 `enableShaders`，保留注释和未知键，并在写入前备份、写入后校验；游戏运行时由 Core 运行时注册表拒绝改写，GUI 用同一更新动作处理已安装/可更新。`env.client=optional` 的文件默认不安装，GUI 必须逐个勾选。
 
 ## Microsoft 认证（M3）
 
@@ -181,10 +185,10 @@ Minecraft AppID 已于 **2026-10-26** 通过 Mojang 官方审核并加入 API Al
 
 - **首页**：当前实例、账户、Java、启动/停止、最近退出码。
 - **游戏实例**：列表、创建、删除（需确认）、打开隔离游戏目录、自动/手动 JVM 内存设置、启动。
-- **版本下载 / 安装向导**：官方/可信镜像清单、Release/Snapshot 过滤；M6.1 向导依次选择 Minecraft → Vanilla/Fabric → Java → 新/现有实例 → 确认 → 下载校验；进度/取消/重试，默认新实例，更新现有实例需显式确认并备份 manifest。
-- **模组管理**：实例详情打开「模组管理」双视图；已安装页管理本地模组、检测更新；浏览页搜索 Modrinth、查看项目/版本/依赖并安装。M6.2 仅 Fabric；GUI 通过 Core 的 `ModManager` 访问网络。
-- **整合包导入**：实例页「导入整合包」支持 `.mrpack` 文件选择与 Finder 拖放；展示解析结果、Java 与可选客户端文件后，通过 Core 的 `MrpackInstaller` 创建全新实例。M6.3 仅 Vanilla/Fabric；Forge/NeoForge/Quilt/CurseForge 明确不支持。
-- **图形与光影**：Fabric 实例详情打开「图形与光影」；提供 Iris + Sodium 检测/安装计划、已安装光影、Modrinth 搜索/版本/更新、本地 ZIP 导入、启用/停用和删除。界面明确显示 macOS OpenGL 4.1 上限与“安装不等于已启用”；实际渲染需进入世界验证。
+- **版本下载 / 安装向导**：官方/可信镜像清单、Release/Snapshot 过滤；向导依次选择 Minecraft → Vanilla/Fabric/NeoForge → Java → 新/现有实例 → 确认 → 下载校验；NeoForge 版本来自官方 Maven 并严格匹配 Minecraft；进度/取消/重试，默认新实例，更新现有实例需显式确认并备份 manifest。
+- **模组管理**：实例详情打开「模组管理」双视图；已安装页管理本地模组、检测更新；浏览页搜索 Modrinth、查看项目/版本/依赖并安装。支持 Fabric 与 NeoForge；GUI 通过 Core 的 `ModManager` 访问网络。
+- **整合包导入**：实例页「导入整合包」支持 `.mrpack` 文件选择与 Finder 拖放；展示解析结果、Java 与可选客户端文件后，通过 Core 的 `MrpackInstaller` 创建全新实例。支持 Vanilla/Fabric/NeoForge；Forge/Quilt/CurseForge 明确不支持。
+- **图形与光影**：Fabric/NeoForge 实例详情打开「图形与光影」；提供 Iris + Sodium 检测/安装计划、已安装光影、Modrinth 搜索/版本/更新、本地 ZIP 导入、启用/停用和删除。启动器明确显示 macOS OpenGL 4.1 上限与“安装不等于已启用”；实际渲染需进入世界验证。
 - **账户管理**：Microsoft 登录进度、UUID、所有权、真实皮肤/披风纹理与头像裁剪、切换、验证、退出；本地身份只读并明确标注未验证。
 - **运行日志**：LauncherCore 事件、Java stdout/stderr、游戏输出、退出码；搜索、复制、自动滚动、脱敏诊断导出、打开 Minecraft `latest.log`。
 - **设置**：Java 检测/选择、下载源/镜像配置、数据/游戏目录、内嵌认证状态。
@@ -253,11 +257,11 @@ value:   refresh token only
 - GUI 下载本次是 1.20.1 缓存命中 + 3636 文件全量验证；大文件全新下载已由 M2 CLI 验证，但 GUI 中途取消未做真机大文件实测。
 - 未测试 Intel Mac；`.app` 为 ad-hoc 签名，未做 Developer ID 签名/公证。
 - XUID 依赖额外的 Xbox profile 请求；失败时占位 `0` 会限制在线功能。
-- M7.1 只在 Minecraft 1.20.1 + Fabric Loader 0.20.1 + Iris 1.7.6 / Sodium 0.5.12-beta.2 上做了真实世界验证；其他版本即使 Modrinth 声明兼容，也可能因 Iris/Sodium/显卡驱动差异失败。
+- M7.1 只在 Minecraft 1.20.1 + Fabric Loader 0.20.1 + Iris 1.7.6 / Sodium 0.5.12-beta.2 上做了真实世界验证；M7.2 的 NeoForge 验证使用 1.21.1 + NeoForge 21.1.265 + JEI，未在 NeoForge 上重复 Iris/Sodium 世界验证。其他版本即使 Modrinth 声明兼容，也可能因 loader 或显卡驱动差异失败。
 - macOS 只提供 OpenGL 4.1（Metal 转译）；没有 Metal 原生渲染、硬件光追或“RTX”能力。复杂光影在 Apple Silicon 上可能掉帧；启动器只提示，不承诺帧率。
 - 光影“启用”只代表已写入 Iris 配置，是否真正渲染以游戏内为准；测试用的 Complementary r5.9.3 在 Iris 1.7.6 下记录了未识别 custom uniform 警告，未崩溃，但不能据此宣称所有光影包无警告。
 - M7.1 的 GUI 真实启动验证使用 CLI/本地测试身份；没有在 M7.1 阶段重新执行 Microsoft 登录流程。
-- Forge/NeoForge/Quilt 和 CurseForge 整合包未实现。
+- Forge/Quilt 和 CurseForge 整合包未实现；NeoForge 仅验证了现代官方 Maven 版本。
 - legacy `virtual` / `map_to_resources` 资产索引（1.6 及更早）只下载对象、不生成 resources 树。
 - 同尺寸但内容损坏的文件不会被 `install` 自动发现，请用 `lingxi verify` 做哈希级校验。
 

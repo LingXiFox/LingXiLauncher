@@ -564,7 +564,7 @@ struct MrpackImportView: View {
                         return lhs.majorVersion < rhs.majorVersion
                     }
                     self.selectedJavaPath = best?.executable.path ?? ""
-                    self.warningText = "无法从 Mojang/Fabric 元数据确认 Java 要求：\(Self.describe(error))。仍可选择 Java，但请确认版本匹配。"
+                    self.warningText = "无法从 Mojang/Fabric/NeoForge 元数据确认 Java 要求：\(Self.describe(error))。仍可选择 Java，但请确认版本匹配。"
                 }
                 self.isParsing = false
             } catch is CancellationError {
@@ -740,6 +740,7 @@ struct MrpackImportView: View {
         switch loader {
         case .vanilla: return "Vanilla"
         case let .fabric(version): return version.map { "Fabric \($0)" } ?? "Fabric"
+        case let .neoforge(version): return version.map { "NeoForge \($0)" } ?? "NeoForge"
         }
     }
 

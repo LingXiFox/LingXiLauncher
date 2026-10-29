@@ -96,7 +96,7 @@ struct ModsView: View {
             }
             Spacer()
             if let compatibility = store.compatibility {
-                LXBadge(text: "\(compatibility.gameVersion) · Fabric", tone: .success, dot: true)
+                LXBadge(text: "\(compatibility.gameVersion) · \(compatibility.loader.displayName)", tone: .success, dot: true)
             }
             LXIconButton(systemImage: "xmark", label: "关闭模组管理") { dismissSheet() }
         }
@@ -133,7 +133,7 @@ struct ModsView: View {
                 .font(.system(size: 9))
             Text("模组数据来自 Modrinth 官方 API；文件由 cdn.modrinth.com 直接下载并校验发布方哈希。")
             Spacer()
-            Text("仅 Fabric")
+            Text("Fabric / NeoForge")
                 .foregroundStyle(theme.textTertiary)
         }
         .font(LXFont.monoSmall)
@@ -156,7 +156,7 @@ struct ModsView: View {
                 .foregroundStyle(theme.textSecondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 560)
-            Text("M6.2 只支持 Fabric。请先在安装向导中创建/更新为 Fabric 实例。")
+            Text("请先在安装向导中创建/更新为 Fabric 或 NeoForge 实例。")
                 .font(LXFont.caption)
                 .foregroundStyle(theme.textTertiary)
         }
@@ -441,7 +441,7 @@ struct ModsView: View {
                 }.padding(LXSpace.md)
                 Spacer()
             } else if store.results.isEmpty {
-                LXEmptyState(icon: "magnifyingglass", title: "搜索 Modrinth", message: "结果会按当前实例的 Minecraft 版本和 Fabric Loader 过滤。")
+                LXEmptyState(icon: "magnifyingglass", title: "搜索 Modrinth", message: "结果会按当前实例的 Minecraft 版本和 Mod Loader 过滤。")
                     .padding(LXSpace.md)
                 Spacer()
             } else {

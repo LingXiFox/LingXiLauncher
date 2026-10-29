@@ -499,6 +499,7 @@ private struct InstanceDetailPane: View {
     private var loaderLabel: String {
         switch compatibility?.loader {
         case .fabric: return "Fabric"
+        case .neoforge: return "NeoForge"
         case .vanilla: return "Vanilla"
         case nil: return "未知"
         }

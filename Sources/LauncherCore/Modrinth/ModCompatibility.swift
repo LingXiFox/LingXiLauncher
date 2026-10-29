@@ -3,6 +3,15 @@ import Foundation
 public enum ModLoaderKind: String, Sendable, Equatable, Codable {
     case vanilla
     case fabric
+    case neoforge
+
+    public var displayName: String {
+        switch self {
+        case .vanilla: return "Vanilla"
+        case .fabric: return "Fabric"
+        case .neoforge: return "NeoForge"
+        }
+    }
 }
 
 public struct ModCompatibility: Sendable, Equatable {
@@ -33,14 +42,18 @@ public enum ModCompatibilityResolver {
         }
         let version = try VersionResolver().resolve(versionID: versionID, from: layout.gameRoot)
         let gameVersion = version.inheritsFrom ?? version.id
-        let isFabric = version.id.lowercased().hasPrefix("fabric-loader-")
+        let lowerID = version.id.lowercased()
+        let isNeoForge = lowerID.hasPrefix("neoforge-")
+            || version.mainClass.localizedCaseInsensitiveContains("neoforged")
+            || version.libraries.contains { $0.name.lowercased().contains("neoforge") }
+        let isFabric = lowerID.hasPrefix("fabric-loader-")
             || version.mainClass.localizedCaseInsensitiveContains("fabric")
             || version.libraries.contains { $0.name.lowercased().contains("fabric-loader") }
         return ModCompatibility(
             instanceID: instance.id,
             versionID: versionID,
             gameVersion: gameVersion,
-            loader: isFabric ? .fabric : .vanilla
+            loader: isNeoForge ? .neoforge : (isFabric ? .fabric : .vanilla)
         )
     }
 }

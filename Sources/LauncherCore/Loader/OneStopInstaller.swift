@@ -3,11 +3,13 @@ import Foundation
 public enum InstallLoaderChoice: Sendable, Equatable {
     case vanilla
     case fabric(loaderVersion: String?)
+    case neoforge(loaderVersion: String?)
 
     public var displayName: String {
         switch self {
         case .vanilla: return "Vanilla"
         case let .fabric(version): return version.map { "Fabric \($0)" } ?? "Fabric (latest compatible)"
+        case let .neoforge(version): return version.map { "NeoForge \($0)" } ?? "NeoForge (latest compatible)"
         }
     }
 }
@@ -95,15 +97,19 @@ public struct OneStopInstaller: Sendable {
         )
         var major = vanilla.javaRequirement.majorVersion ?? 8
         var component = vanilla.javaRequirement.component
-        if case let .fabric(requested) = loader {
+        switch loader {
+        case .fabric:
             let loaders = try await listFabricLoaders(for: minecraftVersionID)
-            let selected = requested.flatMap { value in loaders.first { $0.version == value } }
-                ?? loaders.first(where: \.stable)
-                ?? loaders.first
+            let selected = loaders.first(where: \.stable) ?? loaders.first
             if let minimum = selected?.minimumJavaVersion, minimum > major {
                 major = minimum
                 component = nil
             }
+        case .neoforge:
+            major = max(major, 21)
+            component = nil
+        case .vanilla:
+            break
         }
         return JavaVersionRequirement(component: component, majorVersion: major)
     }
@@ -164,7 +170,38 @@ public struct OneStopInstaller: Sendable {
                 downloadedFiles: report.downloadedFiles,
                 downloadedBytes: report.downloadedBytes
             )
+        case let .neoforge(loaderVersion):
+            let report = try await NeoForgeInstaller(layout: layout, transport: transport, mirror: mirror)
+                .install(
+                    NeoForgeInstallRequest(
+                        minecraftVersionID: request.minecraftVersionID,
+                        loaderVersion: loaderVersion,
+                        instanceID: targetID,
+                        displayName: displayName.isEmpty ? nil : displayName,
+                        updateExistingInstance: request.target.isExisting,
+                        sourcePolicy: request.sourcePolicy,
+                        concurrency: request.concurrency,
+                        javaExecutable: request.javaExecutable
+                    ),
+                    progress: progress
+                )
+            recordJava(instanceID: report.instanceID, executable: request.javaExecutable)
+            return OneStopInstallReport(
+                instanceID: report.instanceID,
+                minecraftVersionID: request.minecraftVersionID,
+                installedVersionID: report.profileID,
+                loader: request.loader,
+                gameDirectory: report.gameDirectory,
+                backupManifest: report.backupManifest,
+                downloadedFiles: report.downloadedFiles,
+                downloadedBytes: report.downloadedBytes
+            )
         }
+    }
+
+    public func listNeoForgeLoaders(for minecraftVersion: String) async throws -> [NeoForgeLoaderVersion] {
+        try await NeoForgeInstaller(layout: layout, transport: transport, mirror: mirror)
+            .listLoaderVersions(for: minecraftVersion)
     }
 
     private func installVanilla(

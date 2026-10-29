@@ -11,9 +11,22 @@ struct InstallWizardView: View {
     }
 
     private enum LoaderKind: String, CaseIterable, Identifiable {
-        case vanilla, fabric
+        case vanilla, fabric, neoforge
         var id: String { rawValue }
-        var title: String { self == .vanilla ? "Vanilla" : "Fabric" }
+        var title: String {
+            switch self {
+            case .vanilla: return "Vanilla"
+            case .fabric: return "Fabric"
+            case .neoforge: return "NeoForge"
+            }
+        }
+        var detail: String {
+            switch self {
+            case .vanilla: return "官方原版，最少依赖"
+            case .fabric: return "Fabric Loader + 兼容库"
+            case .neoforge: return "NeoForge + 官方安装器"
+            }
+        }
     }
 
     private enum TargetMode: String, CaseIterable, Identifiable {
@@ -42,6 +55,7 @@ struct InstallWizardView: View {
     @State private var selectedVersion = ""
     @State private var loader: LoaderKind = .vanilla
     @State private var fabricLoaders: [FabricLoaderVersion] = []
+    @State private var neoforgeLoaders: [NeoForgeLoaderVersion] = []
     @State private var selectedLoaderVersion: String?
     @State private var javaRequirement: JavaVersionRequirement?
     @State private var javaRuntimes: [JavaRuntime] = []
@@ -85,6 +99,7 @@ struct InstallWizardView: View {
         switch loader {
         case .vanilla: return .vanilla
         case .fabric: return .fabric(loaderVersion: selectedLoaderVersion)
+        case .neoforge: return .neoforge(loaderVersion: selectedLoaderVersion)
         }
     }
 
@@ -294,6 +309,7 @@ struct InstallWizardView: View {
                                         selectedVersion = entry.id
                                         selectedLoaderVersion = nil
                                         fabricLoaders = []
+                                        neoforgeLoaders = []
                                         invalidateJavaSelection()
                                     }
                                 } label: {
@@ -337,14 +353,16 @@ struct InstallWizardView: View {
 
     private var loaderStep: some View {
         VStack(alignment: .leading, spacing: LXSpace.md) {
-            stepIntro(number: 2, title: "选择 Mod Loader", detail: "首期支持 Vanilla 与 Fabric；Forge / NeoForge / Quilt 暂不提供。")
+            stepIntro(number: 2, title: "选择 Mod Loader", detail: "支持 Vanilla、Fabric 与 NeoForge；Forge / Quilt 暂不提供。")
             HStack(spacing: LXSpace.sm) {
                 ForEach(LoaderKind.allCases) { kind in
                     Button {
                         if loader != kind {
                             loader = kind
+                            selectedLoaderVersion = nil
                             invalidateJavaSelection()
                             if kind == .fabric { Task { await loadFabricLoaders() } }
+                            if kind == .neoforge { Task { await loadNeoForgeLoaders() } }
                         }
                     } label: {
                         VStack(alignment: .leading, spacing: 5) {
@@ -352,7 +370,7 @@ struct InstallWizardView: View {
                                 .font(.system(size: 18, weight: .medium))
                                 .foregroundStyle(loader == kind ? theme.orange : theme.textSecondary)
                             Text(kind.title).font(LXFont.headline).foregroundStyle(theme.text)
-                            Text(kind == .vanilla ? "官方原版，最少依赖" : "Fabric Loader + 兼容库")
+                            Text(kind.detail)
                                 .font(LXFont.caption).foregroundStyle(theme.textTertiary)
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -369,30 +387,40 @@ struct InstallWizardView: View {
                     .buttonStyle(.plain)
                 }
             }
-            if loader == .fabric {
+            if loader != .vanilla {
                 LXCard(padding: LXSpace.md) {
                     VStack(alignment: .leading, spacing: 8) {
                         HStack {
-                            LXOverline(text: "FABRIC LOADER")
+                            LXOverline(text: loader == .fabric ? "FABRIC LOADER" : "NEOFORGE")
                             Spacer()
-                            if fabricLoaders.isEmpty { ProgressView().controlSize(.small) }
+                            let count = loader == .fabric ? fabricLoaders.count : neoforgeLoaders.count
+                            if count == 0 { ProgressView().controlSize(.small) }
                         }
-                        if fabricLoaders.isEmpty {
+                        if (loader == .fabric ? fabricLoaders.isEmpty : neoforgeLoaders.isEmpty) {
                             Text("正在查询与 Minecraft \(selectedVersion) 兼容的 Loader…")
                                 .font(LXFont.caption).foregroundStyle(theme.textSecondary)
                         } else {
                             Menu {
-                                ForEach(fabricLoaders) { loader in
-                                    Button {
-                                        if selectedLoaderVersion != loader.version {
-                                            selectedLoaderVersion = loader.version
-                                            invalidateJavaSelection()
+                                if loader == .fabric {
+                                    ForEach(fabricLoaders) { item in
+                                        Button {
+                                            if selectedLoaderVersion != item.version {
+                                                selectedLoaderVersion = item.version
+                                                invalidateJavaSelection()
+                                            }
+                                        } label: {
+                                            Text("\(item.version)\(item.stable ? " · stable" : "")")
                                         }
-                                    } label: {
-                                        if selectedLoaderVersion == loader.version {
-                                            Label("\(loader.version)\(loader.stable ? " · stable" : "")", systemImage: "checkmark")
-                                        } else {
-                                            Text("\(loader.version)\(loader.stable ? " · stable" : "")")
+                                    }
+                                } else {
+                                    ForEach(neoforgeLoaders) { item in
+                                        Button {
+                                            if selectedLoaderVersion != item.version {
+                                                selectedLoaderVersion = item.version
+                                                invalidateJavaSelection()
+                                            }
+                                        } label: {
+                                            Text(item.version)
                                         }
                                     }
                                 }
@@ -401,7 +429,7 @@ struct InstallWizardView: View {
                                     VStack(alignment: .leading, spacing: 2) {
                                         Text(selectedLoaderVersion ?? "选择 Loader 版本")
                                             .font(LXFont.bodyStrong).foregroundStyle(theme.text)
-                                        Text("仅列出 Fabric 官方声明兼容的版本")
+                                        Text(loader == .fabric ? "仅列出 Fabric 官方声明兼容的版本" : "NeoForge 官方 Maven 中与 Minecraft 版本匹配的版本")
                                             .font(LXFont.caption).foregroundStyle(theme.textTertiary)
                                     }
                                     Spacer()
@@ -413,7 +441,7 @@ struct InstallWizardView: View {
                             }
                             .menuStyle(.borderlessButton)
                             .menuIndicator(.hidden)
-                            LXBadge(text: "\(fabricLoaders.count) compatible", tone: .success, dot: true)
+                            LXBadge(text: "\(loader == .fabric ? fabricLoaders.count : neoforgeLoaders.count) compatible", tone: .success, dot: true)
                         }
                     }
                 }
@@ -540,7 +568,7 @@ struct InstallWizardView: View {
                 LXCard(padding: LXSpace.md) {
                     VStack(alignment: .leading, spacing: 10) {
                         fieldLabel("实例名称")
-                        TextField("例如：Minecraft 1.20.1 Fabric", text: $newInstanceName)
+                        TextField("例如：Minecraft 1.20.1 Fabric / NeoForge", text: $newInstanceName)
                             .lxInput()
                             .onChange(of: newInstanceName) { _, _ in
                                 if newInstanceID.isEmpty { newInstanceID = suggestedInstanceID() }
@@ -603,7 +631,7 @@ struct InstallWizardView: View {
             LXCard(padding: LXSpace.md) {
                 VStack(alignment: .leading, spacing: 10) {
                     summaryRow("Minecraft", selectedVersion)
-                    summaryRow("Loader", loader == .vanilla ? "Vanilla" : "Fabric \(selectedLoaderVersion ?? "")")
+                    summaryRow("Loader", loaderChoice.displayName)
                     summaryRow("Java", chosenRuntime?.displayDescription ?? "未选择")
                     summaryRow("安装源", installSource)
                     summaryRow("目标", targetDescription)
@@ -678,7 +706,7 @@ struct InstallWizardView: View {
                         }
                         summaryRow("实例", report.instanceID)
                         summaryRow("游戏目录", report.gameDirectory.path)
-                        summaryRow("Loader", loader == .vanilla ? "Vanilla" : "Fabric \(selectedLoaderVersion ?? "")")
+                        summaryRow("Loader", loaderChoice.displayName)
                         if let backup = report.backupManifest {
                             summaryRow("备份", backup.path)
                         }
@@ -744,6 +772,16 @@ struct InstallWizardView: View {
             let installer = try model.makeOneStopInstaller()
             fabricLoaders = try await installer.listFabricLoaders(for: selectedVersion)
             selectedLoaderVersion = fabricLoaders.first(where: \.stable)?.version ?? fabricLoaders.first?.version
+        } catch {
+            setError(error)
+        }
+    }
+
+    private func loadNeoForgeLoaders() async {
+        do {
+            let installer = try model.makeOneStopInstaller()
+            neoforgeLoaders = try await installer.listNeoForgeLoaders(for: selectedVersion)
+            selectedLoaderVersion = neoforgeLoaders.first?.version
         } catch {
             setError(error)
         }
@@ -911,7 +949,7 @@ struct InstallWizardView: View {
 
     private func prepareNewTargetIfNeeded() {
         if newInstanceName.isEmpty {
-            newInstanceName = "Minecraft \(selectedVersion)\(loader == .vanilla ? "" : " Fabric")"
+            newInstanceName = "Minecraft \(selectedVersion)\(loader == .vanilla ? "" : " \(loader.title)")"
         }
         if newInstanceID.isEmpty { newInstanceID = suggestedInstanceID() }
     }

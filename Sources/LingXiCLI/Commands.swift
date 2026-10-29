@@ -888,6 +888,11 @@ enum CLI {
               compatibility metadata and Maven artifacts. New instance by default;
               --update explicitly backs up instance.json before changing the target.
 
+          install neoforge --version <minecraft-id> --instance <instance-id> [--update]
+                  [--loader <neoforge-version>] [--java <path>] [--source auto]
+              Install NeoForge through its official installer in an isolated staging
+              root. Requires Java 21+; only official NeoForge Maven artifacts are used.
+
           java list [--data-root <path>]
           java install --major <version> --yes [--data-root <path>]
               Detect Java runtimes; optionally download a verified Eclipse Temurin
@@ -899,15 +904,15 @@ enum CLI {
           mod list --instance <id> [--json]
           mod enable|disable|remove --instance <id> --file <mod.jar>
           mod updates --instance <id> [--json]
-              Modrinth Fabric mod browsing/install with required-dependency resolution,
+              Modrinth Fabric/NeoForge mod browsing/install with required-dependency resolution,
               SHA-1/SHA-512 verification and atomic local mod updates.
 
           mrpack inspect --file <pack.mrpack> [--json]
           mrpack install --file <pack.mrpack> [--name <name>] [--java <path>]
                   [--root <path>] [--data-root <path>] [--source auto|official] [--json]
               Validate a Modrinth .mrpack, download/verify its files through the
-              persistent cache, install Minecraft/Fabric and commit the pack into a
-              fresh isolated instance. Forge/NeoForge/Quilt are rejected explicitly.
+              persistent cache, install Minecraft plus Fabric/NeoForge and commit the pack into a
+              fresh isolated instance. Forge/Quilt are rejected explicitly.
 
           graphics status --instance <id> [--json]
           graphics setup --instance <id> [--replace] [--json]

@@ -70,6 +70,7 @@ extension CLI {
         switch loader {
         case .vanilla: return "vanilla"
         case let .fabric(version): return version.map { "fabric-\($0)" } ?? "fabric"
+        case let .neoforge(version): return version.map { "neoforge-\($0)" } ?? "neoforge"
         }
     }
 

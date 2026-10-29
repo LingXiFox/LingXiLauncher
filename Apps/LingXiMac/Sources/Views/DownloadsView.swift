@@ -143,13 +143,13 @@ struct DownloadsView: View {
                 Text("从版本到启动，一次完成")
                     .font(LXFont.title(23))
                     .foregroundStyle(theme.text)
-                Text("安装 Minecraft、选择 Vanilla 或 Fabric、检测/下载 Java，并明确创建新实例或更新现有实例。")
+                Text("安装 Minecraft、选择 Vanilla、Fabric 或 NeoForge、检测/下载 Java，并明确创建新实例或更新现有实例。")
                     .font(LXFont.body)
                     .foregroundStyle(theme.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
                 VStack(alignment: .leading, spacing: 6) {
                     wizardPoint("自动读取版本元数据与 Java 要求", icon: "cpu")
-                    wizardPoint("Fabric 官方 Loader 与 Maven 依赖", icon: "square.stack.3d.up")
+                    wizardPoint("Fabric / NeoForge 官方 Loader 与 Maven 依赖", icon: "square.stack.3d.up")
                     wizardPoint("失败/取消不修改目标实例", icon: "shield.checkered")
                 }
                 if let selectedVersionID {

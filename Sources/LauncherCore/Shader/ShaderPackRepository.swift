@@ -117,9 +117,9 @@ struct ShaderPackRepository: Sendable {
 
     // MARK: - Commit
 
-    /// Moves a fully verified staged ZIP into the instance and persists metadata. The old file
-    /// remains recoverable until the metadata write succeeds. Existing untracked files are never
-    /// overwritten unless they are the record explicitly being replaced by an update.
+    /// Moves a fully verified staged ZIP into the instance and persists metadata. Every file
+    /// that is replaced is backed up under a unique name and restored if metadata persistence
+    /// fails, so a failed update cannot leave a missing or half-replaced shader pack.
     func commit(
         instance: Instance,
         stagedURL: URL,
@@ -134,17 +134,18 @@ struct ShaderPackRepository: Sendable {
         } catch {
             throw LauncherError(.ioFailure, "无法创建光影目录: \(error.localizedDescription)")
         }
+        let metadataURL = self.metadataURL(instance: instance)
         var records = try loadRecords(instance: instance)
         let oldRecord = records.first { $0.fileName == replacingFileName }
-        if let duplicate = records.first(where: { $0.sha1 != nil && $0.sha1 == record.sha1 && $0.fileName != replacingFileName }) {
+        if let duplicate = records.first(where: {
+            $0.fileName != replacingFileName
+                && (($0.sha1 != nil && $0.sha1 == record.sha1) || ($0.sha512 != nil && $0.sha512 == record.sha512))
+        }) {
             throw LauncherError(
                 .usageError,
                 "该光影包已安装为 \(duplicate.fileName)；不会重复复制。",
                 suggestion: "请在已安装光影列表中管理它。"
             )
-        }
-        if let duplicate = records.first(where: { $0.sha512 != nil && $0.sha512 == record.sha512 && $0.fileName != replacingFileName }) {
-            throw LauncherError(.usageError, "该光影包内容已安装为 \(duplicate.fileName)；不会重复复制。")
         }
         let destination = directory.appendingPathComponent(record.fileName, isDirectory: false)
         if fm.fileExists(atPath: destination.path) && oldRecord == nil {
@@ -162,42 +163,51 @@ struct ShaderPackRepository: Sendable {
             ".shaderpacks-backup-\(UUID().uuidString)",
             isDirectory: true
         )
-        var oldURL: URL?
-        var backupURL: URL?
+        var backups: [(original: URL, backup: URL)] = []
+        var metadataBackup: URL?
+        var movedStaged = false
         do {
             try fm.createDirectory(at: backupDirectory, withIntermediateDirectories: true)
+
+            func backup(_ source: URL, name: String) throws {
+                guard fm.fileExists(atPath: source.path) else { return }
+                let target = backupDirectory.appendingPathComponent(name, isDirectory: false)
+                try fm.moveItem(at: source, to: target)
+                backups.append((source, target))
+            }
+
             if let oldRecord, oldRecord.fileName != record.fileName {
-                let candidate = directory.appendingPathComponent(oldRecord.fileName, isDirectory: false)
-                if fm.fileExists(atPath: candidate.path) {
-                    let backup = backupDirectory.appendingPathComponent(oldRecord.fileName, isDirectory: false)
-                    try fm.moveItem(at: candidate, to: backup)
-                    oldURL = candidate
-                    backupURL = backup
-                }
+                try backup(
+                    directory.appendingPathComponent(oldRecord.fileName, isDirectory: false),
+                    name: "old-\(oldRecord.fileName)"
+                )
             }
-            if fm.fileExists(atPath: destination.path) {
-                let backup = backupDirectory.appendingPathComponent(record.fileName, isDirectory: false)
-                if backupURL != nil {
-                    try? fm.removeItem(at: backup)
-                }
-                try fm.moveItem(at: destination, to: backup)
-                oldURL = destination
-                backupURL = backup
+            try backup(destination, name: "target-\(record.fileName)")
+            if fm.fileExists(atPath: metadataURL.path) {
+                let target = backupDirectory.appendingPathComponent("shaderpacks.json", isDirectory: false)
+                try fm.copyItem(at: metadataURL, to: target)
+                metadataBackup = target
             }
+
             try fm.moveItem(at: stagedURL, to: destination)
+            movedStaged = true
             records.removeAll { $0.fileName == replacingFileName || $0.fileName == record.fileName }
             records.append(record)
             try saveRecords(records, instance: instance)
-            if let backupDirectory = try? fm.destinationOfSymbolicLink(atPath: ""), backupDirectory.isEmpty {
-                // unreachable placeholder; keeps closure-free cleanup explicit below
-            }
             try? fm.removeItem(at: backupDirectory)
             return record
         } catch {
-            try? fm.removeItem(at: destination)
-            if let backupURL, let oldURL {
-                try? fm.createDirectory(at: oldURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-                try? fm.moveItem(at: backupURL, to: oldURL)
+            if movedStaged {
+                try? fm.removeItem(at: destination)
+            }
+            for item in backups.reversed() {
+                try? fm.createDirectory(at: item.original.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try? fm.moveItem(at: item.backup, to: item.original)
+            }
+            if let metadataBackup, fm.fileExists(atPath: metadataBackup.path) {
+                try? fm.createDirectory(at: instance.directory, withIntermediateDirectories: true)
+                try? fm.removeItem(at: metadataURL)
+                try? fm.copyItem(at: metadataBackup, to: metadataURL)
             }
             try? fm.removeItem(at: backupDirectory)
             throw (error as? LauncherError) ?? LauncherError(

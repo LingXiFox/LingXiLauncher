@@ -432,8 +432,7 @@ extension CLI {
         let (manager, instanceID) = try shaderManager(input)
         let result = try manager.activate(
             fileName: try input.requireValue("file"),
-            instanceID: instanceID,
-            gameRunning: false
+            instanceID: instanceID
         )
         if input.has("json") {
             CLIOutput.emitJSON(JSONShaderActivation(state: "enabled", shaderPack: result.shaderPack, message: result.message))
@@ -454,7 +453,7 @@ extension CLI {
             return ExitStatus.success.rawValue
         }
         let (manager, instanceID) = try shaderManager(input)
-        let result = try manager.deactivate(instanceID: instanceID, gameRunning: false)
+        let result = try manager.deactivate(instanceID: instanceID)
         if input.has("json") {
             CLIOutput.emitJSON(JSONShaderActivation(state: "disabled", shaderPack: nil, message: result.message))
         } else {

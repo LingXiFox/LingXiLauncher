@@ -133,11 +133,11 @@ public struct ModManager: Sendable {
 
     public func compatibility(for instance: Instance) throws -> ModCompatibility {
         let compatibility = try ModCompatibilityResolver.resolve(instance: instance, layout: layout)
-        guard compatibility.loader == .fabric else {
+        guard compatibility.loader == .fabric || compatibility.loader == .neoforge else {
             throw LauncherError(
                 .unsupportedVersion,
-                "Instance '\(instance.id)' is \(compatibility.loader.rawValue), but M6.2 only supports Fabric mods",
-                suggestion: "Install/select a Fabric instance before opening mod management."
+                "Instance '\(instance.id)' is \(compatibility.loader.rawValue); NeoForge and Fabric mods require a modded instance",
+                suggestion: "Install/select a Fabric or NeoForge instance before opening mod management."
             )
         }
         return compatibility
@@ -220,8 +220,8 @@ public struct ModManager: Sendable {
         guard !versions.isEmpty else {
             throw LauncherError(
                 .unsupportedVersion,
-                "\(project.title) has no version compatible with Minecraft \(compatibility.gameVersion) / Fabric",
-                suggestion: "Choose another project or switch the instance to a supported Fabric version."
+                "\(project.title) has no version compatible with Minecraft \(compatibility.gameVersion) / \(compatibility.loader.displayName)",
+                suggestion: "Choose another project or switch the instance to a supported \(compatibility.loader.displayName) version."
             )
         }
         let selected: ModrinthVersion
@@ -494,7 +494,7 @@ public struct ModManager: Sendable {
                         throw LauncherError(
                             .missingDependency,
                             "Missing required dependency \(dependencyProject.title) for \(parent)",
-                            suggestion: "No version of the dependency supports this Minecraft/Fabric combination."
+                            suggestion: "No version of the dependency supports this Minecraft \(compatibility.loader.displayName) combination."
                         )
                     }
                     dependencyProjectID = dependencyProject.id

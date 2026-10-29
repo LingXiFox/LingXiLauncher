@@ -80,19 +80,21 @@ public enum MrpackParser {
             let normalizedDependencies = Dictionary(uniqueKeysWithValues: index.dependencies.map {
                 ($0.key.lowercased(), $0.value)
             })
-            let unsupported = ["forge", "neoforge", "quilt-loader", "quilt"].filter {
+            let unsupported = ["forge", "quilt-loader", "quilt"].filter {
                 normalizedDependencies[$0] != nil
             }
             guard unsupported.isEmpty else {
                 throw LauncherError(
                     .unsupportedVersion,
-                    "当前只支持 Vanilla/Fabric 整合包，检测到 \(unsupported.joined(separator: ", "))",
-                    suggestion: "请使用 Fabric 版本，或在后续版本中等待 Forge/NeoForge/Quilt 支持。"
+                    "当前只支持 Vanilla/Fabric/NeoForge 整合包，检测到 \(unsupported.joined(separator: ", "))",
+                    suggestion: "请使用 Fabric/NeoForge 版本，或等待 Forge/Quilt 支持。"
                 )
             }
             let loader: InstallLoaderChoice
             if let fabricVersion = normalizedDependencies["fabric-loader"] {
                 loader = .fabric(loaderVersion: fabricVersion.isEmpty ? nil : fabricVersion)
+            } else if let neoForgeVersion = normalizedDependencies["neoforge"] {
+                loader = .neoforge(loaderVersion: neoForgeVersion.isEmpty ? nil : neoForgeVersion)
             } else {
                 loader = .vanilla
             }

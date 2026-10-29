@@ -14,12 +14,14 @@ public struct ShaderPackManager: Sendable {
     private let transport: any DownloadTransport
     private let allowedDownloadHosts: Set<String>
     private let irisConfiguration: IrisConfigurationStore
+    private let runtime: any InstanceRuntimeChecking
 
     public init(
         layout: GameDataLayout,
         transport: any DownloadTransport = URLSessionTransport(),
         client: ModrinthClient? = nil,
-        allowedDownloadHosts: Set<String> = ["cdn.modrinth.com"]
+        allowedDownloadHosts: Set<String> = ["cdn.modrinth.com"],
+        runtime: (any InstanceRuntimeChecking)? = nil
     ) {
         self.layout = layout
         self.transport = transport
@@ -27,20 +29,23 @@ public struct ShaderPackManager: Sendable {
         self.repository = ShaderPackRepository(layout: layout)
         self.allowedDownloadHosts = Set(allowedDownloadHosts.map { $0.lowercased() })
         self.irisConfiguration = IrisConfigurationStore()
+        self.runtime = runtime ?? InstanceRuntimeRegistry(layout: layout)
     }
 
     // MARK: - Compatibility
 
     public func compatibility(for instance: Instance) throws -> ShaderCompatibility {
         let base = try ModCompatibilityResolver.resolve(instance: instance, layout: layout)
-        guard base.loader == .fabric else {
+        guard base.loader == .fabric || base.loader == .neoforge else {
             throw LauncherError(
                 .unsupportedVersion,
-                "光影需要 Iris，而 Iris 只能安装在 Fabric 实例上；当前实例是 \(base.loader.rawValue)。",
-                suggestion: "请选择 Fabric 实例，或先安装 Fabric Loader。"
+                "光影需要 Iris，而当前实例是 \(base.loader.rawValue)；请先安装 Fabric 或 NeoForge。",
+                suggestion: "选择 Fabric/NeoForge 实例后再管理光影。"
             )
         }
-        let loaderVersion = Self.fabricLoaderVersion(from: instance.manifest.versionID)
+        let loaderVersion = base.loader == .fabric
+            ? Self.fabricLoaderVersion(from: instance.manifest.versionID)
+            : Self.neoForgeLoaderVersion(from: instance.manifest.versionID)
         return ShaderCompatibility(
             instanceID: instance.id,
             versionID: base.versionID,
@@ -110,6 +115,9 @@ public struct ShaderPackManager: Sendable {
 
     public func remove(fileName: String, instanceID: String) throws {
         let instance = try loadInstance(instanceID)
+        guard !runtime.isRunning(instanceID: instanceID) else {
+            throw LauncherError(.usageError, "游戏正在运行，不能删除光影包。", suggestion: "请先退出游戏，再修改 shaderpacks。")
+        }
         _ = try repository.remove(fileName: fileName, instance: instance)
     }
 
@@ -135,6 +143,9 @@ public struct ShaderPackManager: Sendable {
         progress: @escaping @Sendable (ShaderPackProgress) -> Void
     ) async throws -> ShaderPackInstallReport {
         let instance = try loadInstance(instanceID)
+        guard !runtime.isRunning(instanceID: instanceID) else {
+            throw LauncherError(.usageError, "游戏正在运行，不能安装或更新光影包。", suggestion: "请先退出游戏，再修改 shaderpacks。")
+        }
         let compatibility = try compatibility(for: instance)
         progress(ShaderPackProgress(phase: .resolving, message: "查询 Modrinth 光影项目", completed: 0, total: 1))
         let project = try await client.project(idOrSlug: projectIDOrSlug)
@@ -168,14 +179,20 @@ public struct ShaderPackManager: Sendable {
         try Task.checkCancellation()
 
         let existing = try repository.list(instance: instance)
-        if let duplicate = existing.first(where: { $0.projectID == project.id && $0.fileName != replacingFileName }) {
+        let existingForProject = existing.first(where: { $0.projectID == project.id })
+        // Installing another version of an already-installed project is an update: choose the
+        // existing record automatically so the new verified file replaces it transactionally.
+        let effectiveReplacement = replacingFileName ?? existingForProject?.fileName
+        if let duplicate = existing.first(where: {
+            $0.projectID == project.id && $0.fileName != effectiveReplacement
+        }) {
             throw LauncherError(
                 .usageError,
                 "\(project.title) 已安装为 \(duplicate.versionNumber ?? duplicate.fileName)；不会自动覆盖。",
                 suggestion: "请使用更新操作，或先在已安装光影中删除旧版本。"
             )
         }
-        if let replacement = replacingFileName {
+        if let replacement = effectiveReplacement {
             guard let old = existing.first(where: { $0.fileName == replacement }) else {
                 throw LauncherError(.usageError, "要替换的光影记录不存在：\(replacement)")
             }
@@ -223,8 +240,8 @@ public struct ShaderPackManager: Sendable {
             instance: instance,
             stagedURL: staged,
             record: record,
-            replacingFileName: replacingFileName,
-            allowReplace: replacingFileName != nil
+            replacingFileName: effectiveReplacement,
+            allowReplace: effectiveReplacement != nil
         )
         progress(ShaderPackProgress(phase: .done, message: "光影包已安装；是否启用取决于 Iris 配置", completed: 1, total: 1, currentFile: fileName))
         return ShaderPackInstallReport(installed: committed, downloadedBytes: file.size, downloadedFiles: 1)
@@ -355,10 +372,9 @@ public struct ShaderPackManager: Sendable {
     @discardableResult
     public func activate(
         fileName: String,
-        instanceID: String,
-        gameRunning: Bool
+        instanceID: String
     ) throws -> ShaderActivationResult {
-        guard !gameRunning else {
+        guard !runtime.isRunning(instanceID: instanceID) else {
             throw LauncherError(.usageError, "游戏正在运行，不能覆盖 Iris 配置。", suggestion: "退出游戏后重试。")
         }
         let instance = try loadInstance(instanceID)
@@ -399,8 +415,8 @@ public struct ShaderPackManager: Sendable {
     }
 
     @discardableResult
-    public func deactivate(instanceID: String, gameRunning: Bool) throws -> ShaderActivationResult {
-        guard !gameRunning else {
+    public func deactivate(instanceID: String) throws -> ShaderActivationResult {
+        guard !runtime.isRunning(instanceID: instanceID) else {
             throw LauncherError(.usageError, "游戏正在运行，不能覆盖 Iris 配置。", suggestion: "退出游戏后重试。")
         }
         let instance = try loadInstance(instanceID)
@@ -436,7 +452,14 @@ public struct ShaderPackManager: Sendable {
         guard components.count >= 2,
               let major = Int(components[0]),
               let minor = Int(components[1]) else { return false }
-        return major == 1 && minor == 7
+        // Iris 1.7 introduced this config layout; later 1.x releases retain it. Unknown major
+        // versions are rejected instead of writing an unverified property file.
+        return major == 1 && minor >= 7
+    }
+
+    static func neoForgeLoaderVersion(from versionID: String?) -> String? {
+        guard let versionID, versionID.hasPrefix("neoforge-") else { return nil }
+        return String(versionID.dropFirst("neoforge-".count))
     }
 
     static func fabricLoaderVersion(from versionID: String?) -> String? {

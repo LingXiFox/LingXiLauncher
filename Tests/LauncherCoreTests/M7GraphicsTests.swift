@@ -1,6 +1,11 @@
 import XCTest
 @testable import LauncherCore
 
+private struct FixedRuntime: InstanceRuntimeChecking {
+    let running: Bool
+    func isRunning(instanceID: String) -> Bool { running }
+}
+
 private actor GraphicsTransport: DownloadTransport {
     private var api: [String: Data] = [:]
     private var files: [String: Data] = [:]
@@ -138,13 +143,81 @@ final class M7GraphicsTests: XCTestCase {
         let config = instance.gameDirectory.appendingPathComponent("config/iris.properties")
         try FileManager.default.createDirectory(at: config.deletingLastPathComponent(), withIntermediateDirectories: true)
         try Data("shaderPack=old.zip\nenableShaders=false\n# keep me\nlanguage=zh\n".utf8).write(to: config)
-        let activation = try manager.activate(fileName: "complementary.zip", instanceID: instance.id, gameRunning: false)
+        let activation = try manager.activate(fileName: "complementary.zip", instanceID: instance.id)
         XCTAssertNotNil(activation.backupURL)
         let text = try String(contentsOf: config, encoding: .utf8)
         XCTAssertTrue(text.contains("shaderPack=complementary.zip"))
         XCTAssertTrue(text.contains("enableShaders=true"))
         XCTAssertTrue(text.contains("language=zh"))
         XCTAssertEqual(try manager.activationState(instanceID: instance.id).kind, .enabled)
+    }
+
+    func testGraphicsUpgradeFailureRestoresBothOldMods() async throws {
+        let instance = try makeFabricInstance()
+        let transport = GraphicsTransport()
+        let api = GraphicsAPI()
+        try await api.populate(transport)
+        let client = ModrinthClient(baseURL: api.baseURL, transport: transport)
+        let manager = GraphicsSetupManager(layout: layout, transport: transport, client: client)
+        _ = try await manager.install(instanceID: instance.id) { _ in }
+
+        try await api.makeNewerPair(transport, failIrisDownload: true)
+        do {
+            _ = try await manager.install(instanceID: instance.id, allowReplace: true) { _ in }
+            XCTFail("expected Iris download failure after Sodium replacement")
+        } catch let error as LauncherError {
+            XCTAssertEqual(error.code, .sizeMismatch)
+        }
+
+        let mods = try ModManager(layout: layout, transport: transport, client: client)
+            .installed(instanceID: instance.id)
+        XCTAssertEqual(mods.first { $0.projectID == GraphicsSetupManager.irisProjectID }?.versionID, "iris-v1")
+        XCTAssertEqual(mods.first { $0.projectID == GraphicsSetupManager.sodiumProjectID }?.versionID, "sodium-v1")
+        XCTAssertEqual(
+            try Data(contentsOf: instance.gameDirectory.appendingPathComponent("mods/sodium.jar")),
+            api.sodiumData
+        )
+        let leftovers = try FileManager.default.contentsOfDirectory(atPath: instance.directory.path)
+        XCTAssertFalse(leftovers.contains { $0.hasPrefix("mods-backup-") }, "snapshot staging must be cleaned")
+    }
+
+    func testShaderRepositoryRestoresOldFileWhenStagedCommitFails() async throws {
+        let instance = try makeFabricInstance()
+        let transport = GraphicsTransport()
+        let api = GraphicsAPI()
+        try await api.populate(transport)
+        let client = ModrinthClient(baseURL: api.baseURL, transport: transport)
+        _ = try await GraphicsSetupManager(layout: layout, transport: transport, client: client)
+            .install(instanceID: instance.id) { _ in }
+        let manager = ShaderPackManager(layout: layout, transport: transport, client: client)
+        let old = try await manager.install(instanceID: instance.id, projectIDOrSlug: "shader") { _ in }.installed
+        let repository = ShaderPackRepository(layout: layout)
+        let missingStage = instance.directory.appendingPathComponent("missing-stage.zip")
+        let replacement = InstalledShaderPack(
+            projectID: old.projectID,
+            slug: old.slug,
+            title: old.title,
+            versionID: "shader-v2",
+            versionNumber: "2.0",
+            fileName: old.fileName,
+            sha1: old.sha1,
+            sha512: old.sha512,
+            fileSize: old.fileSize,
+            source: .modrinth,
+            license: old.license,
+            iconURL: old.iconURL,
+            installedAt: Date()
+        )
+        XCTAssertThrowsError(try repository.commit(
+            instance: instance,
+            stagedURL: missingStage,
+            record: replacement,
+            replacingFileName: old.fileName,
+            allowReplace: true
+        ))
+        let zip = instance.gameDirectory.appendingPathComponent("shaderpacks/complementary.zip")
+        XCTAssertEqual(try Data(contentsOf: zip), api.shaderData)
+        XCTAssertEqual(try manager.installed(instanceID: instance.id).first?.versionID, "shader-v1")
     }
 
     func testShaderInstallHashFailureLeavesWorldsConfigsAndRecordsUntouched() async throws {
@@ -198,20 +271,36 @@ final class M7GraphicsTests: XCTestCase {
         let client = ModrinthClient(baseURL: api.baseURL, transport: transport)
         _ = try await GraphicsSetupManager(layout: layout, transport: transport, client: client)
             .install(instanceID: instance.id) { _ in }
-        let manager = ShaderPackManager(layout: layout, transport: transport, client: client)
+        let manager = ShaderPackManager(
+            layout: layout, transport: transport, client: client,
+            runtime: FixedRuntime(running: false)
+        )
         _ = try await manager.install(instanceID: instance.id, projectIDOrSlug: "shader") { _ in }
+        _ = try manager.activate(fileName: "complementary.zip", instanceID: instance.id)
 
-        XCTAssertThrowsError(try manager.activate(fileName: "complementary.zip", instanceID: instance.id, gameRunning: true)) { error in
+        let blockingManager = ShaderPackManager(
+            layout: layout, transport: transport, client: client,
+            runtime: FixedRuntime(running: true)
+        )
+        do {
+            _ = try await blockingManager.install(instanceID: instance.id, projectIDOrSlug: "shader") { _ in }
+            XCTFail("shader install/update must be blocked while the game runs")
+        } catch let error as LauncherError {
+            XCTAssertEqual(error.code, .usageError)
+        }
+        XCTAssertThrowsError(try blockingManager.activate(fileName: "complementary.zip", instanceID: instance.id)) { error in
             XCTAssertEqual((error as? LauncherError)?.code, .usageError)
         }
-        _ = try manager.activate(fileName: "complementary.zip", instanceID: instance.id, gameRunning: false)
-        let result = try manager.deactivate(instanceID: instance.id, gameRunning: false)
+        XCTAssertThrowsError(try blockingManager.remove(fileName: "complementary.zip", instanceID: instance.id)) { error in
+            XCTAssertEqual((error as? LauncherError)?.code, .usageError)
+        }
+
+        let result = try manager.deactivate(instanceID: instance.id)
         XCTAssertNotNil(result.backupURL)
         let config = try String(contentsOf: result.configURL, encoding: .utf8)
         XCTAssertTrue(config.contains("enableShaders=false"))
         XCTAssertTrue(config.contains("shaderPack="))
     }
-
 
     func testUnsupportedMacOpenGLPathWarnsWithoutClaimingMetalRayTracing() {
         let unavailable = GraphicsCapabilities(
@@ -311,15 +400,17 @@ private struct GraphicsAPI {
         await transport.setData(fileBase + "/shader.zip", shaderData)
     }
 
-    func makeNewerPair(_ transport: GraphicsTransport) async throws {
+    func makeNewerPair(_ transport: GraphicsTransport, failIrisDownload: Bool = false) async throws {
         var newerIris = irisVersion
         newerIris["id"] = "iris-v2"
         newerIris["version_number"] = "1.7.7"
         newerIris["date_published"] = "2026-02-01T00:00:00Z"
+        newerIris["files"] = [file(name: "iris-v2.jar", path: "iris-v2.jar", data: Data(repeating: 0x69, count: 64))]
         var newerSodium = sodiumVersion
         newerSodium["id"] = "sodium-v2"
         newerSodium["version_number"] = "0.6.0"
         newerSodium["date_published"] = "2026-02-01T00:00:00Z"
+        newerSodium["files"] = [file(name: "sodium-v2.jar", path: "sodium-v2.jar", data: Data(repeating: 0x73, count: 64))]
         var irisDeps = newerIris["dependencies"] as? [[String: Any]] ?? []
         irisDeps[0]["version_id"] = "sodium-v2"
         newerIris["dependencies"] = irisDeps
@@ -327,7 +418,7 @@ private struct GraphicsAPI {
         try await setVersionList(transport, project: "AANobbMI", versions: [newerSodium])
         await transport.setJSONData("/v2/version/sodium-v2", try graphicsJSON(newerSodium))
         await transport.setJSONData("/v2/version/iris-v2", try graphicsJSON(newerIris))
-        await transport.setData(fileBase + "/iris-v2.jar", Data(repeating: 0x69, count: 64))
+        await transport.setData(fileBase + "/iris-v2.jar", failIrisDownload ? Data() : Data(repeating: 0x69, count: 64))
         await transport.setData(fileBase + "/sodium-v2.jar", Data(repeating: 0x73, count: 64))
     }
 

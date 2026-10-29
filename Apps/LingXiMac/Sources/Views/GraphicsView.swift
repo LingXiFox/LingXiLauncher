@@ -13,7 +13,11 @@ struct GraphicsView: View {
 
     init(instance: Instance, model: AppModel) {
         self.model = model
-        _store = StateObject(wrappedValue: GraphicsStore(instance: instance, model: model))
+        _store = StateObject(wrappedValue: GraphicsStore(
+            instance: instance,
+            setupManager: model.makeGraphicsSetupManager(),
+            shaderManager: model.makeShaderPackManager()
+        ))
     }
 
     var body: some View {
@@ -216,25 +220,6 @@ struct GraphicsView: View {
                         installedRow(pack)
                     }
                 }
-                if !store.updates.isEmpty {
-                    Text("可用更新").font(LXFont.headline).foregroundStyle(theme.text).padding(.top, 8)
-                    ForEach(store.updates, id: \.projectID) { update in
-                        HStack(spacing: 12) {
-                            Image(systemName: "arrow.down.circle.fill").foregroundStyle(theme.orange)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(update.title).font(LXFont.bodyStrong).foregroundStyle(theme.text)
-                                Text("\(update.currentVersionNumber ?? "当前") → \(update.latestVersionNumber)")
-                                    .font(LXFont.caption).foregroundStyle(theme.textSecondary)
-                            }
-                            Spacer()
-                            LXButton("更新", kind: .primary, isDisabled: store.isInstallingShader) {
-                                Task { await store.update(update) }
-                            }
-                        }
-                        .padding(12)
-                        .background(theme.surface, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-                    }
-                }
             }
             .padding(20)
         }
@@ -259,6 +244,17 @@ struct GraphicsView: View {
                     }
                 }
                 Spacer()
+                if let update = store.updates.first(where: { $0.projectID == pack.projectID }) {
+                    VStack(alignment: .trailing, spacing: 4) {
+                        Text("可更新至 \(update.latestVersionNumber)")
+                            .font(LXFont.caption).foregroundStyle(theme.orange)
+                        LXButton("更新", systemImage: "arrow.down.circle", kind: .primary, isDisabled: store.isInstallingShader) {
+                            Task { await store.update(update) }
+                        }
+                    }
+                } else {
+                    Text("已是最新").font(LXFont.caption).foregroundStyle(theme.textTertiary)
+                }
                 LXButton("启用", systemImage: "sun.max", kind: .secondary, isDisabled: store.activationState?.kind == .enabled && store.activationState?.shaderPack == pack.title) {
                     store.activate(pack)
                 }
@@ -292,7 +288,7 @@ struct GraphicsView: View {
                                 }
                             }
                             Spacer()
-                            Text("Minecraft \(store.gameVersion) · Fabric").font(LXFont.caption).foregroundStyle(theme.textTertiary)
+                            Text("Minecraft \(store.gameVersion) · \(store.loaderName)").font(LXFont.caption).foregroundStyle(theme.textTertiary)
                         }
                         if store.isSearching {
                             ProgressView("搜索 Modrinth…").frame(maxWidth: .infinity, minHeight: 160)
@@ -423,7 +419,7 @@ struct GraphicsView: View {
                 LXCard(padding: 14) {
                     LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], alignment: .leading, spacing: 12) {
                         LXKeyValue(label: "Minecraft", value: store.gameVersion)
-                        LXKeyValue(label: "Fabric Loader", value: store.loaderVersion ?? "未知")
+                        LXKeyValue(label: "\(store.loaderName) Loader", value: store.loaderVersion ?? "未知")
                         LXKeyValue(label: "Java", value: store.environment?.javaDescription ?? "未检测")
                         LXKeyValue(label: "图形", value: store.capabilities.summary)
                     }
@@ -453,7 +449,7 @@ struct GraphicsView: View {
                                     Text("尚未安装").font(LXFont.caption).foregroundStyle(theme.textTertiary)
                                 }
                                 if let recommended = item.2 {
-                                    Text("推荐 \(recommended.versionNumber) · Fabric \(store.gameVersion)")
+                                    Text("推荐 \(recommended.versionNumber) · \(store.loaderName) \(store.gameVersion)")
                                         .font(LXFont.caption).foregroundStyle(theme.textTertiary)
                                 }
                             }
@@ -514,7 +510,7 @@ struct GraphicsView: View {
             Image(systemName: "exclamationmark.triangle").font(.system(size: 30)).foregroundStyle(theme.orange)
             Text("此实例不能使用光影工作台").font(LXFont.headline).foregroundStyle(theme.text)
             Text(message).font(LXFont.body).foregroundStyle(theme.textSecondary).multilineTextAlignment(.center).frame(maxWidth: 460)
-            Text("请先在实例安装向导中选择 Fabric Loader，并确认实例版本可解析。").font(LXFont.caption).foregroundStyle(theme.textTertiary)
+            Text("请先在实例安装向导中选择 Fabric 或 NeoForge，并确认实例版本可解析。").font(LXFont.caption).foregroundStyle(theme.textTertiary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(30)

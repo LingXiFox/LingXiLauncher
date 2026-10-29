@@ -82,7 +82,7 @@ public struct MrpackInstallReport: Sendable {
 /// Installs a validated `.mrpack` as a brand-new isolated instance.
 ///
 /// External files are downloaded through `Downloader` into a persistent verified cache, then
-/// copied into a pack staging tree. Minecraft/Fabric is installed through `OneStopInstaller`
+/// copied into a pack staging tree. Minecraft and its Fabric/NeoForge loader are installed through `OneStopInstaller`
 /// only after every external file has passed size/SHA verification. Pack files are then moved
 /// into the new game directory without overwriting anything. Any failure after instance creation
 /// removes that newly created instance; existing instances/worlds are never touched.

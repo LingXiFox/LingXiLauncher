@@ -35,6 +35,16 @@ final class MrpackTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: extraction.path))
     }
 
+    func testParsesNeoForgePackDependency() throws {
+        let package = try MrpackParser.parse(
+            archive: try FixtureLoader.url("mrpack/fixture-neoforge.mrpack"),
+            extractionRoot: root.appendingPathComponent("neoforge-extract", isDirectory: true)
+        )
+        XCTAssertEqual(package.loader, .neoforge(loaderVersion: "21.1.265"))
+        XCTAssertEqual(package.minecraftVersion, "1.21.1")
+        XCTAssertEqual(package.name, "NeoForge Fixture Pack")
+    }
+
     func testRejectsUnsafeOrUnverifiableManifestFiles() throws {
         let cases: [(String, LauncherError.Code)] = [
             ("mrpack/bad-path.mrpack", .pathEscapesRoot),

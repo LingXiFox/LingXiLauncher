@@ -202,7 +202,7 @@ public struct GraphicsSetupManager: Sendable {
                 suggestion: "确认计划中的版本变化后再执行更新。"
             )
         }
-        let before = Set(try modManager.installed(instanceID: instanceID).map(\.fileName))
+        let snapshot = try ModsSnapshot(instanceID: instanceID, layout: layout)
         var changed: [String] = []
         do {
             // Sodium first gives Iris a valid dependency target. ModManager still resolves any
@@ -233,30 +233,45 @@ public struct GraphicsSetupManager: Sendable {
                 )
                 changed.append(Self.irisProjectID)
             }
+            let installed = try modManager.installed(instanceID: instanceID)
+            guard let iris = Self.find(Self.irisProjectID, slug: "iris", in: installed),
+                  let sodium = Self.find(Self.sodiumProjectID, slug: "sodium", in: installed) else {
+                throw LauncherError(.ioFailure, "Iris/Sodium 安装后未找到完整记录。")
+            }
+            let refreshed = try await environment(instanceID: instanceID)
+            try snapshot.discard()
+            return GraphicsSetupReport(
+                environment: refreshed,
+                installedIris: iris,
+                installedSodium: sodium,
+                changedProjectIDs: changed
+            )
         } catch {
-            rollbackNewMods(instanceID: instanceID, before: before)
+            do {
+                try snapshot.restore()
+            } catch {
+                throw LauncherError(
+                    .ioFailure,
+                    "Iris/Sodium 安装失败，且无法完整回滚：\(error.localizedDescription)",
+                    suggestion: "请检查实例目录权限和磁盘空间；原有模组文件仍保留在快照目录中。"
+                )
+            }
             throw (error as? LauncherError) ?? LauncherError(.ioFailure, "Iris/Sodium 安装失败：\(error.localizedDescription)")
         }
-        let installed = try modManager.installed(instanceID: instanceID)
-        guard let iris = Self.find(Self.irisProjectID, slug: "iris", in: installed),
-              let sodium = Self.find(Self.sodiumProjectID, slug: "sodium", in: installed) else {
-            rollbackNewMods(instanceID: instanceID, before: before)
-            throw LauncherError(.ioFailure, "Iris/Sodium 安装后未找到完整记录。")
-        }
-        let refreshed = try await environment(instanceID: instanceID)
-        return GraphicsSetupReport(
-            environment: refreshed,
-            installedIris: iris,
-            installedSodium: sodium,
-            changedProjectIDs: changed
-        )
     }
 
     public func remove(instanceID: String) throws {
-        let installed = try modManager.installed(instanceID: instanceID)
-        for mod in installed {
-            guard mod.projectID == Self.irisProjectID || mod.projectID == Self.sodiumProjectID else { continue }
-            try modManager.remove(fileName: mod.fileName, instanceID: instanceID)
+        let snapshot = try ModsSnapshot(instanceID: instanceID, layout: layout)
+        do {
+            let installed = try modManager.installed(instanceID: instanceID)
+            for mod in installed {
+                guard mod.projectID == Self.irisProjectID || mod.projectID == Self.sodiumProjectID else { continue }
+                try modManager.remove(fileName: mod.fileName, instanceID: instanceID)
+            }
+            try snapshot.discard()
+        } catch {
+            try? snapshot.restore()
+            throw error
         }
     }
 
@@ -276,13 +291,13 @@ public struct GraphicsSetupManager: Sendable {
         let irisVersions = try await client.versions(
             projectID: Self.irisProjectID,
             gameVersion: compatibility.gameVersion,
-            loader: "fabric"
-        ).filter { $0.isCompatible(gameVersion: compatibility.gameVersion, loader: "fabric") }
+            loader: compatibility.loader.rawValue
+        ).filter { $0.isCompatible(gameVersion: compatibility.gameVersion, loader: compatibility.loader.rawValue) }
         guard let iris = Self.preferredVersion(irisVersions) else {
             throw LauncherError(
                 .unsupportedVersion,
-                "Iris 没有适用于 Minecraft \(compatibility.gameVersion) / Fabric 的版本。",
-                suggestion: "光影管理目前只支持 Modrinth 上有 Fabric 版本组合的 Minecraft 版本。"
+                "Iris 没有适用于 Minecraft \(compatibility.gameVersion) / \(compatibility.loader.rawValue) 的版本。",
+                suggestion: "请确认该 Minecraft 版本有 Iris/Sodium 的 Modrinth 构建。"
             )
         }
         var notes: [String] = []
@@ -293,27 +308,27 @@ public struct GraphicsSetupManager: Sendable {
             if let versionID = dependency.versionID {
                 let pinned = try await client.version(id: versionID)
                 guard pinned.projectID == Self.sodiumProjectID,
-                      pinned.isCompatible(gameVersion: compatibility.gameVersion, loader: "fabric") else {
+                      pinned.isCompatible(gameVersion: compatibility.gameVersion, loader: compatibility.loader.rawValue) else {
                     throw LauncherError(.unsupportedVersion, "Iris \(iris.versionNumber) 所需的 Sodium 版本不适用于当前实例。")
                 }
                 sodium = pinned
                 notes.append("Iris \(iris.versionNumber) 的元数据固定依赖 Sodium \(pinned.versionNumber)。")
             } else {
-                notes.append("Iris \(iris.versionNumber) 声明需要 Sodium，但未固定具体版本；将选择最新的 Fabric 兼容版本。")
+                notes.append("Iris \(iris.versionNumber) 声明需要 Sodium，但未固定具体版本；将选择最新的兼容版本。")
             }
         }
         if sodium == nil {
             let versions = try await client.versions(
                 projectID: Self.sodiumProjectID,
                 gameVersion: compatibility.gameVersion,
-                loader: "fabric"
-            ).filter { $0.isCompatible(gameVersion: compatibility.gameVersion, loader: "fabric") }
+                loader: compatibility.loader.rawValue
+            ).filter { $0.isCompatible(gameVersion: compatibility.gameVersion, loader: compatibility.loader.rawValue) }
             sodium = Self.preferredVersion(versions)
         }
         guard let sodium else {
             throw LauncherError(
                 .unsupportedVersion,
-                "Sodium 没有适用于 Minecraft \(compatibility.gameVersion) / Fabric 的版本。"
+                "Sodium 没有适用于 Minecraft \(compatibility.gameVersion) / \(compatibility.loader.rawValue) 的版本。"
             )
         }
         if let installedIris, installedIris.versionID == iris.id,
@@ -348,10 +363,78 @@ public struct GraphicsSetupManager: Sendable {
         return "\(record.source) · \(record.version)"
     }
 
-    private func rollbackNewMods(instanceID: String, before: Set<String>) {
-        guard let after = try? modManager.installed(instanceID: instanceID) else { return }
-        for mod in after where !before.contains(mod.fileName) {
-            try? modManager.remove(fileName: mod.fileName, instanceID: instanceID)
+}
+
+/// A full, instance-local snapshot of mod files and their metadata. `ModManager` replaces
+/// individual files transactionally, but a multi-mod graphics setup needs a single rollback
+/// boundary: a failure after Sodium commits but before Iris does must restore both.
+private struct ModsSnapshot {
+    private let instance: Instance
+    private let root: URL
+    private let hadMods: Bool
+    private let hadDisabled: Bool
+    private let hadMetadata: Bool
+    private var fileManager: FileManager { FileManager.default }
+
+    init(instanceID: String, layout: GameDataLayout) throws {
+        let instance = try InstanceRepository(layout: layout).load(id: instanceID)
+        let repository = ModRepository(layout: layout)
+        let root = instance.directory.appendingPathComponent(
+            ".mods-snapshot-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        let mods = repository.modsDirectory(instance: instance)
+        let disabled = repository.disabledDirectory(instance: instance)
+        let metadata = repository.metadataURL(instance: instance)
+        do {
+            try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+            if FileManager.default.fileExists(atPath: mods.path) {
+                try FileManager.default.copyItem(at: mods, to: root.appendingPathComponent("mods", isDirectory: true))
+            }
+            if FileManager.default.fileExists(atPath: disabled.path) {
+                try FileManager.default.copyItem(at: disabled, to: root.appendingPathComponent("mods-disabled", isDirectory: true))
+            }
+            if FileManager.default.fileExists(atPath: metadata.path) {
+                try FileManager.default.copyItem(at: metadata, to: root.appendingPathComponent("mods.json", isDirectory: false))
+            }
+        } catch {
+            try? FileManager.default.removeItem(at: root)
+            throw LauncherError(.ioFailure, "无法创建模组事务快照：\(error.localizedDescription)")
+        }
+        self.instance = instance
+        self.root = root
+        self.hadMods = FileManager.default.fileExists(atPath: root.appendingPathComponent("mods").path)
+        self.hadDisabled = FileManager.default.fileExists(atPath: root.appendingPathComponent("mods-disabled").path)
+        self.hadMetadata = FileManager.default.fileExists(atPath: root.appendingPathComponent("mods.json").path)
+    }
+
+    func restore() throws {
+        let repository = ModRepository(layout: GameDataLayout(
+            gameRoot: instance.gameDirectory,
+            dataRoot: instance.directory
+        ))
+        let mods = instance.gameDirectory.appendingPathComponent("mods", isDirectory: true)
+        let disabled = instance.directory.appendingPathComponent("mods-disabled", isDirectory: true)
+        let metadata = instance.directory.appendingPathComponent("mods.json", isDirectory: false)
+        _ = repository
+        if fileManager.fileExists(atPath: mods.path) { try fileManager.removeItem(at: mods) }
+        if fileManager.fileExists(atPath: disabled.path) { try fileManager.removeItem(at: disabled) }
+        if fileManager.fileExists(atPath: metadata.path) { try fileManager.removeItem(at: metadata) }
+        if hadMods {
+            try fileManager.copyItem(at: root.appendingPathComponent("mods"), to: mods)
+        }
+        if hadDisabled {
+            try fileManager.copyItem(at: root.appendingPathComponent("mods-disabled"), to: disabled)
+        }
+        if hadMetadata {
+            try fileManager.copyItem(at: root.appendingPathComponent("mods.json"), to: metadata)
+        }
+        try? fileManager.removeItem(at: root)
+    }
+
+    func discard() throws {
+        if fileManager.fileExists(atPath: root.path) {
+            try fileManager.removeItem(at: root)
         }
     }
 }
