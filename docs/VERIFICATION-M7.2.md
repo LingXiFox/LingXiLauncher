@@ -89,3 +89,11 @@ sources        0 Modrinth · 0 local
 - 没有执行真实的大型第三方 NeoForge 整合包安装；合成 pack 只验证 loader 依赖和实例事务。
 - macOS OpenGL 4.1 的性能限制仍然存在；没有 Metal 原生后端。
 - 本文件中的 CI 段落在首次 push 后补充实际 run URL 和 artifact 名称。
+
+## 7. GitHub Actions 实跑结果
+
+- Run：[CI #40878810862](https://github.com/LingXiFox/LingXiLauncher/actions/runs/40878810862)（commit `736e34c`，`xcode-27` Apple Silicon Runner）— **success**；总耗时约 3m45s。
+- `swift build`（Debug）、**290 tests / 0 failures / 0 unexpected**、Release CLI、Release GUI、`Scripts/build-app.sh --release`、Info.plist、arm64、ad-hoc signature 全部通过；日志没有 XCTest skip。
+- Artifact：`LingXiMac-ci-736e34c67732188529ed4fdb708be69ddba24b5b.zip`（约 3.6 MB，保留 7 天）。
+- 工作流没有执行 Microsoft 登录、Minecraft 游戏文件下载或图形游戏启动；Artifact 仅是 ad-hoc 测试包，不是公证发行版。
+- 非阻断提示：GitHub 对 `actions/checkout@v4` / `actions/upload-artifact@v4` 的 Node 20 弃用警告；不影响本次构建、签名或测试。
