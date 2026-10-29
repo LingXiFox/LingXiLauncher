@@ -13,12 +13,14 @@ struct MrpackImportView: View {
     @State private var javaRequirement: JavaVersionRequirement?
     @State private var selectedJavaPath = ""
     @State private var parsedFiles: [MrpackFile] = []
+    @State private var selectedOptionalPaths = Set<String>()
     @State private var overrideCount = 0
     @State private var isParsing = false
     @State private var isInstalling = false
     @State private var progress: MrpackInstallProgress?
     @State private var errorText: String?
     @State private var warningText: String?
+    @State private var installFailed = false
     @State private var report: MrpackInstallReport?
     @State private var installTask: Task<Void, Never>?
     @State private var parseTask: Task<Void, Never>?
@@ -63,6 +65,7 @@ struct MrpackImportView: View {
         .frame(width: 760, height: 780)
         .background(theme.canvas)
         .environment(\.lxTheme, theme)
+        .interactiveDismissDisabled(isInstalling)
         .task {
             registerDebugActions()
             guard !didLoadInitialURL else { return }
@@ -74,8 +77,17 @@ struct MrpackImportView: View {
         .onDisappear {
             for token in debugTokens { DebugAutomationCenter.shared.unregister(token) }
             debugTokens.removeAll()
-            if !isInstalling {
-                parseTask?.cancel()
+            parseTask?.cancel()
+            if isInstalling {
+                // The sheet can be dismissed by the app/window while a task is still running.
+                // Cancel it and only remove the extraction tree after the installer has stopped.
+                installTask?.cancel()
+                let task = installTask
+                Task { @MainActor in
+                    _ = await task?.result
+                    self.cleanupPackage()
+                }
+            } else {
                 cleanupPackage()
             }
         }
@@ -136,11 +148,9 @@ struct MrpackImportView: View {
             }
             Spacer()
             LXIconButton(systemImage: "xmark", label: "关闭") {
-                parseTask?.cancel()
-                installTask?.cancel()
-                cleanupPackage()
-                dismiss()
+                closeImporter()
             }
+            .disabled(isInstalling)
         }
     }
 
@@ -201,6 +211,9 @@ struct MrpackImportView: View {
                         LXBadge(text: package.minecraftVersion, tone: .info, icon: "cube")
                         LXBadge(text: loaderLabel(package.loader), tone: .accent, icon: "square.stack.3d.up")
                         LXBadge(text: "\(parsedFiles.count) 文件", tone: .neutral, icon: "doc")
+                        if !(package.optionalFiles.isEmpty) {
+                            LXBadge(text: "\(package.optionalFiles.count) 可选", tone: .warning, icon: "switch.2")
+                        }
                         LXBadge(text: "\(overrideCount) overrides", tone: .neutral, icon: "folder")
                         Spacer()
                     }
@@ -210,6 +223,7 @@ struct MrpackImportView: View {
                         infoTile("客户端跳过", "\(package.skippedClientUnsupported) 个 server-only 文件")
                     }
 
+                    optionalSection(package)
                     javaSection(package)
                     VStack(alignment: .leading, spacing: 6) {
                         Text("实例名称").font(LXFont.captionStrong).foregroundStyle(theme.textSecondary)
@@ -227,6 +241,9 @@ struct MrpackImportView: View {
                                     .font(.system(size: 10))
                                     .foregroundStyle(theme.orange)
                                 Text(file.relativePath).font(LXFont.monoSmall).foregroundStyle(theme.text)
+                                if file.isOptional {
+                                    Text("可选").font(LXFont.caption).foregroundStyle(theme.warning)
+                                }
                                 Spacer()
                                 Text(ByteCountFormatter.string(fromByteCount: Int64(file.fileSize), countStyle: .file))
                                     .font(LXFont.monoSmall).foregroundStyle(theme.textTertiary)
@@ -252,6 +269,40 @@ struct MrpackImportView: View {
         .scrollIndicators(.never)
     }
 
+    private func optionalSection(_ package: MrpackPackage) -> some View {
+        Group {
+            if !package.optionalFiles.isEmpty {
+                VStack(alignment: .leading, spacing: 7) {
+                    HStack {
+                        Text("可选客户端模组").font(LXFont.captionStrong).foregroundStyle(theme.textSecondary)
+                        Spacer()
+                        Text("默认不安装；仅勾选的文件会下载")
+                            .font(LXFont.caption).foregroundStyle(theme.textTertiary)
+                    }
+                    ForEach(package.optionalFiles, id: \.relativePath) { file in
+                        Toggle(isOn: Binding(
+                            get: { selectedOptionalPaths.contains(file.relativePath) },
+                            set: { enabled in
+                                if enabled { selectedOptionalPaths.insert(file.relativePath) }
+                                else { selectedOptionalPaths.remove(file.relativePath) }
+                            }
+                        )) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(file.relativePath).font(LXFont.monoSmall).foregroundStyle(theme.text)
+                                Text("由整合包作者标记为 optional；不需要时请保持关闭。")
+                                    .font(LXFont.caption).foregroundStyle(theme.textTertiary)
+                            }
+                        }
+                        .toggleStyle(.checkbox)
+                        .tint(theme.orange)
+                    }
+                }
+                .padding(10)
+                .background(theme.surfaceRaised.opacity(0.55), in: RoundedRectangle(cornerRadius: LXRadius.md, style: .continuous))
+            }
+        }
+    }
+
     private func javaSection(_ package: MrpackPackage) -> some View {
         VStack(alignment: .leading, spacing: 7) {
             HStack {
@@ -275,7 +326,7 @@ struct MrpackImportView: View {
                         LXButton("刷新", systemImage: "arrow.clockwise", kind: .ghost) {
                             Task { await model.refreshJavaRuntimes() }
                         }
-                        if let javaRequirement {
+                        if javaRequirement != nil {
                             LXButton("安装 Java", systemImage: "arrow.down.circle", kind: .primary) {
                                 showJavaDownload = true
                             }
@@ -395,7 +446,7 @@ struct MrpackImportView: View {
                 LXProgressBar(fraction: progress.total > 0 ? Double(progress.completed) / Double(progress.total) : 0, height: 7)
             }
             HStack {
-                if let package {
+                if package != nil {
                     LXButton("重新选择", systemImage: "arrow.left", kind: .ghost) {
                         cleanupPackage()
                         self.package = nil
@@ -411,15 +462,17 @@ struct MrpackImportView: View {
                         installTask?.cancel()
                     }
                 } else if report != nil {
-                    LXButton("完成", kind: .primary) { dismiss() }
+                    LXButton("完成", kind: .primary) { closeImporter() }
                     LXButton("启动游戏", systemImage: "play.fill", kind: .primary) {
                         model.selectedInstanceID = report?.instanceID
                         model.launchSelectedInstance()
                         dismiss()
                     }
                 } else {
-                    LXButton("取消", kind: .ghost) { dismiss() }
-                    LXButton("安装整合包", systemImage: "arrow.down.circle", kind: .primary) {
+                    LXButton("取消", kind: .ghost) { closeImporter() }
+                    LXButton(installFailed ? "重试安装" : "安装整合包",
+                             systemImage: installFailed ? "arrow.clockwise" : "arrow.down.circle",
+                             kind: .primary) {
                         install()
                     }
                     .disabled(!canInstall)
@@ -468,12 +521,14 @@ struct MrpackImportView: View {
         report = nil
         package = nil
         parsedFiles = []
+        selectedOptionalPaths = []
         overrideCount = 0
         javaRequirement = nil
         selectedJavaPath = ""
         selectedURL = url
         displayName = ""
         isParsing = true
+        installFailed = false
         let extractionRoot = FileManager.default.temporaryDirectory
             .appendingPathComponent("lingxi-mrpack-\(UUID().uuidString)", isDirectory: true)
         parseTask = Task {
@@ -536,22 +591,27 @@ struct MrpackImportView: View {
                         displayName: displayName,
                         javaExecutable: selectedRuntime.executable,
                         sourcePolicy: model.settings.source,
-                        concurrency: 4
+                        concurrency: 4,
+                        selectedOptionalPaths: selectedOptionalPaths,
+                        traceModrinthSources: true
                     ),
                     progress: { event in
                         Task { @MainActor in self.progress = event }
                     }
                 )
                 self.isInstalling = false
+                self.installFailed = false
                 self.report = result
                 model.reloadInstances()
                 model.selectedInstanceID = result.instanceID
                 model.appendLine("Imported modpack \(result.displayName) as \(result.instanceID)", source: "modpack")
             } catch is CancellationError {
                 self.isInstalling = false
-                self.errorText = "安装已取消；已验证缓存会保留，未提交新的整合包实例。"
+                self.installFailed = true
+                self.errorText = "安装已取消；已验证缓存会保留，可直接重试，未提交新的整合包实例。"
             } catch {
                 self.isInstalling = false
+                self.installFailed = true
                 self.errorText = Self.describe(error)
             }
         }
@@ -583,8 +643,37 @@ struct MrpackImportView: View {
             state["ok"] = self.report != nil && self.errorText == nil
             return state
         })
+        debugTokens.append(center.register("mrpack.retry") { _ in
+            guard self.package != nil, self.selectedRuntime != nil else {
+                return ["ok": false, "error": self.errorText ?? "not ready to retry", "state": self.debugState()]
+            }
+            self.install()
+            await self.waitUntilInstalled()
+            var state = self.debugState()
+            state["ok"] = self.report != nil && self.errorText == nil
+            return state
+        })
+        debugTokens.append(center.register("mrpack.cancel") { _ in
+            self.installTask?.cancel()
+            await self.waitUntilInstalled()
+            return self.debugState()
+        })
+        debugTokens.append(center.register("mrpack.optional") { params in
+            guard let path = params["path"], let package = self.package,
+                  package.optionalFiles.contains(where: { $0.relativePath == path }) else {
+                return ["ok": false, "error": "unknown optional path"]
+            }
+            if params["selected"] == "false" {
+                self.selectedOptionalPaths.remove(path)
+            } else {
+                self.selectedOptionalPaths.insert(path)
+            }
+            var state = self.debugState()
+            state["ok"] = true
+            return state
+        })
         debugTokens.append(center.register("mrpack.close") { _ in
-            self.dismiss()
+            self.closeImporter()
             return ["mrpackOpen": self.model.showMrpackImport]
         })
     }
@@ -604,7 +693,16 @@ struct MrpackImportView: View {
                 ]
             } ?? [:],
             "java": selectedJavaPath,
-            "report": report.map { ["instance": $0.instanceID, "files": $0.installedFiles] } ?? [:],
+            "optionalSelected": selectedOptionalPaths.sorted(),
+            "installFailed": installFailed,
+            "report": report.map {
+                [
+                    "instance": $0.instanceID,
+                    "files": $0.installedFiles,
+                    "identifiedMods": $0.identifiedMods,
+                    "localMods": $0.localMods,
+                ]
+            } ?? [:],
             "error": errorText ?? "",
         ]
     }
@@ -619,6 +717,18 @@ struct MrpackImportView: View {
         while isInstalling || (report == nil && errorText == nil) {
             try? await Task.sleep(nanoseconds: 100_000_000)
         }
+    }
+
+    private func closeImporter() {
+        parseTask?.cancel()
+        // Never delete the package tree while the installer still owns it. The footer's
+        // cancel action is the retry-preserving path; closing again after cancellation is safe.
+        guard !isInstalling else {
+            installTask?.cancel()
+            return
+        }
+        cleanupPackage()
+        dismiss()
     }
 
     private func cleanupPackage() {

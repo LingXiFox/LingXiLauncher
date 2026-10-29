@@ -2,7 +2,7 @@
 
 验证日期：2026-10-28  
 环境：macOS 27.2（26B123）、Apple Silicon arm64、Swift 6.4.2、LingXi Launcher 0.3.0  
-自动化测试：**270 tests, 0 failures**
+自动化测试：**275 tests, 0 failures, 0 skipped**（M6.3.1 回归后）
 
 ## 1. M6.2.1 稳定性修复
 
@@ -51,8 +51,8 @@ Core 新增：
 - `MrpackParser`：严格读取 `modrinth.index.json`，校验 format 1、game、name/version、Minecraft、Fabric Loader、文件清单、客户端环境；
 - 复用 `SafeZipExtractor`：拒绝 ZIP 路径穿越、绝对路径、反斜杠、符号链接、ZIP64 与超限条目/总展开大小；归档上限 512 MiB，条目 20,000 个，单条目 256 MiB，总展开 1 GiB；
 - `overrides` 先应用，`client-overrides` 后应用；
-- `env.client == unsupported` 的文件跳过，不下载；
-- 外部文件必须有 SHA-1 或 SHA-512、fileSize，且下载 URL 必须是 `https://cdn.modrinth.com`；缺少哈希或非 Modrinth CDN 会在安装前失败，不跳过校验；
+- `env.client == optional` 默认不安装，GUI 需用户显式勾选；`env.client == unsupported` 跳过，不下载；
+- 外部文件必须有 SHA-1 或 SHA-512、fileSize，且下载 URL 必须是 Modrinth 规范认可的官方 HTTPS 域（cdn.modrinth.com / github.com / raw.githubusercontent.com / gitlab.com）；缺少哈希或未知域会在安装前失败，不跳过校验；
 - 所有下载文件进入 `Downloader` 的持久缓存并做 size + SHA-1/SHA-512 校验。
 
 ### 事务安装
@@ -64,7 +64,7 @@ Core 新增：
 3. 构建 pack staging（external files + overrides）；
 4. 全部校验通过后，才调用 `OneStopInstaller` 创建全新实例并安装 Minecraft/Fabric；
 5. 把 staging 文件提交到新实例；目标已存在文件时拒绝覆盖；
-6. 提交失败删除刚创建的实例；取消/失败清理 staging/extraction，保留已验证缓存用于重试；
+6. 提交失败删除刚创建的实例；取消/失败清理 staging，但保留已验证的 extractionRoot 以便同一 package 重试，成功后才删除；
 7. 不修改系统 Java，不触碰已有实例的世界/配置/模组。
 
 GUI 入口在实例页「导入整合包」，支持文件选择与 Finder 拖放；展示包名、版本、MC/Fabric、文件清单、overrides、下载大小、Java 选择/自动匹配，安装时显示阶段和进度，失败显示具体原因与建议。Java 无兼容运行时可请求 JavaManager 优先安装 Mojang runtime。
@@ -132,11 +132,15 @@ lingxi mrpack install --file Fabulously.Optimized-5.4.1.mrpack \
 ## 4. 兼容性与范围
 
 - 本阶段只支持 Vanilla/Fabric；Forge、NeoForge、Quilt、CurseForge 明确拒绝。
-- 外部文件仅允许 Modrinth CDN；不实现任意第三方 URL 跳过校验。
+- 外部文件仅允许 Modrinth 规范认可的官方下载域；不实现任意第三方 URL 跳过校验。
 - `overrides`/`client-overrides` 是整合包自身内容，按 ZIP 安全规则提取；外部文件逐个哈希校验，归档本身记录 SHA-256。
 - 真实 GUI 启动仍需 Microsoft 账户；本次真实游戏启动使用 CLI local-offline 技术身份，Microsoft 认证/Keychain 未改动。
 - 未修改系统 JDK；Java 记录写入实例 `javaRuntime`（本次为 system Microsoft 17）。
 
-## 5. 清理
+## 5. M6.3.1 后续补充
+
+M6.3.1 修复了失败/取消后的重试生命周期、加入 Modrinth 哈希来源追踪、支持官方 GitHub/GitLab 下载域与 optional 客户端文件，并新增 GitHub Actions CI。详细验证见 [VERIFICATION-M6.3.1.md](VERIFICATION-M6.3.1.md)。
+
+## 6. 清理
 
 验证后删除 `.dev-sandbox` 中的 Minecraft、Fabric、Java、整合包缓存、实例和测试账户，以及 `/tmp` 临时下载；保留 `docs/evidence/M6.3` 的截图和脱敏日志。

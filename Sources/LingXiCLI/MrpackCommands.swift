@@ -30,6 +30,8 @@ private struct JSONMrpackInstall: Encodable {
     let installedFiles: Int
     let downloadedFiles: Int
     let downloadedBytes: Int
+    let identifiedMods: Int
+    let localMods: Int
     enum CodingKeys: String, CodingKey {
         case instanceID = "instance_id"
         case displayName = "display_name"
@@ -39,6 +41,8 @@ private struct JSONMrpackInstall: Encodable {
         case installedFiles = "installed_files"
         case downloadedFiles = "downloaded_files"
         case downloadedBytes = "downloaded_bytes"
+        case identifiedMods = "identified_mods"
+        case localMods = "local_mods"
     }
 }
 
@@ -105,12 +109,12 @@ extension CLI {
 
     private static func runMrpackInstall(_ arguments: [String]) async throws -> Int32 {
         let spec = ArgumentParser.Spec(
-            valueOptions: ["file", "name", "java", "root", "data-root", "source", "mirror-config", "concurrency"],
+            valueOptions: ["file", "name", "java", "root", "data-root", "source", "mirror-config", "concurrency", "optional"],
             flagOptions: ["json", "help"]
         )
         let input = try ArgumentParser.parse(arguments, spec: spec)
         if input.has("help") {
-            print("usage: lingxi mrpack install --file <pack.mrpack> [--name <display name>] [--java <path>] [--root <path>] [--data-root <path>] [--source auto|official|mirror|local-cache-only] [--json]")
+            print("usage: lingxi mrpack install --file <pack.mrpack> [--name <display name>] [--java <path>] [--root <path>] [--data-root <path>] [--source auto|official|mirror|local-cache-only] [--optional <path[,path]>] [--json]")
             return ExitStatus.success.rawValue
         }
         let layout = try resolveLayout(input)
@@ -141,7 +145,14 @@ extension CLI {
                 displayName: input.value("name"),
                 javaExecutable: javaPath,
                 sourcePolicy: source,
-                concurrency: Int(input.value("concurrency") ?? "4") ?? 4
+                concurrency: Int(input.value("concurrency") ?? "4") ?? 4,
+                selectedOptionalPaths: Set(
+                    (input.value("optional") ?? "")
+                        .split(separator: ",")
+                        .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+                        .filter { !$0.isEmpty }
+                ),
+                traceModrinthSources: true
             ),
             progress: { event in
                 CLIOutput.fail("[mrpack] \(event.message) (\(event.completed)/\(event.total))")
@@ -156,7 +167,9 @@ extension CLI {
                 installedVersionID: report.installedVersionID,
                 installedFiles: report.installedFiles,
                 downloadedFiles: report.downloadedFiles,
-                downloadedBytes: report.downloadedBytes
+                downloadedBytes: report.downloadedBytes,
+                identifiedMods: report.identifiedMods,
+                localMods: report.localMods
             ))
         } else {
             CLIOutput.header("Modpack installed")
@@ -165,6 +178,7 @@ extension CLI {
             CLIOutput.field("minecraft", report.minecraftVersionID)
             CLIOutput.field("loader", loaderLabel(report.loader))
             CLIOutput.field("files", "\(report.installedFiles) committed")
+            CLIOutput.field("sources", "\(report.identifiedMods) Modrinth · \(report.localMods) local")
             CLIOutput.field("game directory", report.gameDirectory.path)
         }
         return ExitStatus.success.rawValue

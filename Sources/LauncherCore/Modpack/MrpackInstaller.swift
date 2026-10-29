@@ -36,19 +36,29 @@ public struct MrpackInstallRequest: Sendable {
     public let javaExecutable: URL
     public let sourcePolicy: DownloadSourcePolicy
     public let concurrency: Int
+    /// Optional client files explicitly chosen by the user. An empty set installs required files
+    /// only; optional files are never selected implicitly.
+    public let selectedOptionalPaths: Set<String>
+    /// Best-effort Modrinth hash lookup after import. Failure never fails the installation.
+    public let traceModrinthSources: Bool
 
     public init(
         package: MrpackPackage,
         displayName: String? = nil,
         javaExecutable: URL,
         sourcePolicy: DownloadSourcePolicy = .auto,
-        concurrency: Int = 4
+        concurrency: Int = 4,
+        selectedOptionalPaths: Set<String> = [],
+        traceModrinthSources: Bool = false
     ) {
         self.package = package
         self.displayName = displayName
         self.javaExecutable = javaExecutable
         self.sourcePolicy = sourcePolicy
         self.concurrency = max(1, min(concurrency, 8))
+        self.selectedOptionalPaths = Set(package.optionalFiles.map(\.relativePath))
+            .intersection(selectedOptionalPaths)
+        self.traceModrinthSources = traceModrinthSources
     }
 }
 
@@ -64,6 +74,9 @@ public struct MrpackInstallReport: Sendable {
     public let cacheHits: Int
     public let installedFiles: Int
     public let javaRuntime: JavaRuntime
+    public let identifiedMods: Int
+    public let localMods: Int
+    public let sourceWarnings: [String]
 }
 
 /// Installs a validated `.mrpack` as a brand-new isolated instance.
@@ -77,16 +90,19 @@ public struct MrpackInstaller: Sendable {
     private let layout: GameDataLayout
     private let transport: any DownloadTransport
     private let mirror: TrustedMirrorConfiguration?
+    private let modrinthClient: ModrinthClient?
     private var fm: FileManager { FileManager.default }
 
     public init(
         layout: GameDataLayout,
         transport: any DownloadTransport,
-        mirror: TrustedMirrorConfiguration? = nil
+        mirror: TrustedMirrorConfiguration? = nil,
+        modrinthClient: ModrinthClient? = nil
     ) {
         self.layout = layout
         self.transport = transport
         self.mirror = mirror
+        self.modrinthClient = modrinthClient
     }
 
     public func requiredJava(for package: MrpackPackage) async throws -> JavaVersionRequirement {
@@ -106,16 +122,26 @@ public struct MrpackInstaller: Sendable {
             throw LauncherError(.usageError, "整合包实例名称不能为空")
         }
         let instanceID = try makeInstanceID(from: displayName)
+        let selectedFiles = package.selectedFiles(includingOptionalPaths: request.selectedOptionalPaths)
+        let selectedBytes = selectedFiles.reduce(0) { $0 + $1.fileSize }
         let cacheRoot = layout.dataRoot
             .appendingPathComponent("cache/mrpack", isDirectory: true)
             .appendingPathComponent(package.archiveSHA256, isDirectory: true)
         let stageRoot = layout.dataRoot
             .appendingPathComponent("cache/mrpack-staging", isDirectory: true)
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        // The package owns the extracted tree. The GUI/CLI must be able to retry after a failure,
+        // so the installer never deletes it; only an explicit user re-parse/close may clean it.
+        guard fm.fileExists(atPath: package.extractionRoot.path) else {
+            throw LauncherError(
+                .missingDependency,
+                "整合包临时文件已失效",
+                suggestion: "请重新解析整合包后再试。"
+            )
+        }
         var createdInstance = false
         defer {
             try? fm.removeItem(at: stageRoot)
-            try? fm.removeItem(at: package.extractionRoot)
             if createdInstance {
                 try? InstanceRepository(layout: layout).delete(id: instanceID)
             }
@@ -123,12 +149,13 @@ public struct MrpackInstaller: Sendable {
 
         progress(MrpackInstallProgress(
             phase: .downloading,
-            message: "准备下载 \(package.files.count) 个整合包文件",
+            message: "准备下载 \(selectedFiles.count) 个整合包文件",
             completed: 0,
-            total: package.files.count
+            total: selectedFiles.count
         ))
         let cacheHits = try await downloadFiles(
-            package: package,
+            files: selectedFiles,
+            overrides: package.overrides,
             cacheRoot: cacheRoot,
             stageRoot: stageRoot,
             sourcePolicy: request.sourcePolicy,
@@ -177,19 +204,44 @@ public struct MrpackInstaller: Sendable {
             phase: .committing,
             message: "提交整合包文件到新实例",
             completed: 0,
-            total: package.files.count + package.overrides.count
+            total: selectedFiles.count + package.overrides.count
         ))
         do {
             let instance = try InstanceRepository(layout: layout).load(id: oneStopReport.instanceID)
             let committed = try commitStage(stageRoot: stageRoot, to: instance)
             let javaRuntime = try JavaRuntimeInspector().inspect(executable: request.javaExecutable)
+            createdInstance = false
+            try Task.checkCancellation()
+
+            var trace = MrpackSourceTraceSummary.empty
+            if request.traceModrinthSources {
+                progress(MrpackInstallProgress(
+                    phase: .committing,
+                    message: "识别整合包模组的 Modrinth 来源",
+                    completed: committed,
+                    total: committed
+                ))
+                let repository = ModRepository(layout: layout)
+                let tracer = MrpackSourceTracer(
+                    client: modrinthClient ?? ModrinthClient(transport: transport)
+                )
+                trace = await tracer.trace(
+                    instance: instance,
+                    files: selectedFiles,
+                    repository: repository
+                )
+                try Task.checkCancellation()
+            }
+
             progress(MrpackInstallProgress(
                 phase: .done,
                 message: "整合包安装完成",
                 completed: committed,
                 total: committed
             ))
-            createdInstance = false
+            // Success ends the package's lifetime. Failure/cancellation deliberately keeps the
+            // extraction root so the same validated package can be retried by the caller.
+            try? fm.removeItem(at: package.extractionRoot)
             return MrpackInstallReport(
                 instanceID: oneStopReport.instanceID,
                 displayName: displayName,
@@ -197,11 +249,14 @@ public struct MrpackInstaller: Sendable {
                 installedVersionID: oneStopReport.installedVersionID,
                 loader: package.loader,
                 gameDirectory: instance.gameDirectory,
-                downloadedFiles: package.files.count,
-                downloadedBytes: package.files.reduce(0) { $0 + $1.fileSize },
+                downloadedFiles: selectedFiles.count,
+                downloadedBytes: selectedBytes,
                 cacheHits: cacheHits,
                 installedFiles: committed,
-                javaRuntime: javaRuntime
+                javaRuntime: javaRuntime,
+                identifiedMods: trace.identifiedFiles,
+                localMods: trace.localFiles,
+                sourceWarnings: trace.warnings
             )
         } catch {
             try? InstanceRepository(layout: layout).delete(id: oneStopReport.instanceID)
@@ -229,7 +284,8 @@ public struct MrpackInstaller: Sendable {
     }
 
     private func downloadFiles(
-        package: MrpackPackage,
+        files: [MrpackFile],
+        overrides: [MrpackOverride],
         cacheRoot: URL,
         stageRoot: URL,
         sourcePolicy: DownloadSourcePolicy,
@@ -239,7 +295,7 @@ public struct MrpackInstaller: Sendable {
         try fm.createDirectory(at: cacheRoot, withIntermediateDirectories: true)
         var tasks: [DownloadTask] = []
         var cacheHits = 0
-        for file in package.files {
+        for file in files {
             let destination = try PathSafety.safeJoin(base: cacheRoot, relativePath: file.relativePath)
             if fm.fileExists(atPath: destination.path), try cacheFileMatches(file, at: destination) {
                 cacheHits += 1
@@ -272,7 +328,7 @@ public struct MrpackInstaller: Sendable {
                         phase: .verifying,
                         message: "已下载并校验 \(path)",
                         completed: completed,
-                        total: package.files.count,
+                        total: files.count,
                         currentFile: path
                     ))
                 case let .fileFailed(path, message):
@@ -280,7 +336,7 @@ public struct MrpackInstaller: Sendable {
                         phase: .downloading,
                         message: "下载失败：\(path) — \(message)",
                         completed: 0,
-                        total: package.files.count,
+                        total: files.count,
                         currentFile: path
                     ))
                 case let .phase(_, message):
@@ -288,7 +344,7 @@ public struct MrpackInstaller: Sendable {
                         phase: .downloading,
                         message: message,
                         completed: 0,
-                        total: package.files.count
+                        total: files.count
                     ))
                 default:
                     break
@@ -315,23 +371,23 @@ public struct MrpackInstaller: Sendable {
             phase: .verifying,
             message: "校验所有下载文件",
             completed: 0,
-            total: package.files.count
+            total: files.count
         ))
-        for (index, file) in package.files.enumerated() {
+        for (index, file) in files.enumerated() {
             let destination = try PathSafety.safeJoin(base: cacheRoot, relativePath: file.relativePath)
             try verify(file, at: destination)
             progress(MrpackInstallProgress(
                 phase: .verifying,
                 message: "已验证 \(file.relativePath)",
                 completed: index + 1,
-                total: package.files.count,
+                total: files.count,
                 currentFile: file.relativePath
             ))
         }
 
         try fm.createDirectory(at: stageRoot, withIntermediateDirectories: true)
-        let overridesByPath = Dictionary(uniqueKeysWithValues: package.overrides.map { ($0.relativePath, $0) })
-        for file in package.files {
+        let overridesByPath = Dictionary(uniqueKeysWithValues: overrides.map { ($0.relativePath, $0) })
+        for file in files {
             let source = try PathSafety.safeJoin(base: cacheRoot, relativePath: file.relativePath)
             let destination = try PathSafety.safeJoin(base: stageRoot, relativePath: file.relativePath)
             try fm.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -341,7 +397,7 @@ public struct MrpackInstaller: Sendable {
             }
             try fm.copyItem(at: source, to: destination)
         }
-        for override in package.overrides {
+        for override in overrides {
             let destination = try PathSafety.safeJoin(base: stageRoot, relativePath: override.relativePath)
             try fm.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
             if fm.fileExists(atPath: destination.path) { try fm.removeItem(at: destination) }

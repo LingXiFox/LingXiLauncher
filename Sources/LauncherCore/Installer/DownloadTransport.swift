@@ -45,6 +45,9 @@ public protocol DownloadTransport: Sendable {
     /// The default keeps existing test transports source-compatible.
     func fetch(from url: URL, headers: [String: String]) async throws -> Data
 
+    /// Posts a JSON body and returns the response body. Used by Modrinth's hash lookup API.
+    func postJSON(from url: URL, body: Data, headers: [String: String]) async throws -> Data
+
     /// Downloads `url` into the file at `destination` (which the caller owns and may delete).
     /// Implementations must not write a partial body to `destination` on failure.
     func download(from url: URL, to destination: URL) async throws
@@ -53,6 +56,50 @@ public protocol DownloadTransport: Sendable {
 public extension DownloadTransport {
     func fetch(from url: URL, headers: [String: String]) async throws -> Data {
         try await fetch(from: url)
+    }
+
+    func postJSON(from url: URL, body: Data, headers: [String: String]) async throws -> Data {
+        throw TransportError.invalidResponse("transport does not support POST")
+    }
+}
+
+/// Shared HTTPS/redirect policy for every transport request. Redirects are allowed only when
+/// they stay on HTTPS and use a standard port; the final content is still hash-verified by the
+/// caller. Limiting the number of hops prevents redirect loops.
+public enum DownloadRedirectPolicy {
+    public static let maximumRedirects = 5
+
+    public static func validate(_ url: URL) throws {
+        guard url.scheme?.lowercased() == "https",
+              let host = url.host, !host.isEmpty,
+              url.user == nil, url.password == nil,
+              url.port == nil || url.port == 443 else {
+            throw TransportError.invalidResponse("redirect/insecure URL rejected: \(url.absoluteString)")
+        }
+    }
+}
+
+private final class RedirectGuard: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    private let lock = NSLock()
+    private var redirects = 0
+
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest,
+        completionHandler: @escaping (URLRequest?) -> Void
+    ) {
+        lock.lock()
+        defer { lock.unlock() }
+        redirects += 1
+        guard redirects <= DownloadRedirectPolicy.maximumRedirects,
+              let target = request.url,
+              (try? DownloadRedirectPolicy.validate(target)) != nil else {
+            completionHandler(nil)
+            return
+        }
+        completionHandler(request)
     }
 }
 
@@ -74,13 +121,36 @@ public struct URLSessionTransport: DownloadTransport, @unchecked Sendable {
     }
 
     public func fetch(from url: URL, headers: [String: String]) async throws -> Data {
+        try DownloadRedirectPolicy.validate(url)
         var request = URLRequest(url: url)
         request.setValue(URLSessionTransport.userAgent, forHTTPHeaderField: "User-Agent")
         for (key, value) in headers {
             request.setValue(value, forHTTPHeaderField: key)
         }
         do {
-            let (data, response) = try await session.data(for: request)
+            let (data, response) = try await session.data(for: request, delegate: RedirectGuard())
+            try validate(response)
+            return data
+        } catch let error as TransportError {
+            throw error
+        } catch {
+            throw URLSessionTransport.map(error)
+        }
+    }
+
+    public func postJSON(from url: URL, body: Data, headers: [String: String]) async throws -> Data {
+        try DownloadRedirectPolicy.validate(url)
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.httpBody = body
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue(URLSessionTransport.userAgent, forHTTPHeaderField: "User-Agent")
+        for (key, value) in headers {
+            request.setValue(value, forHTTPHeaderField: key)
+        }
+        do {
+            let (data, response) = try await session.data(for: request, delegate: RedirectGuard())
             try validate(response)
             return data
         } catch let error as TransportError {
@@ -91,10 +161,11 @@ public struct URLSessionTransport: DownloadTransport, @unchecked Sendable {
     }
 
     public func download(from url: URL, to destination: URL) async throws {
+        try DownloadRedirectPolicy.validate(url)
         var request = URLRequest(url: url)
         request.setValue(URLSessionTransport.userAgent, forHTTPHeaderField: "User-Agent")
         do {
-            let (temporaryURL, response) = try await session.download(for: request)
+            let (temporaryURL, response) = try await session.download(for: request, delegate: RedirectGuard())
             try validate(response)
             let fileManager = FileManager.default
             try? fileManager.removeItem(at: destination)

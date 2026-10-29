@@ -169,13 +169,13 @@ swift build
 swift test
 ```
 
-当前总计 **270 个测试**，全量运行 0 失败：
+当前总计 **275 个测试，0 failures，0 skipped**（2026-10-29，`swift test`）：
 
 | 测试文件（用例数） | 覆盖 |
 |---|---|
 | `ManifestTests` (4) | manifest / 版本 JSON 解码、坏 JSON、缺字段、未知 rule 字段 |
 | `VersionMetadataTests` (7) | 真实 26.3/1.16.5 元数据、`assetIndex.url`、logging `id`、数组参数 |
-| `VersionResolverTests` (8) | 正常解析、缺失元数据、legacy 转换、继承合并、缺失父版本、循环继承、真实 Fabric profile、id 不一致 |
+| `VersionResolverTests` (9) | 正常解析、缺失元数据、legacy 转换、继承合并、缺失父版本、循环继承、真实 Fabric profile、id 不一致 |
 | `RuleEvaluatorTests` (23) | macOS/Linux、arm64/x86_64、allow/disallow 顺序、features、version 正则与区间 |
 | `ArgumentResolverTests` (13) | 字符串/对象混合、数组展开、占位符、未知占位符报错 |
 | `DependencyResolverTests` (27) | classpath 顺序与去重、缺失收集、legacy natives 告警、路径穿越 |
@@ -186,16 +186,17 @@ swift test
 | `DownloaderTests` (17) | 成功/哈希或大小不符/空文件、缓存命中与失效、重试、404、auto 回退、并发上限、去重、原子替换与失败保护 |
 | `SafeZipExtractorTests` (10) | 正常/存储模式、`../`、嵌套穿越、绝对路径、symlink、损坏包、条目与数量上限 |
 | `InstallerTests` (10) | 端到端安装、二次缓存、宽展修复、local-cache-only、mirror-only、版本筛选、natives 解压、verify 检出损坏 |
-| `M2_5CompatibilityTests` (7) | JVM 架构上下文/Rosetta、per-JVM natives 缓存、规则按 JVM 架构、双向架构不匹配、缺失 natives、Mach-O/ZIP 架构检查 |
-| `LocalOfflineIdentityTests` (9) / `InstanceRepositoryTests` (9) | UUID 向量、名字边界、账户无令牌字段、单一 `.minecraft` 与迁移、内存策略/删除 |
-| `AuthenticationTests` (23) | 内嵌配置、PKCE RFC 向量、OAuth、state 拒绝、真实 loopback、Xbox/XSTS/Minecraft/所有权、Keychain |
+| `JVMArchitectureTests` (7) | JVM 架构上下文/Rosetta、per-JVM natives 缓存、规则按 JVM 架构、双向架构不匹配、缺失 natives、Mach-O/ZIP 架构检查 |
+| `LocalOfflineIdentityTests` (9) / `InstanceRepositoryTests` (8) | UUID 向量、名字边界、账户无令牌字段、单一 `.minecraft` 与迁移、内存策略/删除 |
+| `AuthenticationConfigurationTests` (6) / `PKCETests` (2) / `LoopbackAuthorizationTests` (3) / `MicrosoftOAuthClientTests` (3) / `MicrosoftAuthenticationServiceTests` (4) / `XboxMinecraftAuthenticationTests` (4) | 内嵌配置、PKCE RFC 向量、OAuth、state 拒绝、真实 loopback、Xbox/XSTS/Minecraft/所有权、Keychain |
 | `M6InstallTests` (10) | Fabric 兼容 Loader 端点、损坏目标 fail-closed、唯一备份、显式更新/存档保留、失败不创建目标、Java 无兼容运行时 |
 | `JavaManagerSafetyTests` (5) | 托管 JDK 最终 probe 失败回滚、成功替换清理 backup、Mojang runtime 完整安装/记录、Java 元数据兼容判断 |
-| `M6ModrinthTests` (10) | 真实 Modrinth 搜索/项目/版本解码、facets/User-Agent、本地 mods 生命周期、必需/固定版本依赖、启用/禁用/版本约束下的不兼容依赖、更新状态/渠道/降级、更新哈希失败保留旧文件 |
-| `MrpackTests` (8) | format 1 解析/客户端 overrides、ZIP 路径与哈希拒绝、真实合成安装、损坏/网络失败、重试、取消后无实例 |
+| `M6ModrinthTests` (11) | 真实 Modrinth 搜索/项目/版本解码、facets/User-Agent、本地 mods 生命周期、必需/固定版本依赖、启用/禁用/版本约束下的不兼容依赖、更新状态/渠道/降级、更新哈希失败保留旧文件、mrpack 哈希来源追踪 |
+| `MrpackTests` (12) | format 1 解析/客户端 overrides、ZIP 路径与哈希拒绝、可信域/重定向、可选客户端文件、真实合成安装、损坏/网络失败、连续取消与重试、已有实例保护 |
 | `LaunchServiceTests` (2) | 启动失败事件、事件流终止与重复调用 |
 | `PathSafetyTests` (4) / `GameDataLayoutTests` (3) / `PlatformContextTests` (3) | 路径穿越、布局推导、平台上下文 |
 
+CI（`.github/workflows/ci.yml`）在 `xcode-27` Apple Silicon Runner 上运行 `swift build`、`swift test`、Release CLI/GUI、`Scripts/build-app.sh`、Info.plist/Bundle/ad-hoc 签名校验，并上传测试用 Artifact；不执行真实登录、Minecraft 下载或图形游戏启动。
 安全测试约定：含 token 的 `LaunchPlan`、`--dry-run`、`--json`、日志文件都必须脱敏；游戏中 stdout/stderr 原样记录（启动器从不写完整命令行）。M2 测试全部使用内存传输层（`StubTransport`），不访问网络。
 
 ## 8. 任务与里程碑映射

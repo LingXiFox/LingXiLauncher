@@ -1,0 +1,91 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test-package:
+    name: Build, test and package (Apple Silicon)
+    runs-on: xcode-27
+    timeout-minutes: 60
+    env:
+      SWIFT_DETERMINISTIC_HASHING: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Toolchain info
+        run: |
+          set -euo pipefail
+          uname -m
+          swift --version
+          xcodebuild -version
+
+      - name: Debug build
+        run: |
+          set -euo pipefail
+          swift build
+
+      - name: Unit tests
+        run: |
+          set -euo pipefail
+          swift test 2>&1 | tee "$RUNNER_TEMP/swift-test.log"
+          if grep -q 'skipped' "$RUNNER_TEMP/swift-test.log"; then
+            echo "XCTest reported skips; inspect the log artifact for details." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "XCTest skips: 0 (no skipped tests in the full log)." >> "$GITHUB_STEP_SUMMARY"
+          fi
+          grep -E 'Executed [0-9]+ tests' "$RUNNER_TEMP/swift-test.log" | tail -n 1 >> "$GITHUB_STEP_SUMMARY" || true
+
+      - name: Release CLI and GUI builds
+        run: |
+          set -euo pipefail
+          swift build -c release --product lingxi
+          swift build -c release --product LingXiMac
+
+      - name: Package app bundle (ad-hoc, CI only)
+        run: |
+          set -euo pipefail
+          Scripts/build-app.sh --release
+
+      - name: Verify app bundle and signature
+        run: |
+          set -euo pipefail
+          APP="dist/LingXiMac.app"
+          test -d "$APP"
+          test -x "$APP/Contents/MacOS/LingXiMac"
+          test -f "$APP/Contents/Info.plist"
+          test -f "$APP/Contents/Resources/AppIcon.icns"
+          plutil -lint "$APP/Contents/Info.plist"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Contents/Info.plist")" = "com.lingxifox.LingXiLauncher"
+          lipo -info "$APP/Contents/MacOS/LingXiMac" | grep -q arm64
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          codesign -dv --verbose=4 "$APP" 2>&1 | tee "$RUNNER_TEMP/codesign.txt"
+          grep -q 'Signature=adhoc' "$RUNNER_TEMP/codesign.txt"
+          echo "CI artifact is ad-hoc signed for testing only; it is not notarized or a release build." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Archive app bundle
+        run: |
+          set -euo pipefail
+          ditto -c -k --sequesterRsrc --keepParent "dist/LingXiMac.app" "dist/LingXiMac-${GITHUB_SHA}.zip"
+
+      - name: Upload CI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: LingXiMac-ci-${{ github.sha }}
+          path: dist/LingXiMac-${{ github.sha }}.zip
+          if-no-files-found: error
+          retention-days: 7

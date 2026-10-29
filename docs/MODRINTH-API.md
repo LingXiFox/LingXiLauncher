@@ -18,11 +18,29 @@
 - 只搜索 `project_type:mod`，且强制 `categories:fabric` + 当前实例的 `versions:<minecraft>`。
 - 只展示 Modrinth 返回的项目元数据（标题、简介、作者、图标、许可证、下载量）。
 - 模组文件由用户确认安装后，从 Modrinth 返回的 `cdn.modrinth.com` HTTPS 地址直接下载。
-- Core 拒绝非 HTTPS、非 `cdn.modrinth.com` 的模组下载地址；不跟随用户输入的任意 URL。
+- `.mrpack` 外部文件按 format 1 规范仅接受 `cdn.modrinth.com`、`github.com`、`raw.githubusercontent.com`、`gitlab.com` 的 HTTPS 地址；所有候选都需通过重定向安全校验。
+- Core 拒绝非 HTTPS、非官方域的模组下载地址；不跟随用户输入的任意 URL。
 - 不缓存或再分发模组 JAR；不绕过项目许可证。安装记录保留 `project_id`、`version_id`、许可证名称与原始文件名。
 - 不把 Microsoft/Xbox/Minecraft 令牌发送到 Modrinth；API 请求不携带认证信息。
 - Modrinth API License 是有限、可撤销的许可；本项目按条款以用户主动操作的方式查询/下载内容，不宣称对模组内容拥有权利。
 - Modrinth 名称与商标属于其权利人；UI 仅作来源说明。
+
+## 哈希来源追踪
+
+导入 `.mrpack` 后，`.jar` 的 SHA-1/SHA-512 通过官方批量接口查询：
+
+```http
+POST /v2/version_files
+Content-Type: application/json
+
+{"hashes":["<sha1-or-sha512>"],"algorithm":"sha1"}
+```
+
+只有返回文件的实际哈希与本地哈希一致才会写入 `project_id`/`version_id`/来源 `modrinth`；无匹配或接口失败时保持 `local`，不伪造来源，也不阻断安装。识别后的模组可参与 `mod update` 检测。
+
+## optional 语义
+
+`.mrpack` 中 `env.client == "optional"` 的文件默认不安装。GUI 提供逐文件开关，只有用户明确勾选才下载并提交；`required` 仍必须安装，`unsupported` 仍跳过。
 
 ## 依赖语义
 

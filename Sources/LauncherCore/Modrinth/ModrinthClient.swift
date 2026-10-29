@@ -93,6 +93,43 @@ public struct ModrinthClient: Sendable {
         return try decode(ModrinthVersion.self, from: data, context: "Modrinth version '\(id)'")
     }
 
+    /// Looks up versions by SHA-1/SHA-512 using Modrinth's batch endpoint.
+    ///
+    /// The API accepts up to 500 hashes per request; this implementation keeps a conservative
+    /// chunk size so a single request cannot become oversized or monopolize the rate limit.
+    /// Unknown hashes are simply absent from the result.
+    public func versions(
+        forHashes hashes: [String],
+        algorithm: ModrinthHashAlgorithm = .sha1
+    ) async throws -> [String: ModrinthVersion] {
+        let unique = Array(Set(hashes.map { $0.lowercased() }))
+            .filter { Self.isValidHash($0, algorithm: algorithm) }
+            .sorted()
+        guard !unique.isEmpty else { return [:] }
+        let url = baseURL.appendingPathComponent("version_files")
+        var result: [String: ModrinthVersion] = [:]
+        for start in stride(from: 0, to: unique.count, by: 100) {
+            let chunk = Array(unique[start..<min(start + 100, unique.count)])
+            let request = HashLookupRequest(hashes: chunk, algorithm: algorithm.rawValue)
+            let body: Data
+            do {
+                body = try JSONEncoder().encode(request)
+            } catch {
+                throw LauncherError.metadata(error, context: "Could not encode Modrinth hash lookup")
+            }
+            let data = try await post(url, body: body, label: "Modrinth hash lookup")
+            let decoded = try decode(
+                [String: ModrinthVersion].self,
+                from: data,
+                context: "Modrinth hash lookup"
+            )
+            for (hash, version) in decoded {
+                result[hash.lowercased()] = version
+            }
+        }
+        return result
+    }
+
     /// Icon downloads are performed in Core, never by SwiftUI. The URL must be HTTPS.
     public func fetchIcon(from url: URL) async throws -> Data {
         guard url.scheme?.lowercased() == "https",
@@ -126,12 +163,35 @@ public struct ModrinthClient: Sendable {
         }
     }
 
+    private func post(_ url: URL, body: Data, label: String) async throws -> Data {
+        guard url.scheme?.lowercased() == "https", url.host != nil else {
+            throw LauncherError(.invalidMetadata, "Refusing a non-HTTPS Modrinth API URL")
+        }
+        do {
+            return try await transport.postJSON(from: url, body: body, headers: [
+                "User-Agent": userAgent,
+                "Accept": "application/json",
+            ])
+        } catch let error as TransportError {
+            throw Self.map(error, label: label)
+        }
+    }
+
+    private static func isValidHash(_ hash: String, algorithm: ModrinthHashAlgorithm) -> Bool {
+        hash.count == algorithm.expectedLength && hash.allSatisfy(\.isHexDigit)
+    }
+
     private func decode<T: Decodable>(_ type: T.Type, from data: Data, context: String) throws -> T {
         do {
             return try JSONDecoder().decode(type, from: data)
         } catch {
             throw LauncherError.metadata(error, context: "Invalid \(context) response")
         }
+    }
+
+    private struct HashLookupRequest: Encodable {
+        let hashes: [String]
+        let algorithm: String
     }
 
     private static func encode<T: Encodable>(_ value: T) -> String? {

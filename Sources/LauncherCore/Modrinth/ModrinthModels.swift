@@ -204,6 +204,13 @@ public struct ModrinthDependency: Decodable, Sendable, Equatable {
     }
 }
 
+public enum ModrinthHashAlgorithm: String, Sendable, CaseIterable {
+    case sha1
+    case sha512
+
+    public var expectedLength: Int { self == .sha1 ? 40 : 128 }
+}
+
 public struct ModrinthFileHashes: Decodable, Sendable, Equatable {
     public let sha1: String?
     public let sha512: String?

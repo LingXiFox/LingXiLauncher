@@ -97,10 +97,86 @@ final class MrpackTests: XCTestCase {
             "client-pack"
         )
         XCTAssertTrue(FileManager.default.fileExists(atPath: installed.gameDirectory.appendingPathComponent("config/pack.txt").path))
-        XCTAssertFalse(FileManager.default.fileExists(atPath: extraction.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: extraction.path), "successful install owns and removes the temporary tree")
     }
 
-    func testNetworkFailureLeavesNoInstanceAndRetrySucceeds() async throws {
+    func testOptionalClientFilesRequireExplicitSelection() async throws {
+        guard let java = try? JavaRuntimeInspector().discoverDefaultExecutable() else {
+            throw XCTSkip("No Java runtime available for the synthetic mrpack install test")
+        }
+        let fixture = try SyntheticInstallation()
+        let optionalData = Data("optional-mod|exact-bytes".utf8)
+        let optionalURL = URL(string: "https://cdn.modrinth.com/data/pack/versions/1/optional.jar")!
+        let optionalFile = MrpackFile(
+            relativePath: "mods/optional.jar",
+            sha1: SHA1.hexDigest(optionalData),
+            sha512: SHA512Digest.hexDigest(optionalData),
+            downloadURL: optionalURL,
+            fileSize: optionalData.count,
+            clientEnvironment: "optional"
+        )
+
+        func makePackage(_ name: String) throws -> MrpackPackage {
+            let parsed = try MrpackParser.parse(
+                archive: try FixtureLoader.url("mrpack/fixture-test-version.mrpack"),
+                extractionRoot: root.appendingPathComponent(name, isDirectory: true)
+            )
+            return MrpackPackage(
+                archiveURL: parsed.archiveURL,
+                archiveSHA256: parsed.archiveSHA256,
+                name: parsed.name,
+                versionID: parsed.versionID,
+                summary: parsed.summary,
+                minecraftVersion: parsed.minecraftVersion,
+                loader: parsed.loader,
+                files: parsed.files + [optionalFile],
+                overrides: parsed.overrides,
+                skippedClientUnsupported: parsed.skippedClientUnsupported,
+                extractionRoot: parsed.extractionRoot
+            )
+        }
+
+        let transport = StubTransport()
+        await fixture.populate(transport)
+        await transport.setData(Data("pack-data".utf8), for: URL(string: "https://cdn.modrinth.com/data/pack/versions/1/pack.jar")!)
+        await transport.setData(optionalData, for: optionalURL)
+        let installer = MrpackInstaller(layout: layout, transport: transport)
+
+        let off = try makePackage("optional-off-extract")
+        let offReport = try await installer.install(
+            MrpackInstallRequest(package: off, displayName: "Optional Off", javaExecutable: java, sourcePolicy: .official),
+            progress: { _ in }
+        )
+        XCTAssertEqual(offReport.downloadedFiles, 1)
+        let requestedAfterOff = await transport.requestedURLs
+        XCTAssertFalse(requestedAfterOff.contains(optionalURL.absoluteString))
+        let offInstance = try XCTUnwrap(try InstanceRepository(layout: layout).list().first { $0.id == offReport.instanceID })
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: offInstance.gameDirectory.appendingPathComponent("mods/optional.jar").path
+        ))
+
+        let on = try makePackage("optional-on-extract")
+        let onReport = try await installer.install(
+            MrpackInstallRequest(
+                package: on,
+                displayName: "Optional On",
+                javaExecutable: java,
+                sourcePolicy: .official,
+                selectedOptionalPaths: [optionalFile.relativePath]
+            ),
+            progress: { _ in }
+        )
+        XCTAssertEqual(onReport.downloadedFiles, 2)
+        let requestedAfterOn = await transport.requestedURLs
+        XCTAssertTrue(requestedAfterOn.contains(optionalURL.absoluteString))
+        let onInstance = try XCTUnwrap(try InstanceRepository(layout: layout).list().first { $0.id == onReport.instanceID })
+        XCTAssertEqual(
+            try Data(contentsOf: onInstance.gameDirectory.appendingPathComponent("mods/optional.jar")),
+            optionalData
+        )
+    }
+
+    func testNetworkFailureLeavesNoInstanceAndRetryUsesSamePackage() async throws {
         guard let java = try? JavaRuntimeInspector().discoverDefaultExecutable() else {
             throw XCTSkip("No Java runtime available for the synthetic mrpack install test")
         }
@@ -124,22 +200,19 @@ final class MrpackTests: XCTestCase {
             XCTAssertEqual((error as? LauncherError)?.code, .downloadFailed)
         }
         XCTAssertTrue(try InstanceRepository(layout: layout).list().isEmpty)
-        XCTAssertFalse(FileManager.default.fileExists(atPath: firstPackage.extractionRoot.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: firstPackage.extractionRoot.path), "failure must preserve the validated package for retry")
 
         await transport.setData(Data("pack-data".utf8), for: packURL)
-        let retryPackage = try MrpackParser.parse(
-            archive: try FixtureLoader.url("mrpack/fixture-test-version.mrpack"),
-            extractionRoot: root.appendingPathComponent("retry-2", isDirectory: true)
-        )
         let report = try await installer.install(
-            MrpackInstallRequest(package: retryPackage, displayName: "Retry Pack", javaExecutable: java, sourcePolicy: .official),
+            MrpackInstallRequest(package: firstPackage, displayName: "Retry Pack", javaExecutable: java, sourcePolicy: .official),
             progress: { _ in }
         )
         XCTAssertEqual(report.installedFiles, 2)
         XCTAssertEqual(try InstanceRepository(layout: layout).list().count, 1)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: firstPackage.extractionRoot.path), "retry success consumes the package")
     }
 
-    func testCancellationLeavesNoInstance() async throws {
+    func testCancellationPreservesPackageAndRetrySucceeds() async throws {
         guard let java = try? JavaRuntimeInspector().discoverDefaultExecutable() else {
             throw XCTSkip("No Java runtime available for the synthetic mrpack install test")
         }
@@ -152,24 +225,34 @@ final class MrpackTests: XCTestCase {
             extractionRoot: root.appendingPathComponent("cancel", isDirectory: true)
         )
         let installer = MrpackInstaller(layout: layout, transport: transport)
-        let task = Task {
-            try await installer.install(
-                MrpackInstallRequest(package: package, displayName: "Cancel Pack", javaExecutable: java, sourcePolicy: .official),
-                progress: { _ in }
-            )
+        for _ in 0..<2 {
+            let task = Task {
+                try await installer.install(
+                    MrpackInstallRequest(package: package, displayName: "Cancel Pack", javaExecutable: java, sourcePolicy: .official),
+                    progress: { _ in }
+                )
+            }
+            try await Task.sleep(nanoseconds: 150_000_000)
+            task.cancel()
+            do {
+                _ = try await task.value
+                XCTFail("Expected cancellation")
+            } catch is CancellationError {
+                // expected
+            } catch {
+                // Downloader may surface a cancellation as a download failure; either way no commit.
+            }
+            XCTAssertTrue(try InstanceRepository(layout: layout).list().isEmpty)
+            XCTAssertTrue(FileManager.default.fileExists(atPath: package.extractionRoot.path), "every cancellation must preserve the package for retry")
         }
-        try await Task.sleep(nanoseconds: 150_000_000)
-        task.cancel()
-        do {
-            _ = try await task.value
-            XCTFail("Expected cancellation")
-        } catch is CancellationError {
-            // expected
-        } catch {
-            // Downloader may surface a cancellation as a download failure; either way no commit.
-        }
-        XCTAssertTrue(try InstanceRepository(layout: layout).list().isEmpty)
-        XCTAssertFalse(FileManager.default.fileExists(atPath: package.extractionRoot.path))
+
+        await transport.setData(Data("pack-data".utf8), for: URL(string: "https://cdn.modrinth.com/data/pack/versions/1/pack.jar")!)
+        let report = try await installer.install(
+            MrpackInstallRequest(package: package, displayName: "Cancel Pack", javaExecutable: java, sourcePolicy: .official),
+            progress: { _ in }
+        )
+        XCTAssertEqual(report.installedFiles, 2)
+        XCTAssertEqual(try InstanceRepository(layout: layout).list().count, 1)
     }
 
     func testDamagedPackFileDoesNotCreateInstance() async throws {
@@ -211,6 +294,84 @@ final class MrpackTests: XCTestCase {
             }
             XCTAssertFalse(FileManager.default.fileExists(atPath: extraction.path))
         }
+    }
+
+    func testTrustedDownloadHostsAndRedirectSafety() throws {
+        XCTAssertTrue(MrpackParser.isTrustedDownloadURL(URL(string: "https://cdn.modrinth.com/data/x/versions/1/x.jar")!))
+        XCTAssertTrue(MrpackParser.isTrustedDownloadURL(URL(string: "https://github.com/owner/repo/releases/download/v1/x.jar")!))
+        XCTAssertTrue(MrpackParser.isTrustedDownloadURL(URL(string: "https://raw.githubusercontent.com/owner/repo/main/x.jar")!))
+        XCTAssertTrue(MrpackParser.isTrustedDownloadURL(URL(string: "https://gitlab.com/owner/repo/-/raw/main/x.jar")!))
+        for bad in [
+            "https://evil.example/x.jar",
+            "http://cdn.modrinth.com/x.jar",
+            "https://cdn.modrinth.com.evil.example/x.jar",
+            "https://cdn.modrinth.com:444/x.jar",
+            "https://user:pass@cdn.modrinth.com/x.jar",
+            "https://cdn.modrinth.com/",
+        ] {
+            XCTAssertFalse(MrpackParser.isTrustedDownloadURL(URL(string: bad)!), bad)
+        }
+    }
+
+
+    func testRedirectPolicyRejectsInsecureOrCredentialedTargets() {
+        XCTAssertNoThrow(try DownloadRedirectPolicy.validate(
+            URL(string: "https://objects.githubusercontent.com/github-production-release-asset/file.jar")!
+        ))
+        for bad in [
+            "http://cdn.modrinth.com/file.jar",
+            "https://user:pass@cdn.modrinth.com/file.jar",
+            "https://cdn.modrinth.com:444/file.jar",
+            "ftp://cdn.modrinth.com/file.jar",
+        ] {
+            XCTAssertThrowsError(try DownloadRedirectPolicy.validate(URL(string: bad)!), bad)
+        }
+    }
+
+    func testExistingInstanceIsNeverTouchedByNewPackInstall() async throws {
+        guard let java = try? JavaRuntimeInspector().discoverDefaultExecutable() else {
+            throw XCTSkip("No Java runtime available for the synthetic mrpack install test")
+        }
+        let fixture = try SyntheticInstallation()
+        let transport = StubTransport()
+        await fixture.populate(transport)
+
+        let repository = InstanceRepository(layout: layout)
+        let existing = try repository.create(id: "keep-me", displayName: "Keep Me", versionID: "test-version")
+        let world = existing.gameDirectory.appendingPathComponent("saves/keep/world", isDirectory: true)
+        try FileManager.default.createDirectory(at: world, withIntermediateDirectories: true)
+        let level = world.appendingPathComponent("level.dat")
+        let sentinel = Data("existing-world-must-survive".utf8)
+        try sentinel.write(to: level)
+        let options = existing.gameDirectory.appendingPathComponent("options.txt")
+        try Data("fov:0.5\n".utf8).write(to: options)
+
+        await transport.setData(
+            Data("pack-data".utf8),
+            for: URL(string: "https://cdn.modrinth.com/data/pack/versions/1/pack.jar")!
+        )
+        let package = try MrpackParser.parse(
+            archive: try FixtureLoader.url("mrpack/fixture-test-version.mrpack"),
+            extractionRoot: root.appendingPathComponent("existing-safe", isDirectory: true)
+        )
+        let report = try await MrpackInstaller(layout: layout, transport: transport).install(
+            MrpackInstallRequest(
+                package: package,
+                displayName: "Separate Pack",
+                javaExecutable: java,
+                sourcePolicy: .official
+            ),
+            progress: { _ in }
+        )
+
+        XCTAssertNotEqual(report.instanceID, existing.id)
+        XCTAssertEqual(try Data(contentsOf: level), sentinel)
+        XCTAssertEqual(try String(contentsOf: options, encoding: .utf8), "fov:0.5\n")
+        XCTAssertEqual(try repository.list().count, 2)
+        let installed = try XCTUnwrap(repository.list().first { $0.id == report.instanceID })
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: installed.gameDirectory.appendingPathComponent("saves/keep").path
+        ))
     }
 
     func testRejectsMissingIndex() throws {

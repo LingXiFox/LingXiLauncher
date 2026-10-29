@@ -7,6 +7,7 @@ private actor ModrinthRoutingTransport: DownloadTransport {
     private(set) var requestedPaths: [String] = []
     private(set) var requestedURLs: [URL] = []
     private(set) var lastHeaders: [String: String] = [:]
+    private(set) var postedBodies: [String: Data] = [:]
 
     func setAPI(path: String, data: Data) { api[path] = data }
     func setFile(path: String, data: Data) { files[path] = data }
@@ -19,6 +20,15 @@ private actor ModrinthRoutingTransport: DownloadTransport {
         requestedPaths.append(url.path)
         requestedURLs.append(url)
         lastHeaders = headers
+        guard let data = api[url.path] else { throw TransportError.httpStatus(404) }
+        return data
+    }
+
+    func postJSON(from url: URL, body: Data, headers: [String: String]) async throws -> Data {
+        requestedPaths.append(url.path)
+        requestedURLs.append(url)
+        lastHeaders = headers
+        postedBodies[url.path] = body
         guard let data = api[url.path] else { throw TransportError.httpStatus(404) }
         return data
     }
@@ -352,6 +362,76 @@ final class M6ModrinthTests: XCTestCase {
         XCTAssertTrue(olderUpdates.isEmpty)
     }
 
+    func testMrpackTracerPromotesVerifiedHashesAndLeavesUnknownJarsLocal() async throws {
+        let instance = try makeFabricInstance()
+        let repository = ModRepository(layout: layout)
+        let tracedData = Data("traced-mod".utf8)
+        let unknownData = Data("unknown-mod".utf8)
+        let staged = repository.stagingDirectory(instance: instance)
+        try FileManager.default.createDirectory(at: staged, withIntermediateDirectories: true)
+        let tracedURL = staged.appendingPathComponent("traced.jar")
+        let unknownURL = staged.appendingPathComponent("unknown.jar")
+        try tracedData.write(to: tracedURL)
+        try unknownData.write(to: unknownURL)
+        try repository.commitInstall(instance: instance, staged: [
+            StagedModFile(
+                temporaryURL: tracedURL,
+                record: InstalledMod(title: "traced.jar", fileName: "traced.jar", sha1: SHA1.hexDigest(tracedData), enabled: true)
+            ),
+            StagedModFile(
+                temporaryURL: unknownURL,
+                record: InstalledMod(title: "unknown.jar", fileName: "unknown.jar", sha1: SHA1.hexDigest(unknownData), enabled: true)
+            ),
+        ])
+
+        let transport = ModrinthRoutingTransport()
+        let fixtures = SyntheticModAPI()
+        await fixtures.populateTrace(transport, tracedData: tracedData)
+        let client = ModrinthClient(
+            baseURL: URL(string: "https://api.modrinth.test/v2")!,
+            transport: transport
+        )
+        let files = [
+            MrpackFile(
+                relativePath: "mods/traced.jar",
+                sha1: SHA1.hexDigest(tracedData),
+                sha512: SHA512Digest.hexDigest(tracedData),
+                downloadURL: URL(string: "https://cdn.modrinth.com/data/testmod/versions/traced-v1/traced.jar")!,
+                fileSize: tracedData.count,
+                clientEnvironment: "required"
+            ),
+            MrpackFile(
+                relativePath: "mods/unknown.jar",
+                sha1: SHA1.hexDigest(unknownData),
+                sha512: SHA512Digest.hexDigest(unknownData),
+                downloadURL: URL(string: "https://cdn.modrinth.com/data/unknown/versions/1/unknown.jar")!,
+                fileSize: unknownData.count,
+                clientEnvironment: "required"
+            ),
+        ]
+
+        let tracer = MrpackSourceTracer(client: client)
+        let summary = await tracer.trace(instance: instance, files: files, repository: repository)
+        XCTAssertEqual(summary.identifiedFiles, 1)
+        XCTAssertEqual(summary.localFiles, 1)
+        XCTAssertTrue(summary.warnings.isEmpty)
+
+        let records = try repository.list(instance: instance)
+        let traced = try XCTUnwrap(records.first { $0.fileName == "traced.jar" })
+        XCTAssertEqual(traced.source, "modrinth")
+        XCTAssertEqual(traced.projectID, "testmod")
+        XCTAssertEqual(traced.versionID, "traced-v1")
+        XCTAssertEqual(records.first { $0.fileName == "unknown.jar" }?.source, "local")
+
+        // A traced import must participate in the normal update flow.
+        let manager = ModManager(layout: layout, transport: transport, client: client)
+        let updates = try await manager.updates(instanceID: instance.id)
+        XCTAssertEqual(updates.first?.projectID, "testmod")
+        XCTAssertEqual(updates.first?.latestVersionID, "traced-v2")
+        let posted = await transport.postedBodies["/v2/version_files"]
+        XCTAssertNotNil(posted)
+    }
+
     // MARK: - Fixtures
 
     private func makeFabricInstance() throws -> Instance {
@@ -427,6 +507,25 @@ private struct SyntheticModAPI {
         await transport.setAPI(path: "/v2/project/testmod/version", data: json([badUpdateVersion]))
         await transport.setAPI(path: "/v2/version/testmod-v2", data: json(badUpdateVersion))
         await transport.setFile(path: "/testmod-v2.jar", data: Data("corrupt-v2".utf8))
+    }
+
+    func populateTrace(_ transport: ModrinthRoutingTransport, tracedData: Data) async {
+        let current = tracedVersion(data: tracedData, id: "traced-v1", number: "1.0")
+        let update = tracedVersion(data: Data("traced-v2".utf8), id: "traced-v2", number: "2.0")
+        let hash = SHA1.hexDigest(tracedData)
+        await transport.setAPI(path: "/v2/version_files", data: json([:]))
+        await transport.setAPI(path: "/v2/version_files", data: json([hash: current]))
+        await transport.setAPI(path: "/v2/project/testmod", data: json(project(id: "testmod", title: "Test Mod")))
+        await transport.setAPI(path: "/v2/project/testmod/version", data: json([current, update]))
+    }
+
+    private func tracedVersion(data: Data, id: String, number: String) -> [String: Any] {
+        [
+            "id": id, "project_id": "testmod", "name": number, "version_number": number,
+            "dependencies": [], "game_versions": ["1.20.1"], "version_type": "release", "loaders": ["fabric"],
+            "date_published": "2026-01-01T00:00:00Z", "downloads": 1, "status": "listed",
+            "files": [file(name: "traced-\(id).jar", data: data)],
+        ]
     }
 
     private var version: [String: Any] {

@@ -16,6 +16,18 @@ public struct MrpackPackage: Sendable, Equatable {
 
     public var totalDownloadBytes: Int { files.reduce(0) { $0 + $1.fileSize } }
     public var totalFileCount: Int { files.count + overrides.count }
+
+    public var optionalFiles: [MrpackFile] { files.filter(\.isOptional) }
+
+    /// Required client files plus only the explicitly selected optional files. Optional files
+    /// are never installed implicitly: their authors intend them to be an opt-in.
+    public func selectedFiles(includingOptionalPaths paths: Set<String>) -> [MrpackFile] {
+        files.filter { !$0.isOptional || paths.contains($0.relativePath) }
+    }
+
+    public func selectedDownloadBytes(includingOptionalPaths paths: Set<String>) -> Int {
+        selectedFiles(includingOptionalPaths: paths).reduce(0) { $0 + $1.fileSize }
+    }
 }
 
 public struct MrpackFile: Sendable, Equatable {
@@ -25,6 +37,8 @@ public struct MrpackFile: Sendable, Equatable {
     public let downloadURL: URL
     public let fileSize: Int
     public let clientEnvironment: String
+
+    public var isOptional: Bool { clientEnvironment == "optional" }
 
     public init(
         relativePath: String,

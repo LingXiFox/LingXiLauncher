@@ -149,6 +149,68 @@ public struct ModRepository: Sendable {
         }
     }
 
+    /// Attaches verified Modrinth provenance to an already installed local jar. This is used
+    /// after `.mrpack` import: the file bytes are re-hashed and must match the API metadata, so
+    /// a stale or forged record can never be promoted to `modrinth` accidentally.
+    @discardableResult
+    public func attachSource(
+        instance: Instance,
+        fileName: String,
+        projectID: String,
+        slug: String?,
+        title: String,
+        versionID: String,
+        versionNumber: String?,
+        sha1 expectedSHA1: String?,
+        sha512 expectedSHA512: String?,
+        license: String?,
+        iconURL: String?
+    ) throws -> InstalledMod {
+        _ = try Self.validatedFileName(fileName)
+        guard !projectID.isEmpty, !versionID.isEmpty else {
+            throw LauncherError(.invalidMetadata, "Modrinth source identity is incomplete")
+        }
+        var records = try loadRecords(instance: instance)
+        guard let index = records.firstIndex(where: { $0.fileName == fileName }) else {
+            throw LauncherError(.missingDependency, "Mod '\(fileName)' is not tracked for this instance")
+        }
+        let enabledURL = modsDirectory(instance: instance).appendingPathComponent(fileName)
+        let disabledURL = disabledDirectory(instance: instance).appendingPathComponent(fileName)
+        let fileURL: URL
+        let enabled: Bool
+        if fm.fileExists(atPath: enabledURL.path) && !fm.fileExists(atPath: disabledURL.path) {
+            fileURL = enabledURL
+            enabled = true
+        } else if fm.fileExists(atPath: disabledURL.path) && !fm.fileExists(atPath: enabledURL.path) {
+            fileURL = disabledURL
+            enabled = false
+        } else {
+            throw LauncherError(.ioFailure, "Cannot trace mod '\(fileName)': file is missing or duplicated")
+        }
+
+        let actualSHA1 = try SHA1.hexDigest(ofFileAt: fileURL)
+        let actualSHA512 = try? SHA512Digest.hexDigest(ofFileAt: fileURL)
+        let sha1Matches = expectedSHA1.map { $0.lowercased() == actualSHA1.lowercased() }
+        let sha512Matches = expectedSHA512.map { $0.lowercased() == actualSHA512?.lowercased() }
+        guard sha1Matches == true || sha512Matches == true else {
+            throw LauncherError(.hashMismatch, "Cannot trace mod '\(fileName)': hash no longer matches")
+        }
+
+        records[index].projectID = projectID
+        records[index].slug = slug
+        records[index].title = title
+        records[index].versionID = versionID
+        records[index].versionNumber = versionNumber
+        records[index].sha1 = actualSHA1
+        records[index].sha512 = actualSHA512
+        records[index].enabled = enabled
+        records[index].source = "modrinth"
+        records[index].license = license
+        records[index].iconURL = iconURL
+        try saveRecords(records, instance: instance)
+        return records[index]
+    }
+
     // MARK: - Enable / disable / delete
 
     @discardableResult
@@ -195,7 +257,6 @@ public struct ModRepository: Sendable {
         guard let index = records.firstIndex(where: { $0.fileName == fileName }) else {
             throw LauncherError(.missingDependency, "Mod '\\(fileName)' is not tracked for this instance")
         }
-        let record = records[index]
         let enabledURL = modsDirectory(instance: instance).appendingPathComponent(fileName)
         let disabledURL = disabledDirectory(instance: instance).appendingPathComponent(fileName)
         let existing = [enabledURL, disabledURL].first { fm.fileExists(atPath: $0.path) }

@@ -1,6 +1,8 @@
 # LingXi Launcher
 
-macOS Apple Silicon 原生 **Minecraft: Java Edition** 启动器。当前进度：**M0 + M1 + M2 + M2.5 + M3 + M5-Alpha + M6.1 + M6.1.1 + M6.2 + M6.2.1 + M6.3**。
+[![CI](https://github.com/LingXiFox/LingXiLauncher/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/LingXiFox/LingXiLauncher/actions/workflows/ci.yml)
+
+macOS Apple Silicon 原生 **Minecraft: Java Edition** 启动器。当前进度：**M0 + M1 + M2 + M2.5 + M3 + M5-Alpha + M6.1 + M6.1.1 + M6.2 + M6.2.1 + M6.3 + M6.3.1**。
 
 - **M3 Microsoft 正版认证已实现并通过真机验证**：OAuth 2.0 Authorization Code + PKCE S256、系统浏览器、localhost 回调、Xbox Live → XSTS → Minecraft Services → 所有权/档案、Keychain 存储与刷新。
 - **M5-Alpha SwiftUI GUI 可用**：首页 / 游戏实例 / 版本下载 / 账户管理 / 运行日志 / 设置，直接调用 LauncherCore，不执行 CLI。
@@ -9,10 +11,10 @@ macOS Apple Silicon 原生 **Minecraft: Java Edition** 启动器。当前进度�
 - **M6.2 Modrinth 模组管理**：Fabric 实例的 Modrinth 搜索、兼容性过滤、依赖自动解析、JAR 哈希校验、本地启用/禁用/删除、更新检测与原子更新；GUI 实例详情提供双视图。
 - **M6.1.1 稳定性**：托管 JDK 完整校验后安全替换（失败恢复旧版本）；向导切换版本/Loader 后即时重验 Java；补充 Fabric 1.16.5/1.20.1/1.21.11/26.3 真实元数据矩阵。
 - **M6.2.1 模组稳定性**：依赖冲突只在启用的实际版本上判定；更新保留禁用状态；更新检测按渠道和自然版本号而非仅日期；DebugAutomation 仅 Debug + 会话 token。
-- **M6.3 整合包**：按 Modrinth format 1 解析 `.mrpack`，安全 ZIP/overrides、外部文件哈希下载、OneStop 安装、独立新实例、失败/取消清理和缓存重试；GUI/Finder 拖放导入。
+- **M6.3 整合包**：按 Modrinth format 1 解析 `.mrpack`，安全 ZIP/overrides、外部文件哈希下载、OneStop 安装、独立新实例；M6.3.1 修复失败/取消后的同包重试，支持官方下载域、可选客户端文件和 Modrinth 哈希来源追踪；GUI/Finder 拖放导入。
 - Fabric（Forge/NeoForge/Quilt 未实现）已通过真实 1.20.1 + Loader 0.20.1 安装与启动验证；本地离线身份仅保留给 CLI 技术验证，GUI 不提供绕过所有权的启动入口。
 
-详见 [docs/VERIFICATION-M6.3.md](docs/VERIFICATION-M6.3.md)、[docs/VERIFICATION-M6.2.md](docs/VERIFICATION-M6.2.md)、[docs/VERIFICATION-M6.1.md](docs/VERIFICATION-M6.1.md)、[docs/VERIFICATION-M3-M5.md](docs/VERIFICATION-M3-M5.md) 与 [docs/VERIFICATION-M2.5.md](docs/VERIFICATION-M2.5.md)。调试 GUI 可使用 [docs/DEBUG-AUTOMATION.md](docs/DEBUG-AUTOMATION.md) 的 opt-in 接口。这是一个**开发中**项目，不是已发布产品。
+详见 [docs/VERIFICATION-M6.3.1.md](docs/VERIFICATION-M6.3.1.md)、[docs/VERIFICATION-M6.3.md](docs/VERIFICATION-M6.3.md)、[docs/VERIFICATION-M6.2.md](docs/VERIFICATION-M6.2.md)、[docs/VERIFICATION-M6.1.md](docs/VERIFICATION-M6.1.md)、[docs/VERIFICATION-M3-M5.md](docs/VERIFICATION-M3-M5.md) 与 [docs/VERIFICATION-M2.5.md](docs/VERIFICATION-M2.5.md)。调试 GUI 可使用 [docs/DEBUG-AUTOMATION.md](docs/DEBUG-AUTOMATION.md) 的 opt-in 接口。这是一个**开发中**项目，不是已发布产品。
 
 ## 设计边界
 
@@ -39,6 +41,8 @@ LingXiMac (SwiftUI)              lingxi (CLI)
 ```
 
 ## 快速开始
+
+CI 使用 GitHub 官方 `xcode-27` Apple Silicon Runner，执行 Debug 构建、完整单元测试、Release CLI/GUI 构建、`Scripts/build-app.sh` 打包及 Info.plist/App Bundle/ad-hoc 签名校验，并上传临时 Artifact。CI Artifact 仅用于验证，**不是** Developer ID 签名或公证发行版。
 
 要求：macOS 14+、Apple Silicon、Swift 6 工具链（Xcode 26/27 自带）。开发期游戏文件全部放在仓库内 `.dev-sandbox/`（已 gitignore），不写系统目录。
 

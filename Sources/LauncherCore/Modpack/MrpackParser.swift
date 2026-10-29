@@ -10,6 +10,15 @@ public enum MrpackParser {
     public static let maximumEntries = 20_000
     public static let maximumArchiveSize = 512 * 1024 * 1024
 
+    /// Modrinth format 1 permits these official download hosts. Redirects are validated
+    /// separately by the transport; a redirect never bypasses the hash and size checks.
+    static let trustedDownloadHosts: Set<String> = [
+        "cdn.modrinth.com",
+        "github.com",
+        "raw.githubusercontent.com",
+        "gitlab.com",
+    ]
+
     public static func parse(
         archive: URL,
         extractionRoot: URL,
@@ -120,11 +129,11 @@ public enum MrpackParser {
                         "\(path) 没有发布 SHA-1/SHA-512；拒绝跳过校验安装"
                     )
                 }
-                guard let downloadURL = raw.downloads.compactMap({ URL(string: $0) }).first(where: isAllowedModrinthURL) else {
+                guard let downloadURL = raw.downloads.compactMap({ URL(string: $0) }).first(where: isTrustedDownloadURL) else {
                     throw LauncherError(
                         .invalidMetadata,
-                        "\(path) 没有安全的 Modrinth CDN 下载地址",
-                        suggestion: "仅允许 https://cdn.modrinth.com 的文件；不会跳过校验或改用未知外部地址。"
+                        "\(path) 没有可信的 Modrinth 下载地址",
+                        suggestion: "仅允许 Modrinth 官方认可的 cdn.modrinth.com、github.com、raw.githubusercontent.com、gitlab.com HTTPS 地址；不会跳过校验或改用未知外部地址。"
                     )
                 }
                 files.append(MrpackFile(
@@ -186,11 +195,14 @@ public enum MrpackParser {
         return value
     }
 
-    private static func isAllowedModrinthURL(_ url: URL) -> Bool {
+    /// Internal for regression tests; the public parser is the only production caller.
+    static func isTrustedDownloadURL(_ url: URL) -> Bool {
         guard url.scheme?.lowercased() == "https",
-              url.host?.lowercased() == "cdn.modrinth.com",
+              let host = url.host?.lowercased(),
+              trustedDownloadHosts.contains(host),
               url.user == nil, url.password == nil,
-              url.port == nil || url.port == 443 else { return false }
+              url.port == nil || url.port == 443,
+              !url.path.isEmpty, url.path != "/" else { return false }
         return true
     }
 
