@@ -2,7 +2,7 @@
 
 验证日期：2026-10-29
 环境：macOS 27.2、Apple M5（arm64）、Xcode 27.2、Swift 6.4.2
-测试基线：**282 tests, 0 failures, 0 skipped**
+测试基线：**283 tests, 0 failures, 0 skipped**
 Release：CLI + SwiftUI GUI 构建成功；`dist/LingXiMac.app` 为 arm64、Info.plist 合法、ad-hoc 签名通过
 
 ## 1. 范围
@@ -14,7 +14,7 @@ Release：CLI + SwiftUI GUI 构建成功；`dist/LingXiMac.app` 为 arm64、Info
 - 下载 ZIP 后校验 Modrinth SHA-512（优先）或 SHA-1，并验证文件大小；通过后才原子提交到实例 `shaderpacks/`。
 - 本地 ZIP 导入、启用/停用、删除、替换和更新检测。
 - 只改 Iris 的 `config/iris.properties` 中 `shaderPack` 和 `enableShaders`，保留注释、未知键和其他配置。
-- macOS OpenGL 4.1 的能力提示与性能警告；不声称支持 Metal 原生渲染或硬件光追。
+- macOS OpenGL 4.1 的能力提示与性能警告；不声称支持 Metal 原生渲染或硬件光追。`GraphicsCapabilities` 对无法创建 OpenGL 上下文的路径也做显式提示，不伪造能力。
 
 没有新增 Forge/NeoForge/Quilt、CurseForge 或新的 Mod Loader。
 
@@ -23,10 +23,10 @@ Release：CLI + SwiftUI GUI 构建成功；`dist/LingXiMac.app` 为 arm64、Info
 完整测试：
 
 ```text
-Executed 282 tests, with 0 failures (0 unexpected) in 14.721 seconds
+Executed 283 tests, with 0 failures (0 unexpected) in 9.568 seconds
 ```
 
-新增 `Tests/LauncherCoreTests/M7GraphicsTests.swift`，7 项：
+新增 `Tests/LauncherCoreTests/M7GraphicsTests.swift`，8 项：
 
 ```text
 testGraphicsSetupInstallsPinnedIrisAndSodiumWithShaderFacets
@@ -35,6 +35,7 @@ testShaderInstallActivationPreservesConfigAndVerifiesZip
 testShaderInstallHashFailureLeavesWorldsConfigsAndRecordsUntouched
 testNonFabricInstanceIsRejectedBeforeNetworkOrFileWrite
 testActivationIsBlockedWhileGameRunsAndDeactivationIsSafe
+testUnsupportedMacOpenGLPathWarnsWithoutClaimingMetalRayTracing
 testMalformedLocalShaderIsRejectedWithoutMetadataOrFileCommit
 ```
 
@@ -149,7 +150,7 @@ warning: Iris 1.7.6+1.20.1 的元数据固定依赖 Sodium mc1.20.1-0.5.12-beta.
 
 ```text
 swift build                                      # success
-swift test                                       # 282 tests, 0 failures
+swift test                                       # 283 tests, 0 failures
 swift build -c release --product lingxi          # success
 swift build -c release --product LingXiMac       # success
 Scripts/build-app.sh --release                   # success
@@ -174,3 +175,10 @@ CI 工作流：`.github/workflows/ci.yml`，使用 GitHub 官方 `xcode-27` Appl
 - Complementary r5.9.3 在 Iris 1.7.6 下有未知 custom uniform 警告；未做所有光影包兼容性矩阵。
 - 未测试 Intel Mac；`.app` 为 ad-hoc 签名，不是 Developer ID 签名或公证发行版。
 - Modrinth、Iris、Sodium 和光影包的许可证/署名仍由各自项目提供；启动器不重新分发这些文件。
+
+### GitHub Actions 实跑结果
+
+- 运行：[CI #40859308536](https://github.com/LingXiFox/LingXiLauncher/actions/runs/40859308536)（commit `138bffa`，`xcode-27` Apple Silicon Runner）— **success**，耗时约 2 分 20 秒。
+- Debug build、完整 **283 tests / 0 failures / 0 unexpected**、Release CLI/GUI、`Scripts/build-app.sh`、Info.plist/arm64/ad-hoc 签名校验全部通过。
+- Artifact：`LingXiMac-ci-138bffa7b023cf1af6ce0cca5ebb460e3fa2e32e`，约 **3.70 MB**，保留 7 天；仅用于测试，不是公证发行版。
+- CI 未执行 Microsoft 登录、真实 Minecraft 下载或图形桌面游戏启动；真实游戏验证是本地独立步骤。

@@ -212,6 +212,35 @@ final class M7GraphicsTests: XCTestCase {
         XCTAssertTrue(config.contains("shaderPack="))
     }
 
+
+    func testUnsupportedMacOpenGLPathWarnsWithoutClaimingMetalRayTracing() {
+        let unavailable = GraphicsCapabilities(
+            openGLVersion: nil,
+            renderer: nil,
+            shadingLanguageVersion: nil,
+            isAppleSilicon: true,
+            probeError: "CGLChoosePixelFormat failed"
+        )
+        XCTAssertTrue(unavailable.isLegacyOpenGL)
+        XCTAssertNil(unavailable.openGLMajor)
+        XCTAssertNotNil(unavailable.shaderCompatibilityWarning)
+        XCTAssertEqual(unavailable.summary, "OpenGL 信息不可用")
+
+        let legacy = GraphicsCapabilities(
+            openGLVersion: "4.1 Metal - 91.7",
+            renderer: "Apple M5",
+            shadingLanguageVersion: "4.10",
+            isAppleSilicon: true,
+            probeError: nil
+        )
+        XCTAssertTrue(legacy.isLegacyOpenGL)
+        XCTAssertEqual(legacy.openGLMajor, 4)
+        XCTAssertEqual(legacy.openGLMinor, 1)
+        let warning = try! XCTUnwrap(legacy.shaderCompatibilityWarning)
+        XCTAssertTrue(warning.contains("OpenGL 4.1"))
+        XCTAssertFalse(warning.lowercased().contains("rtx"))
+    }
+
     func testMalformedLocalShaderIsRejectedWithoutMetadataOrFileCommit() throws {
         let instance = try makeFabricInstance()
         let transport = GraphicsTransport()

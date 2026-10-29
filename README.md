@@ -14,7 +14,7 @@ macOS Apple Silicon 原生 **Minecraft: Java Edition** 启动器。当前进度�
 - **M6.3 整合包**：按 Modrinth format 1 解析 `.mrpack`，安全 ZIP/overrides、外部文件哈希下载、OneStop 安装、独立新实例；M6.3.1 修复失败/取消后的同包重试，支持官方下载域、可选客户端文件和 Modrinth 哈希来源追踪；GUI/Finder 拖放导入。
 - **M7.1 图形与光影**：Fabric 1.20.1 上可安装兼容的 Iris + Sodium；独立的 `shaderpacks/` 管理器支持 Modrinth 搜索、版本选择、哈希校验、启用/停用、替换/更新和本地 ZIP 导入。Iris 配置只修改 `config/iris.properties` 的 `shaderPack` / `enableShaders`，并保留注释和未知键；macOS 的 OpenGL 4.1 限制会在 GUI 中明确提示，不宣传不存在的 Metal 光追。
 - Fabric（Forge/NeoForge/Quilt 未实现）已通过真实 1.20.1 + Loader 0.20.1 安装与启动验证；本地离线身份仅保留给 CLI 技术验证，GUI 不提供绕过所有权的启动入口。
-- **GitHub Actions CI**：Debug 构建、**282 项**完整 XCTest、Release CLI/GUI、App Bundle 与 ad-hoc 签名校验、ZIP Artifact 上传；不执行真实登录、游戏下载或图形启动。Artifact 仅用于测试，不是公证发行版。
+- **GitHub Actions CI**：Debug 构建、**283 项**完整 XCTest、Release CLI/GUI、App Bundle 与 ad-hoc 签名校验、ZIP Artifact 上传；不执行真实登录、游戏下载或图形启动。Artifact 仅用于测试，不是公证发行版。
 
 详见 [docs/VERIFICATION-M7.1.md](docs/VERIFICATION-M7.1.md)、[docs/VERIFICATION-M6.3.md](docs/VERIFICATION-M6.3.md)、[docs/VERIFICATION-M6.2.md](docs/VERIFICATION-M6.2.md)、[docs/VERIFICATION-M6.1.md](docs/VERIFICATION-M6.1.md)、[docs/VERIFICATION-M3-M5.md](docs/VERIFICATION-M3-M5.md) 与 [docs/VERIFICATION-M2.5.md](docs/VERIFICATION-M2.5.md)。调试 GUI 可使用 [docs/DEBUG-AUTOMATION.md](docs/DEBUG-AUTOMATION.md) 的 opt-in 接口。这是一个**开发中**项目，不是已发布产品。
 
