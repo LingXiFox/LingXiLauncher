@@ -322,8 +322,15 @@ public struct ShaderPackManager: Sendable {
                 gameVersion: compatibility.gameVersion,
                 loader: nil
             ).filter { $0.isCompatibleForShader(gameVersion: compatibility.gameVersion) }
-            let latest = versions.max { $0.datePublished < $1.datePublished }
-            guard let latest, latest.id != currentVersionID, let file = latest.primaryZip else { continue }
+            // The installed version must still be in the compatible list. If it is absent we
+            // have no reliable comparison baseline and deliberately do not recommend anything.
+            guard let current = versions.first(where: { $0.id == currentVersionID }),
+                  let latest = ModrinthUpdatePolicy.selectUpdate(
+                      current: current,
+                      from: versions,
+                      file: { $0.primaryZip }
+                  ),
+                  let file = latest.primaryZip else { continue }
             result.append(ShaderPackUpdate(
                 projectID: projectID,
                 title: project.title,

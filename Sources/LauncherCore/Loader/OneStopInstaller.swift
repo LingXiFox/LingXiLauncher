@@ -255,6 +255,6 @@ public struct OneStopInstaller: Sendable {
     private func recordJava(instanceID: String, executable: URL) {
         guard let runtime = try? JavaRuntimeInspector().inspect(executable: executable) else { return }
         let record = JavaManager(layout: layout).runtimeRecord(for: runtime)
-        try? InstanceRepository(layout: layout).setJavaRuntime(id: instanceID, record: record)
+        _ = try? InstanceRepository(layout: layout).setJavaRuntime(id: instanceID, record: record)
     }
 }

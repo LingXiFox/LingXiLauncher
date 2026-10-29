@@ -137,6 +137,13 @@ struct ShaderPackRepository: Sendable {
         let metadataURL = self.metadataURL(instance: instance)
         var records = try loadRecords(instance: instance)
         let oldRecord = records.first { $0.fileName == replacingFileName }
+        if let replacingFileName, oldRecord == nil {
+            throw LauncherError(
+                .usageError,
+                "要替换的光影记录不存在：\(replacingFileName)",
+                suggestion: "刷新已安装列表后重试，不会覆盖未知文件。"
+            )
+        }
         if let duplicate = records.first(where: {
             $0.fileName != replacingFileName
                 && (($0.sha1 != nil && $0.sha1 == record.sha1) || ($0.sha512 != nil && $0.sha512 == record.sha512))
@@ -147,15 +154,29 @@ struct ShaderPackRepository: Sendable {
                 suggestion: "请在已安装光影列表中管理它。"
             )
         }
-        let destination = directory.appendingPathComponent(record.fileName, isDirectory: false)
-        if fm.fileExists(atPath: destination.path) && oldRecord == nil {
+        // A filename is an instance-wide namespace. Only the record explicitly selected for
+        // replacement may own the destination; an untracked ZIP or another project's record is
+        // never overwritten just because its bytes differ.
+        if let conflictingRecord = records.first(where: {
+            $0.fileName == record.fileName && $0.fileName != replacingFileName
+        }) {
             throw LauncherError(
                 .usageError,
-                "目标光影文件已存在：\(record.fileName)",
-                suggestion: "不会覆盖未知文件；请先移走该文件或选择更新已安装光影。"
+                "光影文件名 \(record.fileName) 已被 \(conflictingRecord.title) 使用。",
+                suggestion: "请选择更新已有光影，或先移走冲突文件。"
             )
         }
-        if fm.fileExists(atPath: destination.path), !allowReplace {
+        let destination = directory.appendingPathComponent(record.fileName, isDirectory: false)
+        let destinationExisted = fm.fileExists(atPath: destination.path)
+        let ownsDestination = oldRecord?.fileName == record.fileName
+        if destinationExisted && !ownsDestination {
+            throw LauncherError(
+                .usageError,
+                "目标光影文件已存在且不属于当前更新：\(record.fileName)",
+                suggestion: "不会覆盖其他项目或未知来源的文件；请先移走该文件或选择更新已安装光影。"
+            )
+        }
+        if destinationExisted && !allowReplace {
             throw LauncherError(.usageError, "光影文件已存在：\(record.fileName)")
         }
 

@@ -16,6 +16,7 @@ public struct LaunchContext: Sendable {
     /// Launcher-controlled feature flags (demo mode, custom resolution, quick play, ...).
     /// Absent means disabled — never enabled implicitly.
     public let features: [String: Bool]
+    public let quickPlaySingleplayer: String?
     public let launcherName: String
     public let launcherVersion: String
 
@@ -27,6 +28,7 @@ public struct LaunchContext: Sendable {
         identity: LaunchIdentity,
         additionalJVMArguments: [String] = [],
         features: [String: Bool] = [:],
+        quickPlaySingleplayer: String? = nil,
         launcherName: String = "LingXi Launcher",
         launcherVersion: String = LauncherInfo.version
     ) {
@@ -45,6 +47,7 @@ public struct LaunchContext: Sendable {
         self.identity = identity
         self.additionalJVMArguments = additionalJVMArguments
         self.features = mergedFeatures
+        self.quickPlaySingleplayer = quickPlaySingleplayer
         self.launcherName = launcherName
         self.launcherVersion = launcherVersion
     }

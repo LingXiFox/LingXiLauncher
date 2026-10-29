@@ -575,77 +575,18 @@ public struct ModManager: Sendable {
     }
 
     private func compareVersionNumbers(_ lhs: String, _ rhs: String) -> Int {
-        // Natural, token-wise comparison. Modrinth version numbers are not guaranteed to be
-        // SemVer (e.g. `mc1.20.1-0.5.13-fabric`), so numeric runs are compared numerically and
-        // text runs lexicographically. This prevents a newly published old build from appearing
-        // as an update merely because its date is newer.
-        let left = versionTokens(lhs)
-        let right = versionTokens(rhs)
-        let count = max(left.count, right.count)
-        for index in 0..<count {
-            switch (index < left.count ? left[index] : .numeric(0),
-                    index < right.count ? right[index] : .numeric(0)) {
-            case let (.numeric(a), .numeric(b)):
-                if a != b { return a < b ? -1 : 1 }
-            case let (.text(a), .text(b)):
-                if a != b { return a < b ? -1 : 1 }
-            case (.numeric, .text), (.text, .numeric):
-                // Different token shapes are not comparable; fall back to a deterministic
-                // textual comparison instead of claiming one is newer.
-                return lhs.localizedCaseInsensitiveCompare(rhs) == .orderedAscending ? -1 : 1
-            }
-        }
-        return 0
-    }
-
-    private enum VersionToken: Equatable {
-        case numeric(Int)
-        case text(String)
-    }
-
-    private func versionTokens(_ value: String) -> [VersionToken] {
-        var result: [VersionToken] = []
-        var current = ""
-        var currentIsDigit: Bool?
-        for character in value.lowercased() {
-            let isDigit = character.isNumber
-            if currentIsDigit != nil, currentIsDigit != isDigit {
-                result.append(currentIsDigit == true
-                    ? .numeric(Int(current) ?? 0)
-                    : .text(String(current)))
-                current = ""
-            }
-            current.append(character)
-            currentIsDigit = isDigit
-        }
-        if !current.isEmpty {
-            result.append(currentIsDigit == true
-                ? .numeric(Int(current) ?? 0)
-                : .text(String(current)))
-        }
-        return result
+        ModrinthUpdatePolicy.compareVersionNumbers(lhs, rhs)
     }
 
     private func allowedVersionTypes(for current: ModrinthVersion) -> Set<ModrinthVersionType> {
-        switch current.versionType {
-        case .release: return [.release]
-        case .beta: return [.release, .beta]
-        case .alpha: return [.release, .beta, .alpha]
-        case .unknown: return [.release, .beta, .alpha]
-        }
+        ModrinthUpdatePolicy.allowedVersionTypes(for: current.versionType)
     }
 
     private func selectUpdate(
         current: ModrinthVersion,
         from versions: [ModrinthVersion]
     ) -> ModrinthVersion? {
-        let allowed = allowedVersionTypes(for: current)
-        let candidates = versions.filter {
-            $0.id != current.id && allowed.contains($0.versionType) && $0.primaryJar != nil
-        }
-        return candidates
-            .filter { compareVersionNumbers($0.versionNumber, current.versionNumber) > 0 }
-            .max { compareVersionNumbers($0.versionNumber, $1.versionNumber) < 0 }
+        ModrinthUpdatePolicy.selectUpdate(current: current, from: versions) { $0.primaryJar }
     }
 
     // MARK: - Verification / paths

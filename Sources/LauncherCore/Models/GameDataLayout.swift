@@ -59,6 +59,10 @@ public struct GameDataLayout: Sendable, Equatable {
     public var launcherLogsDirectory: URL { dataRoot.appendingPathComponent("logs/launcher", isDirectory: true) }
     public var manifestsCacheDirectory: URL { dataRoot.appendingPathComponent("cache/manifests", isDirectory: true) }
 
+    /// Instance/world backups live outside the game directory so deleting a world or instance
+    /// can never take its recovery copies with it.
+    public var backupsDirectory: URL { dataRoot.appendingPathComponent("backups", isDirectory: true) }
+
     /// Where Mojang's log4j configuration files live (`assets/log_configs`).
     public var loggingConfigsDirectory: URL { assetsDirectory.appendingPathComponent("log_configs", isDirectory: true) }
 

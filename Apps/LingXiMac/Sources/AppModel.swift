@@ -80,6 +80,25 @@ final class AppModel: ObservableObject {
         let appearance: PlayerAppearance?
     }
 
+    enum InstanceToolsTab: String, CaseIterable, Identifiable, Hashable {
+        case manage, worlds, diagnostics
+        var id: String { rawValue }
+        var title: String {
+            switch self {
+            case .manage: return "实例管理"
+            case .worlds: return "世界存档"
+            case .diagnostics: return "启动诊断"
+            }
+        }
+        var icon: String {
+            switch self {
+            case .manage: return "square.on.square"
+            case .worlds: return "archivebox"
+            case .diagnostics: return "stethoscope"
+            }
+        }
+    }
+
     struct Settings: Equatable {
         var javaPath = ""
         var sourceRaw = DownloadSourcePolicy.auto.rawValue
@@ -137,8 +156,14 @@ final class AppModel: ObservableObject {
     @Published var installWizardInitialVersion: String?
     @Published var showModsForInstance: Instance?
     @Published var showGraphicsForInstance: Instance?
+    @Published var showPerformanceForInstance: Instance?
     @Published var showMrpackImport = false
     @Published var mrpackImportURL: URL?
+    @Published var showInstanceToolsForInstance: Instance?
+    @Published var instanceToolsTab: InstanceToolsTab = .manage
+    @Published var crashReport: CrashDiagnosticReport?
+    @Published var crashReportError: String?
+    @Published var isDiagnosing = false
 
     // MARK: - Services
 
@@ -154,6 +179,7 @@ final class AppModel: ObservableObject {
     private var authObserver: Task<Void, Never>?
     private var launchTask: Task<Void, Never>?
     private var logBuffers: [String: String] = [:]
+    private var launchInstanceID: String?
 
     // MARK: - Init
 
@@ -327,6 +353,18 @@ final class AppModel: ObservableObject {
         section = .instances
         selectedInstanceID = instance.id
         showGraphicsForInstance = instance
+    }
+
+    func openPerformance(instance: Instance) {
+        section = .instances
+        selectedInstanceID = instance.id
+        showPerformanceForInstance = instance
+    }
+
+    func openInstanceTools(_ instance: Instance, tab: InstanceToolsTab = .manage) {
+        showInstanceToolsForInstance = instance
+        instanceToolsTab = tab
+        section = .instances
     }
 
     func openInstanceFolder(_ instance: Instance) {
@@ -579,6 +617,9 @@ final class AppModel: ObservableObject {
         }
         lastError = nil
         lastLaunchAt = Date()
+        launchInstanceID = instance.id
+        crashReport = nil
+        crashReportError = nil
         isGameRunning = true
         appendLine("Preparing launch of \(instance.manifest.displayName) with \(java.displayDescription)", source: "launch")
         launchTask?.cancel()
@@ -601,6 +642,66 @@ final class AppModel: ObservableObject {
                 self.appendLine("Launch failed: \(Self.describe(error))", source: "launch", level: .error)
             }
             self.isGameRunning = await self.launchService.isRunning()
+        }
+    }
+
+    /// Builds the same Microsoft-backed identity and Java runtime used by a real launch. The
+    /// benchmark runner must not use a fake/offline identity or silently fall back to system Java.
+    func makeBenchmarkContext(for instance: Instance) async throws -> (LaunchIdentity, URL) {
+        guard let account = activeMicrosoftAccount else {
+            throw LauncherError(.unauthorized, "Benchmarking requires a signed-in Microsoft account")
+        }
+        guard let java = selectedJavaRuntime else {
+            throw LauncherError(.javaNotFound, "Select a Java runtime before benchmarking")
+        }
+        guard let authService else {
+            throw LauncherError(.configurationMissing, authSetupError ?? "Microsoft authentication is not configured")
+        }
+        let session = try await authService.session(for: account.id)
+        return (.microsoft(session), java.executable)
+    }
+
+    func makePerformanceProfileStore() -> PerformanceProfileStore {
+        PerformanceProfileStore(layout: layout)
+    }
+
+    func makeBenchmarkRunner() -> BenchmarkRunner {
+        BenchmarkRunner(layout: layout)
+    }
+
+    func refreshCrashDiagnostics(instance: Instance, exitCode: Int32? = nil) {
+        isDiagnosing = true
+        crashReportError = nil
+        let service = CrashDiagnosticsService(layout: layout)
+        Task {
+            do {
+                let report = try service.collect(instanceID: instance.id, exitCode: exitCode)
+                self.crashReport = report
+                self.isDiagnosing = false
+            } catch {
+                self.crashReportError = Self.describe(error)
+                self.isDiagnosing = false
+            }
+        }
+    }
+
+    func exportCrashReport(_ report: CrashDiagnosticReport, markdown: Bool) {
+        let panel = NSSavePanel()
+        panel.canCreateDirectories = true
+        panel.nameFieldStringValue = "lingxi-crash-\(report.instanceID).\(markdown ? "md" : "json")"
+        panel.allowedContentTypes = markdown ? [.plainText] : [.json]
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            let data: Data
+            if markdown {
+                data = Data(CrashReportExporter.markdown(for: report).utf8)
+            } else {
+                data = try CrashReportExporter.json(for: report)
+            }
+            try data.write(to: url, options: [.atomic])
+            appendLine("Crash report exported: \(url.path)", source: "diagnostics")
+        } catch {
+            setError(error)
         }
     }
 
@@ -640,11 +741,23 @@ final class AppModel: ObservableObject {
                 level: exit.isSuccess ? .info : .error
             )
             reloadInstances()
+            if !exit.isSuccess, let id = launchInstanceID,
+               let instance = instances.first(where: { $0.id == id }) {
+                instanceToolsTab = .diagnostics
+                showInstanceToolsForInstance = instance
+                refreshCrashDiagnostics(instance: instance, exitCode: exit.code)
+            }
         case let .failed(error):
             isGameRunning = false
             gamePID = nil
             setError(error)
             appendLine("Launch failed: \(Self.describe(error))", source: "launch", level: .error)
+            if let id = launchInstanceID,
+               let instance = instances.first(where: { $0.id == id }) {
+                instanceToolsTab = .diagnostics
+                showInstanceToolsForInstance = instance
+                refreshCrashDiagnostics(instance: instance)
+            }
         }
     }
 

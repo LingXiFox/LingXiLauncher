@@ -122,7 +122,7 @@ struct HomeView: View {
     }
 
     private var recentDetail: String {
-        if let last = model.selectedInstance?.manifest.lastLaunchedAt, model.lastLaunchAt == nil {
+        if model.selectedInstance?.manifest.lastLaunchedAt != nil, model.lastLaunchAt == nil {
             return "\(model.selectedInstance?.manifest.lastIdentityMode?.rawValue ?? "上次会话") · 退出码未缓存"
         }
         guard let date = model.lastLaunchAt else {

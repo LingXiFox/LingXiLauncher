@@ -335,6 +335,10 @@ public struct NeoForgeInstaller: Sendable {
             throw error
         }
 
+        // Metadata is the source of truth for the instance. Only once the instance has been
+        // created/updated successfully is it safe to discard the file backups.
+        transaction.commit()
+
         return NeoForgeInstallReport(
             profileID: profileID,
             minecraftVersionID: request.minecraftVersionID,
@@ -462,7 +466,7 @@ public struct NeoForgeInstaller: Sendable {
 /// File-level transaction for merging a staged NeoForge installation into the shared root.
 /// Existing files are copied to a backup directory first; rollback restores every backup and
 /// removes newly created files. Nothing is deleted until commit completes.
-private final class NeoForgeFileTransaction {
+final class NeoForgeFileTransaction {
     private struct Backup {
         let original: URL
         let backup: URL
@@ -471,6 +475,9 @@ private final class NeoForgeFileTransaction {
     private let layout: GameDataLayout
     private let backupRoot: URL
     private var backups: [Backup] = []
+
+    /// Test-only visibility for asserting that no large staging directory survives.
+    var backupRootForTesting: URL { backupRoot }
 
     init(layout: GameDataLayout) throws {
         self.layout = layout
@@ -483,8 +490,11 @@ private final class NeoForgeFileTransaction {
     func installLibraries(from source: URL) throws {
         let files = try allFiles(under: source)
         for file in files {
-            let relative = file.path.replacingOccurrences(of: source.path + "/", with: "")
+            let relative = try relativePath(of: file, under: source)
             let destination = layout.librariesDirectory.appendingPathComponent(relative)
+            guard PathSafety.isContained(destination, inBase: layout.librariesDirectory) else {
+                throw LauncherError(.pathEscapesRoot, "NeoForge library escapes the libraries directory: \(relative)")
+            }
             try install(file, to: destination)
         }
     }
@@ -492,6 +502,13 @@ private final class NeoForgeFileTransaction {
     func installVersion(from source: URL, id: String) throws {
         let destination = try layout.versionDirectory(id)
         try install(source, to: destination)
+    }
+
+    /// Drops only this transaction's private backup directory. The installed files and instance
+    /// metadata are already committed at this point; unrelated game files must never be touched.
+    func commit() {
+        try? FileManager.default.removeItem(at: backupRoot)
+        backups.removeAll()
     }
 
     func rollback() {
@@ -505,6 +522,7 @@ private final class NeoForgeFileTransaction {
             }
         }
         try? FileManager.default.removeItem(at: backupRoot)
+        backups.removeAll()
     }
 
     private func install(_ source: URL, to destination: URL) throws {
@@ -527,6 +545,20 @@ private final class NeoForgeFileTransaction {
         } catch {
             throw LauncherError(.ioFailure, "Cannot install NeoForge file \(destination.lastPathComponent): \(error.localizedDescription)")
         }
+    }
+
+    private func relativePath(of url: URL, under root: URL) throws -> String {
+        let base = root.resolvingSymlinksInPath().path
+        let child = url.resolvingSymlinksInPath().path
+        let prefix = base.hasSuffix("/") ? base : base + "/"
+        guard child.hasPrefix(prefix) else {
+            throw LauncherError(.pathEscapesRoot, "NeoForge entry escapes its staging root: \(url.path)")
+        }
+        let relative = String(child.dropFirst(prefix.count))
+        guard !relative.isEmpty, !relative.hasPrefix("/"), !relative.split(separator: "/").contains("..") else {
+            throw LauncherError(.pathEscapesRoot, "Invalid NeoForge entry path: \(url.path)")
+        }
+        return relative
     }
 
     private func allFiles(under root: URL) throws -> [URL] {

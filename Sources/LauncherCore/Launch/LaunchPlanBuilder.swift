@@ -261,6 +261,9 @@ public struct LaunchPlanBuilder: LaunchPlanning {
             "version_name": version.id,
             "version_type": version.type,
         ]
+        if let world = context.quickPlaySingleplayer, !world.isEmpty {
+            variables["quickPlaySingleplayer"] = world
+        }
         if let loggingFile = dependencies.loggingFile {
             // `${path}` is only meaningful when the log4j configuration actually exists locally.
             variables["path"] = loggingFile.path.path

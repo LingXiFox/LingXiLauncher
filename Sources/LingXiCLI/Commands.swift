@@ -86,7 +86,14 @@ enum CLI {
         case "java":
             return try await runJavaCommand(rest)
         case "instance":
+            if rest.first == "copy" {
+                return try InstanceToolsCLI.copy(Array(rest.dropFirst()))
+            }
             return try runInstanceCommand(rest)
+        case "world":
+            return try InstanceToolsCLI.runWorld(rest)
+        case "diagnose":
+            return try InstanceToolsCLI.runDiagnose(rest)
         case "install":
             return try await runInstall(rest)
         case "mod":
@@ -97,6 +104,8 @@ enum CLI {
             return try await runGraphicsCommand(rest)
         case "shader":
             return try await runShaderCommand(rest)
+        case "performance", "perf":
+            return try await runPerformanceCommand(rest)
         case "verify":
             return try await runVerify(rest)
         default:
@@ -425,7 +434,7 @@ enum CLI {
         let runtime = try services.javaInspector.inspect(executable: javaURL)
         if let instance {
             let record = JavaManager(layout: layout).runtimeRecord(for: runtime)
-            try? registry.setJavaRuntime(id: instance.id, record: record)
+            _ = try? registry.setJavaRuntime(id: instance.id, record: record)
         }
         // Rules, natives selection and natives cache paths must follow the JVM, not the launcher.
         let jvmPlatform = try PlatformContext.forJVM(runtime)
@@ -500,10 +509,29 @@ enum CLI {
 
         let controller = GameProcessController()
         let running = try await controller.start(plan)
+        let runtimeRegistry = InstanceRuntimeRegistry(layout: layout)
+        if let instance {
+            try? runtimeRegistry.markRunning(
+                instanceID: instance.id,
+                pid: running.processIdentifier,
+                executable: runtime.executable
+            )
+        }
+        defer {
+            if let instance { runtimeRegistry.clear(instanceID: instance.id) }
+        }
 
         let logHandle = try makeLogHandle(logURL)
         defer { try? logHandle.close() }
-        writeLogHeader(to: logHandle, plan: plan, version: version, context: context, runtime: runtime, diagnostics: diagnostics)
+        writeLogHeader(
+            to: logHandle,
+            instance: instance,
+            plan: plan,
+            version: version,
+            context: context,
+            runtime: runtime,
+            diagnostics: diagnostics
+        )
 
         var gameExit = GameExit(code: 0, reason: .exited)
         for await event in running.events {
@@ -538,7 +566,7 @@ enum CLI {
         }
     }
 
-    private static func resolveIdentity(_ raw: String, layout: GameDataLayout) async throws -> LaunchIdentity {
+    static func resolveIdentity(_ raw: String, layout: GameDataLayout) async throws -> LaunchIdentity {
         let parts = raw.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
         guard parts.count == 2, !parts[1].isEmpty else {
             throw LauncherError(
@@ -652,6 +680,7 @@ enum CLI {
 
     private static func writeLogHeader(
         to handle: FileHandle,
+        instance: Instance?,
         plan: LaunchPlan,
         version: ResolvedVersion,
         context: LaunchContext,
@@ -661,6 +690,9 @@ enum CLI {
         // Only the redacted plan is ever persisted; argv may contain a session token.
         var lines: [String] = []
         lines.append("# LingXi Launcher \(LauncherInfo.version)")
+        lines.append("# instance: \(instance?.id ?? "none")")
+        lines.append("# instanceName: \(instance?.manifest.displayName ?? "none")")
+        lines.append("# gameDirectory: \(context.gameDirectory.path)")
         lines.append("# started: \(CLIOutput.formatDate(Date()))")
         lines.append("# version: \(version.id)")
         lines.append("# identity: \(context.identity.mode.rawValue)")
@@ -873,6 +905,14 @@ enum CLI {
 
           instance create --name "<display name>" [--version <id>] [--json]
           instance list [--json]
+          instance copy <source-id> --name "<display name>" [--saves] [--json]
+              Copy instance-owned files; global libraries/assets stay shared.
+          world list|backup|restore|delete --instance <id> [--world <name>] [--backup <id>]
+              Manage isolated saves and checksummed backups under dataRoot/backups.
+          diagnose --instance <id> [--exit-code <n>] [--json]
+              Analyze instance-bound logs with deterministic rules and redaction.
+          performance status|benchmark|tune|apply|reports --instance <id> [...]
+              Run real launcher-side benchmarks and apply conservative tuning.
 
           version list [--type release|snapshot|all] [--source official|auto|mirror]
               Fetch the official version manifest (cached) and list versions.

@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/LingXiFox/LingXiLauncher/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/LingXiFox/LingXiLauncher/actions/workflows/ci.yml)
 
-macOS Apple Silicon 原生 **Minecraft: Java Edition** 启动器。当前进度：**M0 + M1 + M2 + M2.5 + M3 + M5-Alpha + M6.1 + M6.1.1 + M6.2 + M6.2.1 + M6.3 + M6.3.1 + M7.1 + M7.1.1 + M7.2**。
+macOS Apple Silicon 原生 **Minecraft: Java Edition** 启动器。当前进度：**M0 + M1 + M2 + M2.5 + M3 + M5-Alpha + M6.1 + M6.1.1 + M6.2 + M6.2.1 + M6.3 + M6.3.1 + M7.1 + M7.1.1 + M7.2 + M7.3 + M8**。
 
 - **M3 Microsoft 正版认证已实现并通过真机验证**：OAuth 2.0 Authorization Code + PKCE S256、系统浏览器、localhost 回调、Xbox Live → XSTS → Minecraft Services → 所有权/档案、Keychain 存储与刷新。
 - **M5-Alpha SwiftUI GUI 可用**：首页 / 游戏实例 / 版本下载 / 账户管理 / 运行日志 / 设置，直接调用 LauncherCore，不执行 CLI。
@@ -15,10 +15,12 @@ macOS Apple Silicon 原生 **Minecraft: Java Edition** 启动器。当前进度�
 - **M7.1 图形与光影**：Fabric 1.20.1 上可安装兼容的 Iris + Sodium；独立的 `shaderpacks/` 管理器支持 Modrinth 搜索、版本选择、哈希校验、启用/停用、替换/更新和本地 ZIP 导入。Iris 配置只修改 `config/iris.properties` 的 `shaderPack` / `enableShaders`，并保留注释和未知键；macOS 的 OpenGL 4.1 限制会在 GUI 中明确提示，不宣传不存在的 Metal 光追。
 - **M7.1.1 图形稳定性**：Iris + Sodium 安装使用模组目录事务快照；Sodium 替换后 Iris 下载/校验失败会恢复两者旧版本。光影更新在游戏运行时拒绝；同一项目的 `已安装` 与 `可更新` 汇成一个更新动作，替换前完整下载校验并保留旧 ZIP；Core 的运行时注册表让 CLI/GUI 共享同一保护逻辑。
 - **M7.2 NeoForge 与稳定性**：安装向导支持 NeoForge 官方 Maven 版本选择；隔离 staging 中调用官方 `--install-client`，验证生成 profile、runtime libraries 和 patched client JAR 后再事务提交。Modrinth 搜索/安装/更新、`.mrpack` 的 `neoforge` 依赖、图形/光影 loader 过滤均支持 NeoForge。真实 1.21.1 + NeoForge 21.1.265 + JEI 已验证到主菜单。
+- **M7.3 崩溃诊断与实例管理**：实例绑定的 latest.log/crash-reports/启动器日志采集，确定性 Java/Loader/模组/LWJGL/OpenGL/Iris/内存/文件诊断，未知原因不编造；支持 Markdown/JSON 脱敏导出、异常退出自动打开诊断。新增实例复制、世界存档备份/校验/分阶段恢复/恢复点、运行中拒绝修改；GUI 的「实例管理」提供实例、世界、启动诊断三个页签。
+- **M8 性能工作台**：启动器侧真实采集启动、资源重载、世界加载/区块生成和渲染阶段；记录硬件/Java/Loader/模组上下文，报告持久化与对比，基于实际数据的保守调优建议、确认后应用和恢复。没有游戏内帧计数器时明确标记 FPS 不可用，不用 CPU 占用伪造帧率；仅在 Apple Silicon 原生运行。
 - Fabric 与 NeoForge 已通过真实安装/启动验证；Forge/Quilt 未实现。本地离线身份仅保留给 CLI 技术验证，GUI 不提供绕过所有权的启动入口。
-- **GitHub Actions CI**：Debug 构建、**290 项**完整 XCTest、Release CLI/GUI、App Bundle 与 ad-hoc 签名校验、ZIP Artifact 上传；不执行真实登录、游戏下载或图形启动。Artifact 仅用于测试，不是公证发行版。
+- **GitHub Actions CI**：Debug 构建、**316 项**完整 XCTest、Release CLI/GUI、App Bundle 与 ad-hoc 签名校验、ZIP Artifact 上传；不执行真实登录、游戏下载或图形启动。Artifact 仅用于测试，不是公证发行版。
 
-详见 [docs/VERIFICATION-M7.2.md](docs/VERIFICATION-M7.2.md)、[docs/VERIFICATION-M7.1.md](docs/VERIFICATION-M7.1.md)、[docs/VERIFICATION-M6.3.md](docs/VERIFICATION-M6.3.md)、[docs/VERIFICATION-M6.2.md](docs/VERIFICATION-M6.2.md)、[docs/VERIFICATION-M6.1.md](docs/VERIFICATION-M6.1.md)、[docs/VERIFICATION-M3-M5.md](docs/VERIFICATION-M3-M5.md) 与 [docs/VERIFICATION-M2.5.md](docs/VERIFICATION-M2.5.md)。调试 GUI 可使用 [docs/DEBUG-AUTOMATION.md](docs/DEBUG-AUTOMATION.md) 的 opt-in 接口。这是一个**开发中**项目，不是已发布产品。
+详见 [docs/VERIFICATION-M8.md](docs/VERIFICATION-M8.md)、[docs/VERIFICATION-M7.3.md](docs/VERIFICATION-M7.3.md)、[docs/VERIFICATION-M7.2.md](docs/VERIFICATION-M7.2.md)、[docs/VERIFICATION-M7.1.md](docs/VERIFICATION-M7.1.md)、[docs/VERIFICATION-M6.3.md](docs/VERIFICATION-M6.3.md)、[docs/VERIFICATION-M6.2.md](docs/VERIFICATION-M6.2.md)、[docs/VERIFICATION-M6.1.md](docs/VERIFICATION-M6.1.md)、[docs/VERIFICATION-M3-M5.md](docs/VERIFICATION-M3-M5.md) 与 [docs/VERIFICATION-M2.5.md](docs/VERIFICATION-M2.5.md)。调试 GUI 可使用 [docs/DEBUG-AUTOMATION.md](docs/DEBUG-AUTOMATION.md) 的 opt-in 接口。这是一个**开发中**项目，不是已发布产品。
 
 ## 设计边界
 
@@ -44,6 +46,8 @@ LingXiMac (SwiftUI)              lingxi (CLI)
    Modpack/MrpackParser · Modpack/MrpackInstaller
    Shader/ShaderPackManager · Shader/GraphicsSetupManager
    Shader/ShaderPackRepository · Shader/IrisConfigurationStore
+   CrashDiagnostics · InstanceCopyService · WorldBackupManager
+   Performance/BenchmarkRunner · Performance/PerformanceTuningEngine
 ```
 
 ## 快速开始
@@ -74,6 +78,31 @@ Xcode 也可构建 SwiftPM scheme：
 ```bash
 xcodebuild -scheme LingXiMac -destination 'platform=macOS' build
 ```
+
+### 实例、世界与诊断（CLI）
+
+```bash
+# 复制实例；--saves 可选，新实例使用新的 ID
+swift run lingxi instance copy m73-fabric --name 'Copied Instance' --saves \
+  --root .dev-sandbox/mc --data-root .dev-sandbox/data
+
+# 世界列表 / 备份 / 恢复 / 删除（备份位于 dataRoot/backups，不写入游戏目录）
+swift run lingxi world list   --instance m73-fabric --root .dev-sandbox/mc --data-root .dev-sandbox/data
+swift run lingxi world backup --instance m73-fabric --world 'New World' \
+  --root .dev-sandbox/mc --data-root .dev-sandbox/data
+swift run lingxi world restore --instance m73-fabric --backup <backup-id> \
+  --root .dev-sandbox/mc --data-root .dev-sandbox/data
+
+# 崩溃诊断与脱敏报告
+swift run lingxi diagnose --instance m73-fabric --root .dev-sandbox/mc --data-root .dev-sandbox/data
+
+# 性能基准（GUI 性能工作台调用同一 Core API）
+swift run lingxi performance benchmark --instance m73-fabric --runs 1 --timeout 90 \
+  --root .dev-sandbox/mc --data-root .dev-sandbox/data
+swift run lingxi performance reports --instance m73-fabric --root .dev-sandbox/mc --data-root .dev-sandbox/data
+```
+
+所有世界恢复都会先检查运行状态与备份校验，再使用 staging/恢复点；游戏运行时拒绝操作。
 
 ### Microsoft 登录（CLI）
 
@@ -190,7 +219,7 @@ Minecraft AppID 已于 **2026-10-26** 通过 Mojang 官方审核并加入 API Al
 - **整合包导入**：实例页「导入整合包」支持 `.mrpack` 文件选择与 Finder 拖放；展示解析结果、Java 与可选客户端文件后，通过 Core 的 `MrpackInstaller` 创建全新实例。支持 Vanilla/Fabric/NeoForge；Forge/Quilt/CurseForge 明确不支持。
 - **图形与光影**：Fabric/NeoForge 实例详情打开「图形与光影」；提供 Iris + Sodium 检测/安装计划、已安装光影、Modrinth 搜索/版本/更新、本地 ZIP 导入、启用/停用和删除。启动器明确显示 macOS OpenGL 4.1 上限与“安装不等于已启用”；实际渲染需进入世界验证。
 - **账户管理**：Microsoft 登录进度、UUID、所有权、真实皮肤/披风纹理与头像裁剪、切换、验证、退出；本地身份只读并明确标注未验证。
-- **运行日志**：LauncherCore 事件、Java stdout/stderr、游戏输出、退出码；搜索、复制、自动滚动、脱敏诊断导出、打开 Minecraft `latest.log`。
+- **运行日志**：LauncherCore 事件、Java stdout/stderr、游戏输出、退出码；搜索、复制、自动滚动、脱敏诊断导出、打开 Minecraft `latest.log`。启动器日志带实例 ID，诊断不会读取其他实例的日志。
 - **设置**：Java 检测/选择、下载源/镜像配置、数据/游戏目录、内嵌认证状态。
 - **安全**：GUI 不执行 CLI；OAuth code、access/refresh token、PKCE verifier 不写入日志；诊断导出脱敏。
 
@@ -207,6 +236,8 @@ GUI 使用 `LaunchService` 启动：`resolve → dependencies → preflight → 
 └── assets/log_configs/<id>
 
 <data-root>/                             # 启动器数据（--data-root；开发期 .dev-sandbox/data）
+├── backups/<instance-id>/<backup-id>/      # 世界备份与 Manifest（独立于游戏目录）
+├── performance/reports/<uuid>.json          # M8 性能报告
 ├── instances/
 │   ├── <instance-id>/instance.json        # 实例元数据（不含嵌套 .minecraft）
 │   ├── <instance-id>/mods.json            # 模组记录/来源/版本/许可证
@@ -261,6 +292,8 @@ value:   refresh token only
 - macOS 只提供 OpenGL 4.1（Metal 转译）；没有 Metal 原生渲染、硬件光追或“RTX”能力。复杂光影在 Apple Silicon 上可能掉帧；启动器只提示，不承诺帧率。
 - 光影“启用”只代表已写入 Iris 配置，是否真正渲染以游戏内为准；测试用的 Complementary r5.9.3 在 Iris 1.7.6 下记录了未识别 custom uniform 警告，未崩溃，但不能据此宣称所有光影包无警告。
 - M7.1 的 GUI 真实启动验证使用 CLI/本地测试身份；没有在 M7.1 阶段重新执行 Microsoft 登录流程。
+- M7.3 世界备份默认为手动；没有自动定时备份策略。恢复操作已在真实 `m73-fabric` 世界验证，但仍建议用户保留独立副本。
+- M8 只记录 CPU/内存和启动阶段；外部启动器无法稳定读取 Minecraft 内部帧时间，因此 FPS/1% low 显示为不可用。单轮/无预热基准不应视为稳定性能结论。
 - Forge/Quilt 和 CurseForge 整合包未实现；NeoForge 仅验证了现代官方 Maven 版本。
 - legacy `virtual` / `map_to_resources` 资产索引（1.6 及更早）只下载对象、不生成 resources 树。
 - 同尺寸但内容损坏的文件不会被 `install` 自动发现，请用 `lingxi verify` 做哈希级校验。

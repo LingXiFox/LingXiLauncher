@@ -42,7 +42,20 @@ Sources/LauncherCore/
 │   └── MicrosoftAuthenticationService.swift # actor 状态机/刷新/登出
 ├── Instance/
 │   ├── InstanceRepository.swift  # 实例创建/加载/列出/切换版本/内存/删除
+│   ├── InstanceRuntimeRegistry.swift # 跨进程运行实例登记/清理
+│   ├── InstanceCopyService.swift  # 新 ID 实例复制、失败清理、可选 saves
+│   ├── WorldBackupManager.swift   # 世界备份 Manifest/SHA-256/恢复点
 │   └── LocalAccountStore.swift   # 本地离线账户（无令牌字段）
+├── CrashDiagnostics/
+│   ├── CrashDiagnosticModels.swift # 诊断类别/证据/报告模型
+│   ├── CrashDiagnosticsService.swift # 实例日志采集 + 确定性规则
+│   └── CrashReportExporter.swift  # Markdown/JSON 脱敏导出
+├── Performance/
+│   ├── PerformanceModels.swift    # 报告/采样/调优/profile 模型
+│   ├── SystemProfiler.swift       # 硬件、进程、CPU/内存采样
+│   ├── MinecraftLogTimeline.swift # 菜单/世界就绪时间线
+│   ├── BenchmarkRunner.swift      # 真实进程基准、有界超时/取消
+│   └── PerformanceTuningEngine.swift # 保守建议、应用/恢复
 ├── Installer/                    # M2
 │   ├── DownloadSource.swift      # official/mirror/auto/local-cache-only + 显式镜像映射
 │   ├── DownloadTransport.swift   # URLSession 实现 + 可注入传输层
@@ -59,7 +72,7 @@ Sources/LauncherCore/
 │   └── InstallationVerifier.swift# 全量哈希校验
 ├── Apps/LingXiMac/               # M5 SwiftUI GUI（直接依赖 LauncherCore）
 │   ├── Info.plist
-│   └── Sources/                  # AppModel + Views（含 GraphicsStore/GraphicsView）
+│   └── Sources/                  # AppModel + Views（含 Graphics/Performance/InstanceTools）
 ├── Scripts/build-app.sh          # SwiftPM → dist/LingXiMac.app（ad-hoc）
 └── Sources/LingXiCLI/            # 薄外壳：argv 解析、Core 调用、退出码映射
 Tests/LauncherCoreTests/
@@ -229,10 +242,12 @@ CI（`.github/workflows/ci.yml`）在 `xcode-27` Apple Silicon Runner 上运行 
 | M7.1 | Iris/Sodium、光影搜索/安装/启用/更新、macOS OpenGL 提示 | ✅ 283 tests；真实 1.20.1 Fabric + Iris 1.7.6 + Sodium 0.5.12 + Complementary r5.9.3 进入世界（见 VERIFICATION-M7.1.md） |
 | M7.1.1 | 图形 pair 事务、运行时写保护、光影替换回滚、统一更新动作 | ✅ 290 tests（见 VERIFICATION-M7.2.md） |
 | M7.2 | NeoForge 安装/Modrinth/mrpack/GUI、官方 installer 安全 | ✅ 真实 1.21.1 + NeoForge 21.1.265 + JEI 主菜单；290 tests（见 VERIFICATION-M7.2.md） |
+| M7.3 | 崩溃诊断、实例复制、世界备份/恢复、运行时保护 | ✅ 316 tests；真实 Fabric 世界/恢复/运行锁定/复制启动与 NeoForge 回归（见 VERIFICATION-M7.3.md） |
+| M8 | 性能采集、报告对比、保守调优、GUI/CLI | ✅ 316 tests；Fabric/NeoForge 真实基准；无游戏内 FPS 时不伪造（见 VERIFICATION-M8.md） |
 
 ## 9. 剩余工作
 
-- **M7.3+**：更多 Minecraft/NeoForge/Iris/Sodium 组合矩阵、真实大型 modpack、光影性能基准、备份策略与发行签名；暂不扩展 Forge/Quilt。
+- **M9+**：更多 Minecraft/NeoForge/Iris/Sodium 组合矩阵、真实大型 modpack、光影帧时间采集、定时备份/保留策略和 Developer ID 签名；暂不扩展 Forge/Quilt/CurseForge。
 - **M5-B**：下载任务历史、更多诊断导出项。
 - 外观：皮肤/披风纹理缓存、Cape 动画与更多皮肤模型细节。
 - 真实大文件 GUI 下载中途取消、Intel Mac 托管 Java、Developer ID 签名/公证。

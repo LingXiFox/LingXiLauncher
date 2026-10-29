@@ -6,19 +6,25 @@ public struct LaunchServiceRequest: Sendable {
     public let javaExecutable: URL
     public let additionalJVMArguments: [String]
     public let features: [String: Bool]
+    /// Optional single-player world used by the automated benchmark. It is not a general
+    /// command-line injection point: the launch builder maps it to the official quick-play
+    /// argument declared by the Minecraft version metadata.
+    public let quickPlayWorld: String?
 
     public init(
         instance: Instance,
         identity: LaunchIdentity,
         javaExecutable: URL,
         additionalJVMArguments: [String] = [],
-        features: [String: Bool] = [:]
+        features: [String: Bool] = [:],
+        quickPlayWorld: String? = nil
     ) {
         self.instance = instance
         self.identity = identity
         self.javaExecutable = javaExecutable
         self.additionalJVMArguments = additionalJVMArguments
         self.features = features
+        self.quickPlayWorld = quickPlayWorld
     }
 }
 
@@ -44,6 +50,7 @@ public actor LaunchService {
     private let runtimeRegistry: InstanceRuntimeRegistry
 
     private var runningGame: RunningGame?
+    private var runningProcessIdentity: ProcessIdentity?
     private var launching = false
 
     public init(
@@ -85,6 +92,12 @@ public actor LaunchService {
         await runningGame?.control.terminate()
     }
 
+    /// The identity of the currently launched process, including its kernel start time. A bare
+    /// PID is never sufficient: macOS may reuse it as soon as the game exits.
+    public func currentProcessIdentity() -> ProcessIdentity? {
+        runningProcessIdentity
+    }
+
     private func run(_ request: LaunchServiceRequest, continuation: AsyncStream<LaunchServiceEvent>.Continuation) async {
         defer {
             finishingLaunch(instanceID: request.instance.id)
@@ -99,9 +112,8 @@ public actor LaunchService {
             let platform = try PlatformContext.forJVM(runtime)
             // Keep the reproducible Java record in instance metadata even when the user
             // launches without reinstalling. A failed record write must not block launch.
-            if let record = try? JavaManager(layout: layout).runtimeRecord(for: runtime) {
-                try? InstanceRepository(layout: layout).setJavaRuntime(id: request.instance.id, record: record)
-            }
+            let record = JavaManager(layout: layout).runtimeRecord(for: runtime)
+            _ = try? InstanceRepository(layout: layout).setJavaRuntime(id: request.instance.id, record: record)
 
             continuation.yield(.phase("Resolving Minecraft \(versionID)"))
             let version = try VersionResolver().resolve(versionID: versionID, from: layout.gameRoot)
@@ -109,13 +121,19 @@ public actor LaunchService {
             continuation.yield(.phase("Resolving libraries and natives"))
             let dependencies = try dependencyResolver.resolve(version: version, layout: layout, platform: platform)
 
-            var jvmArguments = request.additionalJVMArguments
+            var jvmArguments = (request.instance.manifest.jvmArguments ?? []) + request.additionalJVMArguments
+            var seenArguments = Set<String>()
+            jvmArguments = jvmArguments.filter { seenArguments.insert($0).inserted }
             // Memory is a launcher contract, not an optional frontend decoration. Automatic
             // mode still resolves to a concrete -Xmx so the JVM never inherits an unbounded heap.
             if !jvmArguments.contains(where: { $0.hasPrefix("-Xmx") }) {
                 jvmArguments.append(contentsOf: InstanceMemory.jvmArguments(
                     configured: request.instance.manifest.memoryMiB
                 ))
+            }
+            var features = request.features
+            if let world = request.quickPlayWorld, !world.isEmpty {
+                features["is_quick_play_singleplayer"] = true
             }
             let context = LaunchContext(
                 instanceDirectory: request.instance.directory,
@@ -124,7 +142,8 @@ public actor LaunchService {
                 platform: platform,
                 identity: request.identity,
                 additionalJVMArguments: jvmArguments,
-                features: request.features
+                features: features,
+                quickPlaySingleplayer: request.quickPlayWorld
             )
 
             continuation.yield(.phase("Validating launch plan"))
@@ -152,6 +171,7 @@ public actor LaunchService {
             continuation.yield(.phase("Starting Java process"))
             let running = try await processController.start(plan)
             runningGame = running
+            runningProcessIdentity = SystemProfiler.processIdentity(pid: running.processIdentifier)
             try? runtimeRegistry.markRunning(
                 instanceID: request.instance.id,
                 pid: running.processIdentifier,
@@ -162,7 +182,14 @@ public actor LaunchService {
             continuation.yield(.logFile(logURL))
             let logHandle = try? FileHandle(forWritingTo: createLogFile(logURL))
             defer { try? logHandle?.close() }
-            writeLogHeader(logHandle, plan: plan, version: version, identity: request.identity, runtime: runtime)
+            writeLogHeader(
+                logHandle,
+                instance: request.instance,
+                plan: plan,
+                version: version,
+                identity: request.identity,
+                runtime: runtime
+            )
 
             for await event in running.events {
                 switch event {
@@ -196,6 +223,7 @@ public actor LaunchService {
         runtimeRegistry.clear(instanceID: instanceID)
         launching = false
         runningGame = nil
+        runningProcessIdentity = nil
     }
 
     // MARK: - Logging
@@ -219,6 +247,7 @@ public actor LaunchService {
 
     private func writeLogHeader(
         _ handle: FileHandle?,
+        instance: Instance,
         plan: LaunchPlan,
         version: ResolvedVersion,
         identity: LaunchIdentity,
@@ -226,6 +255,9 @@ public actor LaunchService {
     ) {
         var lines = [
             "# LingXi Launcher \(LauncherInfo.version)",
+            "# instance: \(instance.id)",
+            "# instanceName: \(instance.manifest.displayName)",
+            "# gameDirectory: \(instance.gameDirectory.path)",
             "# started: \(ISO8601DateFormatter().string(from: Date()))",
             "# version: \(version.id)",
             "# identity: \(identity.mode.rawValue)",

@@ -36,6 +36,9 @@ public struct InstanceManifest: Codable, Sendable, Equatable {
     public var memoryMiB: Int?
     /// Reproducible Java selection/installation record (version + published checksum).
     public var javaRuntime: JavaRuntimeRecord?
+    /// Instance-specific JVM options written by the performance tuner. Optional so old
+    /// manifests decode unchanged; `-Xmx` is intentionally managed by `memoryMiB` instead.
+    public var jvmArguments: [String]?
 
     public init(
         id: String,
@@ -45,7 +48,8 @@ public struct InstanceManifest: Codable, Sendable, Equatable {
         lastLaunchedAt: Date? = nil,
         lastIdentityMode: IdentityMode? = nil,
         memoryMiB: Int? = nil,
-        javaRuntime: JavaRuntimeRecord? = nil
+        javaRuntime: JavaRuntimeRecord? = nil,
+        jvmArguments: [String]? = nil
     ) {
         self.id = id
         self.displayName = displayName
@@ -55,6 +59,7 @@ public struct InstanceManifest: Codable, Sendable, Equatable {
         self.lastIdentityMode = lastIdentityMode
         self.memoryMiB = memoryMiB
         self.javaRuntime = javaRuntime
+        self.jvmArguments = jvmArguments
     }
 }
 
@@ -158,7 +163,37 @@ public struct InstanceRepository: Sendable {
             lastLaunchedAt: instance.manifest.lastLaunchedAt,
             lastIdentityMode: instance.manifest.lastIdentityMode,
             memoryMiB: instance.manifest.memoryMiB,
-            javaRuntime: instance.manifest.javaRuntime
+            javaRuntime: instance.manifest.javaRuntime,
+            jvmArguments: instance.manifest.jvmArguments
+        )
+        try save(updated, in: instance.directory)
+        instance.manifest = updated
+        return instance
+    }
+
+    /// Atomically replaces the tuner-owned heap/JVM settings while preserving all other fields.
+    @discardableResult
+    public func setPerformance(id: String, heapMiB: Int?, jvmArguments: [String]?) throws -> Instance {
+        if let heapMiB, !(256...65_536).contains(heapMiB) {
+            throw LauncherError(.usageError, "Memory must be between 256 and 65536 MiB")
+        }
+        let unsafe = (jvmArguments ?? []).filter {
+            $0.hasPrefix("-Xmx") || $0.hasPrefix("-Xms") || $0.contains("\n") || $0.contains("\0")
+        }
+        guard unsafe.isEmpty else {
+            throw LauncherError(.usageError, "Unsafe or duplicate heap JVM arguments: \(unsafe.joined(separator: " "))")
+        }
+        var instance = try load(id: id)
+        let updated = InstanceManifest(
+            id: instance.manifest.id,
+            displayName: instance.manifest.displayName,
+            versionID: instance.manifest.versionID,
+            createdAt: instance.manifest.createdAt,
+            lastLaunchedAt: instance.manifest.lastLaunchedAt,
+            lastIdentityMode: instance.manifest.lastIdentityMode,
+            memoryMiB: heapMiB,
+            javaRuntime: instance.manifest.javaRuntime,
+            jvmArguments: jvmArguments
         )
         try save(updated, in: instance.directory)
         instance.manifest = updated

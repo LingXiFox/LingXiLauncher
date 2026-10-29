@@ -190,7 +190,7 @@ public struct FabricInstaller: Sendable {
         let stageID = "fabric-stage-\(UUID().uuidString.prefix(10).lowercased())"
         // Set before calling VanillaInstaller: it may create the staging instance and then fail
         // during a download, in which case the defer must still clean it up.
-        var stageCreated = true
+        let stageCreated = true
         defer {
             if stageCreated { try? registry.delete(id: stageID) }
         }

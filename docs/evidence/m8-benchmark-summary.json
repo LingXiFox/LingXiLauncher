@@ -1,0 +1,42 @@
+{
+  "fpsAvailable": false,
+  "fpsNote": "Minecraft does not expose a stable frame counter to an external launcher process.",
+  "reports": [
+    {
+      "reportID": "ADAD6467-2BF9-40B0-BC5C-46EFACAFC0F6",
+      "instanceID": "m73-fabric",
+      "loader": "Fabric",
+      "minecraftVersion": "1.20.1",
+      "startupSeconds": 5.147598028182983,
+      "totalSeconds": 7.197045087814331,
+      "peakResidentBytes": 968392704,
+      "exitReason": "reached-menu",
+      "hardware": {
+        "modelIdentifier": "Mac17,4",
+        "cpuModel": "Apple M5",
+        "gpuModel": "Apple M5",
+        "logicalCores": 10,
+        "memoryBytes": 34359738368,
+        "operatingSystem": "Version 27.2 (Build 26B123)"
+      }
+    },
+    {
+      "reportID": "3F09D652-B5D6-406D-82A9-22142ECEC995",
+      "instanceID": "m8-neoforge",
+      "loader": "NeoForge",
+      "minecraftVersion": "1.21.1",
+      "startupSeconds": 4.0,
+      "totalSeconds": 8.60433804988861,
+      "peakResidentBytes": 1184399360,
+      "exitReason": "reached-menu",
+      "hardware": {
+        "modelIdentifier": "Mac17,4",
+        "cpuModel": "Apple M5",
+        "gpuModel": "Apple M5",
+        "logicalCores": 10,
+        "memoryBytes": 34359738368,
+        "operatingSystem": "Version 27.2 (Build 26B123)"
+      }
+    }
+  ]
+}
