@@ -210,7 +210,6 @@ public struct MrpackInstaller: Sendable {
             let instance = try InstanceRepository(layout: layout).load(id: oneStopReport.instanceID)
             let committed = try commitStage(stageRoot: stageRoot, to: instance)
             let javaRuntime = try JavaRuntimeInspector().inspect(executable: request.javaExecutable)
-            createdInstance = false
             try Task.checkCancellation()
 
             var trace = MrpackSourceTraceSummary.empty
@@ -242,6 +241,7 @@ public struct MrpackInstaller: Sendable {
             // Success ends the package's lifetime. Failure/cancellation deliberately keeps the
             // extraction root so the same validated package can be retried by the caller.
             try? fm.removeItem(at: package.extractionRoot)
+            createdInstance = false
             return MrpackInstallReport(
                 instanceID: oneStopReport.instanceID,
                 displayName: displayName,
