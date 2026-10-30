@@ -244,6 +244,8 @@ public struct ModrinthFile: Decodable, Sendable, Equatable {
 
     public var isJar: Bool { filename.lowercased().hasSuffix(".jar") }
     public var isZip: Bool { filename.lowercased().hasSuffix(".zip") }
+    public var isMrpack: Bool { filename.lowercased().hasSuffix(".mrpack") }
+    public var isModpackArchive: Bool { isMrpack || isZip }
     public var downloadURL: URL? { URL(string: url) }
 }
 
@@ -309,6 +311,11 @@ public struct ModrinthVersion: Decodable, Sendable, Equatable, Identifiable {
     public var primaryJar: ModrinthFile? {
         let jars = files.filter(\.isJar)
         return jars.first(where: \.primary) ?? jars.first
+    }
+
+    public var primaryArchive: ModrinthFile? {
+        let archives = files.filter(\.isModpackArchive)
+        return archives.first(where: \.primary) ?? archives.first
     }
 
     public var primaryZip: ModrinthFile? {

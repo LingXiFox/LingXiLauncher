@@ -294,7 +294,9 @@ value:   refresh token only
 - 实例复制保留 `resourcepacks.json`，与 `mods.json`、`shaderpacks.json`、`modpack.json` 一并复制。
 - 资源包删除改为可回滚事务，并同步清理受支持版本的 `options.txt` 启用项。
 - 整合包记录区分 `.mrpack` 内部版本 ID 与 Modrinth API 项目/版本 ID；旧记录不会被猜测为 Modrinth 版本。
-- 当前限制：整合包更新事务和真实 `.mrpack` 内容差异仍未实现，详见 [M8.2 验证记录](docs/VERIFICATION-M8.2.md)。
+- `ModpackUpdateManager` 下载并校验目标 `.mrpack`，按真实内部文件/overrides 生成差异，保留本地修改与未知文件，提交失败自动恢复。
+- 资源包更新支持跨文件名迁移、实例级 `flock` 和失败恢复；GUI/CLI 均可预览并确认更新。
+- 真实 Modrinth 整合包 5.4.0 → 5.3.3 更新已应用并启动到标题界面；需要切换 Fabric Loader 的 5.4.1 会明确阻止并建议新建兼容实例。详见 [M8.2 验证记录](docs/VERIFICATION-M8.2.md)。
 
 ## 当前限制（诚实清单）
 

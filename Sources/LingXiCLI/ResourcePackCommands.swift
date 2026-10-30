@@ -161,9 +161,8 @@ extension CLI {
         if updates.isEmpty { print("No updates"); return 0 }
         for update in updates {
             print("\(update.current.title): \(update.current.versionNumber ?? "?") → \(update.version.versionNumber)")
-            if input.has("install"), let file = update.version.primaryZip {
-                _ = try await manager.install(instanceID: instanceID, projectID: update.version.projectID, versionID: update.version.id, allowReplace: true)
-                print("  installed \(file.filename)")
+            if input.has("install"), update.version.primaryZip != nil, let projectID = update.current.projectID {
+                _ = try await manager.update(instanceID: instanceID, projectID: projectID, versionID: update.version.id)
             }
         }
         return 0

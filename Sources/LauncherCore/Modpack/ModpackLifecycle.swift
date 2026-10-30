@@ -62,7 +62,7 @@ public struct ModpackRecord: Codable, Sendable, Equatable {
 }
 
 public struct ModpackFileChange: Sendable, Equatable {
-    public enum Kind: String, Sendable { case added, upgraded, removed }
+    public enum Kind: String, Sendable { case added, upgraded, removed, unchanged, userModified, conflict }
     public let kind: Kind
     public let path: String
     public let oldHash: String?

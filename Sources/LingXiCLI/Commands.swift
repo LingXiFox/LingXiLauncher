@@ -100,6 +100,8 @@ enum CLI {
             return try await runModCommand(rest)
         case "mrpack":
             return try await runMrpackCommand(rest)
+        case "modpack":
+            return try await runModpackCommand(rest)
         case "graphics":
             return try await runGraphicsCommand(rest)
         case "shader":

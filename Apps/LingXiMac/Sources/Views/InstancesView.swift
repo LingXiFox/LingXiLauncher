@@ -58,6 +58,10 @@ struct InstancesView: View {
         .sheet(item: $model.showResourcePacksForInstance) { instance in
             ResourcePacksView(instance: instance, manager: model.makeResourcePackManager())
         }
+        .sheet(item: $model.showModpackUpdateForInstance) { instance in
+            ModpackUpdateView(instance: instance, manager: model.makeModpackUpdateManager())
+                .environment(\.lxTheme, theme)
+        }
         .sheet(item: $model.showGraphicsForInstance) { instance in
             GraphicsView(instance: instance, model: model)
                 .environmentObject(model)
@@ -557,6 +561,9 @@ private struct InstanceDetailPane: View {
             }
             LXButton("性能工作台", systemImage: "gauge.with.dots.needle.50percent", kind: .secondary) {
                 model.openPerformance(instance: instance)
+            }
+            LXButton("整合包更新", systemImage: "shippingbox.and.arrow.backward", kind: .secondary) {
+                model.openModpackUpdate(instance: instance)
             }
             LXButton("实例管理", systemImage: "wrench.and.screwdriver", kind: .secondary) {
                 model.openInstanceTools(instance)

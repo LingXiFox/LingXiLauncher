@@ -157,6 +157,7 @@ final class AppModel: ObservableObject {
     @Published var showModsForInstance: Instance?
     @Published var showGraphicsForInstance: Instance?
     @Published var showResourcePacksForInstance: Instance?
+    @Published var showModpackUpdateForInstance: Instance?
     @Published var showPerformanceForInstance: Instance?
     @Published var showMrpackImport = false
     @Published var mrpackImportURL: URL?
@@ -352,6 +353,12 @@ final class AppModel: ObservableObject {
 
     func openResourcePacks(instance: Instance) {
         showResourcePacksForInstance = instance
+    }
+
+    func openModpackUpdate(instance: Instance) {
+        section = .instances
+        selectedInstanceID = instance.id
+        showModpackUpdateForInstance = instance
     }
 
     func openGraphics(instance: Instance) {
@@ -819,6 +826,10 @@ final class AppModel: ObservableObject {
 
     func makeGraphicsSetupManager() -> GraphicsSetupManager {
         GraphicsSetupManager(layout: layout, transport: URLSessionTransport())
+    }
+
+    func makeModpackUpdateManager() -> ModpackUpdateManager {
+        ModpackUpdateManager(layout: layout)
     }
 
     func makeResourcePackManager() -> ResourcePackManager {

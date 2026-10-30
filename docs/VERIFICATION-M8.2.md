@@ -2,55 +2,61 @@
 
 ## 状态
 
-本记录只报告实际完成的内容。**整合包更新事务、真实 `.mrpack` 内容差异、GUI 更新页和真实 Minecraft 更新验证尚未完成**，不能标记为 M8.2 完成。
+M8.2 的资源包事务、真实 `.mrpack` 内部差异、更新事务、GUI/CLI 和自动化测试已经实现，并完成真实 Modrinth 整合包更新与启动验证。
 
 ## 自动化测试
 
 ```text
-swift test
-Executed 323 tests, with 0 failures (0 unexpected)
+swift test --parallel --num-workers 4
+Executed 327 tests, with 0 failures (0 unexpected)
 ```
+
+Debug `LauncherCore`、CLI、SwiftUI GUI 均构建通过。
 
 ## 已完成
 
 ### 实例复制
 
-- `InstanceCopyService` 新增复制 `<instance>/resourcepacks.json`。
-- `mods.json`、`shaderpacks.json`、`resourcepacks.json`、`modpack.json` 均从实例元数据目录复制。
-- 复制测试增加资源包元数据逐字节断言。
-- 启用/禁用模组、光影 ZIP、资源包 ZIP、可选 `saves/` 仍保持隔离。
-- 不复制全局 `libraries/`、`assets/` 或下载缓存。
+- 复制 `<instance>/resourcepacks.json`，同时保留 `mods.json`、`shaderpacks.json`、`modpack.json`。
+- 不复制全局 libraries/assets；失败只清理新实例。
 
-### 资源包删除事务
+### 资源包生命周期
 
-- 删除前将 managed ZIP 移动到同目录事务备份。
-- 删除时同步从受支持版本的 `options.txt` 移除 `file/<name>`。
-- 元数据写入失败时恢复 ZIP、`options.txt` 和旧元数据。
-- 运行中仍通过 `InstanceRuntimeRegistry` 拒绝操作。
-- 未管理文件不会被删除。
+- 删除为可回滚事务，并同步清理受支持版本的 `options.txt` 启用项。
+- 更新支持跨文件名：下载并校验新 ZIP 后，删除旧 ZIP、迁移启用状态、写元数据；失败恢复 ZIP、`options.txt` 和元数据。
+- 同一实例使用 `flock` 串行化资源包写操作。
+- 未管理文件/其他项目文件不会被覆盖。
 
-### 整合包版本身份
+### 整合包身份与更新
 
-- `ModpackRecord` 新增 `packVersionID`、`modrinthProjectID`、`modrinthVersionID`。
-- 旧 `versionID` 只作为 `.mrpack` 内部 `versionId` 读取，不再当成 Modrinth API 版本 ID。
-- 旧 `modpack.json` 无新字段时可解码；`checkUpdate` 对缺少可信 Modrinth 版本 ID 的记录返回明确错误。
-- 手动关联项目只写项目 ID，不推断当前 Modrinth 版本。
-- 新增旧数据迁移与“不猜测版本”测试。
+- `ModpackRecord` 区分 `.mrpack` 内部 `packVersionID` 与 Modrinth `modrinthProjectID`/`modrinthVersionID`；旧记录不猜测 Modrinth 版本。
+- `ModpackUpdateManager` 执行：目标版本查询 → `.mrpack` 下载/大小/SHA-512 或 SHA-1 校验 → `MrpackParser` 解析 → 内部文件/overrides 差异 → 下载/校验目标文件 → 事务备份 → 应用 → 记录写入 → 完整性验证 → 清理事务。
+- 用户修改与未知文件默认保留；冲突可显式替换/跳过。
+- 进程中断留下 `state.json`，`recover` 可恢复；成功/失败后清理事务目录。
+- CLI：`modpack info|update check|preview|apply|recover`。
+- GUI：实例行“更新整合包”打开差异预览，支持保留/替换/跳过、确认应用和恢复未完成事务。
 
-## 未完成
+## 真实验证
 
-- 目标 `.mrpack` 下载、哈希/大小校验、`MrpackParser` 解析与真实内部文件差异。
-- `ModpackUpdateManager` 的 preflight/download/stage/snapshot/commit/rollback/validate 事务。
-- 用户修改检测、冲突策略、更新恢复目录和未完成事务恢复。
-- GUI 更新差异预览与执行；CLI 更新预览/确认/恢复。
-- 真实 Modrinth 资源包进入游戏、真实实例复制启动、真实 `.mrpack` 更新与故障注入。
-- 资源包跨文件名更新仍会保留旧文件；当前 `allowReplace` 只处理同名替换。
+- 在独立 `.dev-sandbox` 安装 Fabulously Optimized 5.4.0（Fabric 1.20.1，78 个文件，48 个 Modrinth 来源）。
+- 目标 5.3.3 预览 26 项变化，实际应用：18 个文件更新、8 个移除。
+- 更新后 `modpack.json` 记录 `packVersionID=5.3.3`、`modrinthVersionID=yP9fYMLA`，事务目录已清理。
+- 使用 Microsoft Java 17 启动更新后的实例，成功到标题界面：Fabulously Optimized 5.3.3，45 个模组。
+- 截图：[游戏标题](evidence/m82-real-update-title.png)、[GUI 更新预览/Loader 阻止](evidence/m82-gui-update-loader-block.png)。
+- 5.4.1 需要 Fabric Loader 0.14.22 → 0.14.23；当前更新事务拒绝自动切换运行环境，并显示“请先创建兼容实例”，这是有意的安全边界。
+
+## 未完成/未验证
+
+- Loader 版本切换型整合包更新（当前要求新建实例）。
+- 真实资源包进入游戏后的视觉验证。
+- 更新中途进程崩溃的真实恢复演练；当前由合成事务状态测试覆盖。
+- 实例复制后的真实启动验证。
 
 ## 风险
 
-- 资源包更新跨文件名时未完成迁移，可能残留旧 ZIP 和旧启用记录。
-- 无实例级资源包更新锁；并发更新仍可能竞争。
-- 世界备份和实例复制只有合成测试，没有 M8.2 真实运行证据。
+- 真实交叉验证使用的是 5.4.0 → 5.3.3 显式目标更新；推荐更新到 5.4.1 会因 Loader 变更被安全阻止。
+- 更新事务依赖实例目录可写和足够磁盘；预检按目标下载量估算两倍空间。
+- 只支持同一实例的 Loader/Minecraft 版本内更新；需要切换运行时拒绝并要求新实例。
 
 ## 构建
 
@@ -62,9 +68,6 @@ swift build -c release --product LingXiMac
 Scripts/build-app.sh --release
 ```
 
-均通过；ARM64 App Bundle 与 ad-hoc 签名有效。
+## CI
 
-## GitHub Actions
-
-- [CI #41002223613](https://github.com/LingXiFox/LingXiLauncher/actions/runs/41002223613)（commit `cb70604`）— success。
-- 测试：323 tests，0 failures；App Bundle 和 ad-hoc 签名通过。
+提交后补充实际 GitHub Actions 运行链接与 artifact 结果。

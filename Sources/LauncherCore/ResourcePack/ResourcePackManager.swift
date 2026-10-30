@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(Darwin)
+import Darwin
+#endif
 
 public struct ResourcePackRecord: Codable, Sendable, Equatable, Identifiable {
     public let fileName: String
@@ -69,6 +72,30 @@ public struct ResourcePackRecord: Codable, Sendable, Equatable, Identifiable {
 public struct ResourcePackUpdate: Sendable, Equatable {
     public let current: ResourcePackRecord
     public let version: ModrinthVersion
+}
+
+private final class ResourcePackProcessLock {
+    private let descriptor: Int32
+
+    init(layout: GameDataLayout, instanceID: String) throws {
+        let directory = layout.dataRoot.appendingPathComponent("locks", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let safe = instanceID.replacingOccurrences(of: "/", with: "_")
+        let path = directory.appendingPathComponent("resourcepack-\(safe).lock").path
+        descriptor = open(path, O_CREAT | O_RDWR, 0o600)
+        guard descriptor >= 0 else {
+            throw LauncherError(.ioFailure, "Cannot open resource pack lock")
+        }
+        guard flock(descriptor, LOCK_EX | LOCK_NB) == 0 else {
+            close(descriptor)
+            throw LauncherError(.ioFailure, "Another launcher is updating resource packs for this instance")
+        }
+    }
+
+    deinit {
+        _ = flock(descriptor, LOCK_UN)
+        close(descriptor)
+    }
 }
 
 public struct ResourcePackManager: Sendable {
@@ -222,6 +249,8 @@ public struct ResourcePackManager: Sendable {
     }
 
     public func delete(instanceID: String, fileName: String) throws {
+        let lock = try ResourcePackProcessLock(layout: layout, instanceID: instanceID)
+        _ = lock
         let instance = try loadInstance(instanceID)
         try ensureNotRunning(instanceID)
         let component = try safeFileName(fileName)
@@ -278,6 +307,8 @@ public struct ResourcePackManager: Sendable {
     }
 
     public func setEnabled(instanceID: String, fileName: String, enabled: Bool) throws {
+        let lock = try ResourcePackProcessLock(layout: layout, instanceID: instanceID)
+        _ = lock
         let instance = try loadInstance(instanceID)
         try ensureNotRunning(instanceID)
         let game = try gameVersion(for: instance)
@@ -312,12 +343,129 @@ public struct ResourcePackManager: Sendable {
         }
     }
 
+    @discardableResult
+    public func update(
+        instanceID: String,
+        projectID: String,
+        versionID: String
+    ) async throws -> ResourcePackRecord {
+        let instance = try loadInstance(instanceID)
+        try ensureNotRunning(instanceID)
+        let records = try list(instanceID: instanceID)
+        guard let existing = records.first(where: { $0.projectID == projectID }) else {
+            throw LauncherError(.missingDependency, "No managed resource pack from this project is installed")
+        }
+        guard versionID != existing.versionID else { return existing }
+        let version = try await client.version(id: versionID)
+        let game = try gameVersion(for: instance)
+        guard version.projectID == projectID,
+              version.gameVersions.contains(game),
+              version.status.map({ $0 == "listed" }) ?? true,
+              let file = version.primaryZip,
+              let url = file.downloadURL else {
+            throw LauncherError(.usageError, "Resource pack version is not compatible with this instance")
+        }
+        try validateRemoteURL(url)
+        let record = ResourcePackRecord(
+            fileName: try safeFileName(file.filename),
+            projectID: projectID,
+            versionID: version.id,
+            versionNumber: version.versionNumber,
+            versionType: version.versionType.rawValue,
+            title: existing.title,
+            source: "modrinth",
+            sha1: file.hashes.sha1,
+            sha512: file.hashes.sha512,
+            byteCount: file.size,
+            enabled: existing.enabled
+        )
+        let temporary = try temporaryDirectory()
+        defer { try? fm.removeItem(at: temporary) }
+        let staged = temporary.appendingPathComponent(record.fileName)
+        try await transport.download(from: url, to: staged)
+        let size = (try? staged.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+        guard size == file.size else {
+            throw LauncherError(.hashMismatch, "Resource pack size does not match Modrinth metadata")
+        }
+        if let expected = file.hashes.sha512, !expected.isEmpty {
+            guard try SHA512Digest.hexDigest(ofFileAt: staged).caseInsensitiveCompare(expected) == .orderedSame else {
+                throw LauncherError(.hashMismatch, "Resource pack SHA-512 does not match Modrinth metadata")
+            }
+        } else if let expected = file.hashes.sha1, !expected.isEmpty {
+            guard try SHA1.hexDigest(ofFileAt: staged).caseInsensitiveCompare(expected) == .orderedSame else {
+                throw LauncherError(.hashMismatch, "Resource pack SHA-1 does not match Modrinth metadata")
+            }
+        } else {
+            throw LauncherError(.invalidMetadata, "Modrinth resource pack has no verifiable hash")
+        }
+        try ResourcePackArchiveValidator.validate(archive: staged)
+        return try commitReplacement(record: record, staged: staged, replacing: existing, instance: instance)
+    }
+
+    private func commitReplacement(
+        record: ResourcePackRecord,
+        staged: URL,
+        replacing old: ResourcePackRecord,
+        instance: Instance
+    ) throws -> ResourcePackRecord {
+        let lock = try ResourcePackProcessLock(layout: layout, instanceID: instance.id)
+        _ = lock
+        try ensureNotRunning(instance.id)
+        let directory = instance.gameDirectory.appendingPathComponent("resourcepacks", isDirectory: true)
+        try fm.createDirectory(at: directory, withIntermediateDirectories: true)
+        let oldTarget = directory.appendingPathComponent(old.fileName, isDirectory: false)
+        let newTarget = directory.appendingPathComponent(record.fileName, isDirectory: false)
+        var records = try list(instanceID: instance.id)
+        guard records.contains(where: { $0.fileName == old.fileName }) else {
+            throw LauncherError(.missingDependency, "Resource pack ownership changed during update")
+        }
+        if newTarget != oldTarget, fm.fileExists(atPath: newTarget.path) {
+            throw LauncherError(.usageError, "The new resource pack file name is already in use")
+        }
+        let options = instance.gameDirectory.appendingPathComponent("options.txt", isDirectory: false)
+        let oldOptions = try? Data(contentsOf: options)
+        let oldMetadata = try Data(contentsOf: metadataURL(instance))
+        let backup = directory.appendingPathComponent(".lingxi-update-\(UUID().uuidString)", isDirectory: false)
+        let hadOldTarget = fm.fileExists(atPath: oldTarget.path)
+        if hadOldTarget { try fm.copyItem(at: oldTarget, to: backup) }
+        do {
+            if hadOldTarget { try fm.removeItem(at: oldTarget) }
+            if fm.fileExists(atPath: newTarget.path) { try fm.removeItem(at: newTarget) }
+            try fm.moveItem(at: staged, to: newTarget)
+            records.removeAll { $0.fileName == old.fileName }
+            var updated = record
+            updated.enabled = old.enabled
+            records.append(updated)
+            if let oldOptions,
+               ResourcePackOptions.supportedVersions.contains(try gameVersion(for: instance)) {
+                var migrated = try ResourcePackOptions.set(data: oldOptions, fileName: old.fileName, enabled: false)
+                migrated = try ResourcePackOptions.set(data: migrated, fileName: record.fileName, enabled: old.enabled)
+                try migrated.write(to: options, options: [.atomic])
+                guard try ResourcePackOptions.isEnabled(data: Data(contentsOf: options), fileName: record.fileName) == old.enabled else {
+                    throw LauncherError(.ioFailure, "Resource pack options migration failed verification")
+                }
+            }
+            try writeMetadata(records, instance: instance)
+            try? fm.removeItem(at: backup)
+            return updated
+        } catch {
+            if fm.fileExists(atPath: newTarget.path) { try? fm.removeItem(at: newTarget) }
+            if hadOldTarget, fm.fileExists(atPath: backup.path) { try? fm.moveItem(at: backup, to: oldTarget) }
+            try? oldMetadata.write(to: metadataURL(instance), options: [.atomic])
+            if let oldOptions { try? oldOptions.write(to: options, options: [.atomic]) }
+            throw (error as? LauncherError) ?? LauncherError(.ioFailure, "Cannot update resource pack: \(error.localizedDescription)")
+        }
+    }
+
     private func commit(
         record: ResourcePackRecord,
         staged: URL,
         instance: Instance,
         allowReplace: Bool
     ) throws -> ResourcePackRecord {
+        let lock = try ResourcePackProcessLock(layout: layout, instanceID: instance.id)
+        _ = lock
+        try ensureNotRunning(instance.id)
         let directory = instance.gameDirectory.appendingPathComponent("resourcepacks", isDirectory: true)
         try fm.createDirectory(at: directory, withIntermediateDirectories: true)
         let target = directory.appendingPathComponent(record.fileName, isDirectory: false)
