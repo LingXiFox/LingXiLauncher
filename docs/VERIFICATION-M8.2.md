@@ -70,4 +70,7 @@ Scripts/build-app.sh --release
 
 ## CI
 
-提交后补充实际 GitHub Actions 运行链接与 artifact 结果。
+- 运行：[CI #41006645747](https://github.com/LingXiFox/LingXiLauncher/actions/runs/41006645747)，commit `cb3ed4f`，`xcode-27` Apple Silicon Runner — **success**。
+- Debug 构建、完整测试、Release CLI/GUI、App Bundle、签名检查和 Artifact 上传均通过。
+- 测试：327，0 failures，0 unexpected。
+- Artifact：`LingXiMac-ci-cb3ed4fb484d4a434e2e21554795c3ea6714d541`（4,590,851 bytes，CI-only/ad-hoc，非正式发行）。
