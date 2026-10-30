@@ -162,7 +162,7 @@ public struct InstanceCopyService: Sendable {
                     copied.append(name)
                 }
             }
-            for name in ["mods.json", "shaderpacks.json", "modpack.json"] {
+            for name in ["mods.json", "shaderpacks.json", "resourcepacks.json", "modpack.json"] {
                 let from = source.directory.appendingPathComponent(name, isDirectory: false)
                 let to = created.directory.appendingPathComponent(name, isDirectory: false)
                 if FileManager.default.fileExists(atPath: from.path) {

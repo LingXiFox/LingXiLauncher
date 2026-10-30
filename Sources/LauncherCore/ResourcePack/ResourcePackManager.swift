@@ -231,9 +231,28 @@ public struct ResourcePackManager: Sendable {
         }
         let target = instance.gameDirectory.appendingPathComponent("resourcepacks", isDirectory: true)
             .appendingPathComponent(component, isDirectory: false)
-        if fm.fileExists(atPath: target.path) { try fm.removeItem(at: target) }
+        let options = instance.gameDirectory.appendingPathComponent("options.txt", isDirectory: false)
+        let oldOptions = try? Data(contentsOf: options)
+        let backup = target.appendingPathExtension("lingxi-delete-\(UUID().uuidString)")
+        let hadTarget = fm.fileExists(atPath: target.path)
+        if hadTarget { try fm.moveItem(at: target, to: backup) }
         records.remove(at: index)
-        try writeMetadata(records, instance: instance)
+        do {
+            if let oldOptions, try gameVersion(for: instance).isEmpty == false,
+               ResourcePackOptions.supportedVersions.contains(try gameVersion(for: instance)) {
+                let updated = try ResourcePackOptions.set(data: oldOptions, fileName: component, enabled: false)
+                try updated.write(to: options, options: [.atomic])
+            }
+            try writeMetadata(records, instance: instance)
+            if hadTarget { try? fm.removeItem(at: backup) }
+        } catch {
+            if hadTarget, fm.fileExists(atPath: backup.path) {
+                try? fm.removeItem(at: target)
+                try? fm.moveItem(at: backup, to: target)
+            }
+            if let oldOptions { try? oldOptions.write(to: options, options: [.atomic]) }
+            throw (error as? LauncherError) ?? LauncherError(.ioFailure, "Cannot delete resource pack: \(error.localizedDescription)")
+        }
     }
 
     public func setUpdates(instanceID: String) async throws -> [ResourcePackUpdate] {

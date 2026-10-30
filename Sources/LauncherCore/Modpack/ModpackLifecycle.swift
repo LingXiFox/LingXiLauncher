@@ -21,7 +21,11 @@ public struct ModpackFileRecord: Codable, Sendable, Equatable {
 public struct ModpackRecord: Codable, Sendable, Equatable {
     public var schemaVersion: Int
     public var projectID: String?
+    /// `.mrpack` internal `versionId`; not a Modrinth API version id.
     public var versionID: String
+    public var packVersionID: String?
+    public var modrinthProjectID: String?
+    public var modrinthVersionID: String?
     public var minecraftVersion: String
     public var loaderKind: String
     public var loaderVersion: String?
@@ -33,6 +37,9 @@ public struct ModpackRecord: Codable, Sendable, Equatable {
         schemaVersion: Int = 1,
         projectID: String? = nil,
         versionID: String,
+        packVersionID: String? = nil,
+        modrinthProjectID: String? = nil,
+        modrinthVersionID: String? = nil,
         minecraftVersion: String,
         loaderKind: String,
         loaderVersion: String?,
@@ -42,6 +49,9 @@ public struct ModpackRecord: Codable, Sendable, Equatable {
         self.schemaVersion = schemaVersion
         self.projectID = projectID
         self.versionID = versionID
+        self.packVersionID = packVersionID ?? versionID
+        self.modrinthProjectID = modrinthProjectID
+        self.modrinthVersionID = modrinthVersionID
         self.minecraftVersion = minecraftVersion
         self.loaderKind = loaderKind
         self.loaderVersion = loaderVersion
@@ -96,7 +106,10 @@ public struct ModpackLifecycleManager: Sendable {
         guard !projectID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw LauncherError(.usageError, "Project id must not be empty")
         }
+        // Linking a project does not prove which Modrinth version the installed pack came from.
         value.projectID = projectID
+        value.modrinthProjectID = projectID
+        value.modrinthVersionID = nil
         try write(value, instanceID: instanceID)
     }
 
@@ -106,15 +119,18 @@ public struct ModpackLifecycleManager: Sendable {
 
     public func checkUpdate(instanceID: String) async throws -> ModrinthVersion? {
         let value = try record(instanceID: instanceID)
-        guard let projectID = value.projectID else {
+        guard let projectID = value.modrinthProjectID ?? value.projectID else {
             throw LauncherError(.missingDependency, "Pack source is unknown; refusing to guess a Modrinth project")
+        }
+        guard let currentVersionID = value.modrinthVersionID else {
+            throw LauncherError(.missingDependency, "Pack does not have a trusted Modrinth version id; update check is unavailable")
         }
         let versions = try await client.versions(
             projectID: projectID,
             gameVersion: value.minecraftVersion,
             loader: value.loaderKind
         )
-        guard let current = versions.first(where: { $0.id == value.versionID }) else { return nil }
+        guard let current = versions.first(where: { $0.id == currentVersionID }) else { return nil }
         return ModrinthUpdatePolicy.selectUpdate(current: current, from: versions, file: { $0.files.first })
     }
 

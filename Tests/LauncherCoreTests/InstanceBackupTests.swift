@@ -39,6 +39,9 @@ final class InstanceBackupTests: XCTestCase {
         try write("shaderpacks.json", """
         [{"fileName":"pack.zip","projectID":"S1","versionID":"SV1","versionNumber":"1.0.0","title":"Shader","source":"modrinth","sha1":"s1","sha512":"s2","enabled":false}]
         """, in: source.directory)
+        try write("resourcepacks.json", """
+        [{"fileName":"resource.zip","projectID":"R1","versionID":"RV1","versionNumber":"2.0.0","title":"Resource","source":"modrinth","sha1":"r1","sha512":"r2","enabled":true}]
+        """, in: source.directory)
 
         let report = try InstanceCopyService(layout: layout).copy(
             instanceID: source.id,
@@ -53,6 +56,7 @@ final class InstanceBackupTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: report.instance.gameDirectory.appendingPathComponent("saves/World/level.dat")), Data("level".utf8))
         XCTAssertEqual(try Data(contentsOf: report.instance.directory.appendingPathComponent("mods.json")), try Data(contentsOf: source.directory.appendingPathComponent("mods.json")))
         XCTAssertEqual(try Data(contentsOf: report.instance.directory.appendingPathComponent("shaderpacks.json")), try Data(contentsOf: source.directory.appendingPathComponent("shaderpacks.json")))
+        XCTAssertEqual(try Data(contentsOf: report.instance.directory.appendingPathComponent("resourcepacks.json")), try Data(contentsOf: source.directory.appendingPathComponent("resourcepacks.json")))
         XCTAssertEqual(try repository.load(id: source.id).manifest.displayName, "Source")
     }
 
@@ -127,6 +131,24 @@ final class InstanceBackupTests: XCTestCase {
         do {
             _ = try await manager.checkUpdate(instanceID: instance.id)
             XCTFail("must not guess a project")
+        } catch let error as LauncherError {
+            XCTAssertEqual(error.code, .missingDependency)
+        }
+    }
+
+    func testLegacyModpackVersionIsNotTreatedAsModrinthVersionID() async throws {
+        let instance = try makeInstance()
+        let legacy = """
+        {"schemaVersion":1,"versionID":"pack-internal-1","minecraftVersion":"1.20.1","loaderKind":"fabric","loaderVersion":"0.20.1","archiveSHA256":"abc","installedAt":"2026-01-01T00:00:00Z","files":[]}
+        """
+        try Data(legacy.utf8).write(to: instance.directory.appendingPathComponent("modpack.json"))
+        let manager = ModpackLifecycleManager(layout: layout)
+        let record = try manager.record(instanceID: instance.id)
+        XCTAssertEqual(record.versionID, "pack-internal-1")
+        XCTAssertNil(record.modrinthVersionID)
+        do {
+            _ = try await manager.checkUpdate(instanceID: instance.id)
+            XCTFail("legacy pack version must not be used as a Modrinth version id")
         } catch let error as LauncherError {
             XCTAssertEqual(error.code, .missingDependency)
         }

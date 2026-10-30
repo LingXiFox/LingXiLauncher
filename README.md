@@ -289,6 +289,13 @@ value:   refresh token only
 - 整合包来源写入 `modpack.json`；不会根据名称猜测 Modrinth 项目。
 - 当前限制：整合包更新事务和真实资源包进游戏验证尚未完成，详见 [M8.1 验证记录](docs/VERIFICATION-M8.1.md)。
 
+### M8.2 数据安全修复
+
+- 实例复制保留 `resourcepacks.json`，与 `mods.json`、`shaderpacks.json`、`modpack.json` 一并复制。
+- 资源包删除改为可回滚事务，并同步清理受支持版本的 `options.txt` 启用项。
+- 整合包记录区分 `.mrpack` 内部版本 ID 与 Modrinth API 项目/版本 ID；旧记录不会被猜测为 Modrinth 版本。
+- 当前限制：整合包更新事务和真实 `.mrpack` 内容差异仍未实现，详见 [M8.2 验证记录](docs/VERIFICATION-M8.2.md)。
+
 ## 当前限制（诚实清单）
 
 - M3 真实登录已验证；但本次使用浏览器已有 Microsoft 会话（SSO），未在全新浏览器 profile 下重走密码 + 首次 consent。
