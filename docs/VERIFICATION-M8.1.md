@@ -67,6 +67,13 @@ Executed 322 tests, with 0 failures (0 unexpected)
 - `ModpackLifecycleManager` 支持来源关联、更新版本查询、差异预览结构和用户修改标记。
 - **未实现**：整合包更新执行事务、GUI 更新差异页面、真实 `.mrpack` 更新验证。
 
+## GitHub Actions 实跑
+
+- 运行：[CI #40981813313](https://github.com/LingXiFox/LingXiLauncher/actions/runs/40981813313)（commit `3613d2a`）— **success**。
+- 日志：`Executed 322 tests, with 0 failures (0 unexpected)`；XCTest skip 0。
+- Debug/Release、App Bundle、Info.plist、arm64 与 `Signature=adhoc` 均通过。
+- 产物：`LingXiMac-ci-3613d2a...zip`，仅供 CI 测试，不是公证发行版。
+
 ## 构建与签名
 
 ```text
