@@ -63,3 +63,10 @@ Executed 316 tests, with 0 failures (0 unexpected)
 - 世界备份默认手动，不自动在每次启动时生成；没有定时清理策略。
 - 自动修复入口只展示安全建议；删除模组、覆盖配置或修改世界仍需用户明确确认（当前不自动执行）。
 - 帧率无法由外部启动器稳定读取，性能工作台不会用 CPU 占用伪造 FPS。
+
+## CI 与提交
+
+- Commit：`3683638 feat: add crash diagnostics, world backups and performance workbench`
+- CI：[run 40976695758](https://github.com/LingXiFox/LingXiLauncher/actions/runs/40976695758) — success（`xcode-27` Apple Silicon）。
+- 日志：316 tests / 0 failures；Debug、Release CLI/GUI、App Bundle、Info.plist/arm64/ad-hoc 签名和 Artifact 上传全部通过。
+- CI Artifact：`LingXiMac-ci-368363857f28363e42c2aed5205d0582b77ffe03.zip`（ID `12942713576`，约 4.3 MB，仅测试用途）。

@@ -46,3 +46,8 @@ GUI 证据：
 - 单轮/无预热基准会受系统缓存和后台负载影响；工作台允许配置预热轮数，但不会把一次结果包装成稳定结论。
 - 世界加载、区块生成和渲染工作负载需要有可快速进入的世界；未指定时报告会明确说明负载未测量。
 - 外部进程无法读取 Minecraft 内部帧时间，因此 FPS/1% low 目前不可用。
+
+## CI 与提交
+
+- 随 M7.3/M8 提交 `3683638` 一同验证；CI [run 40976695758](https://github.com/LingXiFox/LingXiLauncher/actions/runs/40976695758) success。
+- 316 tests / 0 failures，Release CLI/GUI 与 App Bundle 通过；Artifact `LingXiMac-ci-368363857f28363e42c2aed5205d0582b77ffe03.zip` 仅用于测试。
