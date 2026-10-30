@@ -39,6 +39,7 @@ Debug `LauncherCore`、CLI、SwiftUI GUI 均构建通过。
 ## 真实验证
 
 - 在独立 `.dev-sandbox` 安装 Fabulously Optimized 5.4.0（Fabric 1.20.1，78 个文件，48 个 Modrinth 来源）。
+- **测试说明**：当前 `.mrpack` 文件本身不携带顶层 project/version 身份；本次验证通过测试记录手工关联合法 Modrinth 项目/版本。导入时的自动来源关联仍未实现，未关联的实例会明确拒绝更新。
 - 目标 5.3.3 预览 26 项变化，实际应用：18 个文件更新、8 个移除。
 - 更新后 `modpack.json` 记录 `packVersionID=5.3.3`、`modrinthVersionID=yP9fYMLA`，事务目录已清理。
 - 使用 Microsoft Java 17 启动更新后的实例，成功到标题界面：Fabulously Optimized 5.3.3，45 个模组。
