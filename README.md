@@ -281,6 +281,14 @@ value:   refresh token only
 
 游戏正常跑完时，启动器透传游戏自身的退出码。
 
+## M8.1 数据完整性与资源包
+
+- 实例复制保留 `mods.json`、`shaderpacks.json` 和 `modpack.json`，并保留禁用模组与来源信息。
+- 世界备份包含隐藏文件、跨进程锁、源/目标 SHA-256 一致性和失败回滚。
+- `ResourcePackManager` 支持 Modrinth 资源包搜索/安装/更新/删除、本地 ZIP 导入和受控的 `options.txt` 启用。
+- 整合包来源写入 `modpack.json`；不会根据名称猜测 Modrinth 项目。
+- 当前限制：整合包更新事务和真实资源包进游戏验证尚未完成，详见 [M8.1 验证记录](docs/VERIFICATION-M8.1.md)。
+
 ## 当前限制（诚实清单）
 
 - M3 真实登录已验证；但本次使用浏览器已有 Microsoft 会话（SSO），未在全新浏览器 profile 下重走密码 + 首次 consent。

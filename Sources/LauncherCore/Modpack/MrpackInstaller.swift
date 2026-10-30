@@ -211,6 +211,45 @@ public struct MrpackInstaller: Sendable {
             let committed = try commitStage(stageRoot: stageRoot, to: instance)
             let javaRuntime = try JavaRuntimeInspector().inspect(executable: request.javaExecutable)
             try Task.checkCancellation()
+            var records: [ModpackFileRecord] = []
+            for file in selectedFiles {
+                let target = instance.gameDirectory.appendingPathComponent(file.relativePath)
+                guard FileManager.default.fileExists(atPath: target.path) else { continue }
+                records.append(ModpackFileRecord(
+                    path: file.relativePath,
+                    sha256: try SHA256Digest.hexDigest(ofFileAt: target),
+                    sha1: file.sha1,
+                    sha512: file.sha512,
+                    source: file.downloadURL.host == "cdn.modrinth.com" ? "modrinth" : "pack"
+                ))
+            }
+            for override in package.overrides {
+                let target = instance.gameDirectory.appendingPathComponent(override.relativePath)
+                guard FileManager.default.fileExists(atPath: target.path) else { continue }
+                records.append(ModpackFileRecord(
+                    path: override.relativePath,
+                    sha256: try SHA256Digest.hexDigest(ofFileAt: target),
+                    source: "pack-override"
+                ))
+            }
+            let loaderKind: String
+            var loaderVersion: String?
+            switch package.loader {
+            case .vanilla: loaderKind = "vanilla"
+            case let .fabric(version): loaderKind = "fabric"; loaderVersion = version
+            case let .neoforge(version): loaderKind = "neoforge"; loaderVersion = version
+            }
+            try ModpackLifecycleManager(layout: layout).save(
+                ModpackRecord(
+                    versionID: package.versionID,
+                    minecraftVersion: package.minecraftVersion,
+                    loaderKind: loaderKind,
+                    loaderVersion: loaderVersion,
+                    archiveSHA256: package.archiveSHA256,
+                    files: records
+                ),
+                instanceID: instance.id
+            )
 
             var trace = MrpackSourceTraceSummary.empty
             if request.traceModrinthSources {

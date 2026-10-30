@@ -109,10 +109,15 @@ public struct InstanceIntegrityReport: Codable, Sendable, Equatable {
 public struct InstanceCopyService: Sendable {
     public let layout: GameDataLayout
     public let repository: InstanceRepository
+    private let runtimeRegistry: InstanceRuntimeChecking
 
-    public init(layout: GameDataLayout) {
+    public init(
+        layout: GameDataLayout,
+        runtimeRegistry: InstanceRuntimeChecking? = nil
+    ) {
         self.layout = layout
         self.repository = InstanceRepository(layout: layout)
+        self.runtimeRegistry = runtimeRegistry ?? InstanceRuntimeRegistry(layout: layout)
     }
 
     @discardableResult
@@ -126,16 +131,30 @@ public struct InstanceCopyService: Sendable {
         guard !trimmed.isEmpty else {
             throw LauncherError(.usageError, "Copy display name must not be empty")
         }
+        let saves = source.gameDirectory.appendingPathComponent("saves", isDirectory: true)
+        let hasSaves = FileManager.default.fileExists(atPath: saves.path)
+        if runtimeRegistry.isRunning(instanceID: source.id), options.includeSaves || hasSaves {
+            throw LauncherError(
+                .launchFailed,
+                "Cannot copy an instance with saves while its game is running",
+                suggestion: "Quit the game and retry; the source instance was not modified."
+            )
+        }
+
         let created = try repository.create(displayName: trimmed, versionID: source.manifest.versionID)
         do {
-            if let memory = source.manifest.memoryMiB {
-                _ = try repository.setMemory(id: created.id, memoryMiB: memory)
-            }
+            _ = try repository.setPerformance(
+                id: created.id,
+                heapMiB: source.manifest.memoryMiB,
+                jvmArguments: source.manifest.jvmArguments
+            )
             if let runtime = source.manifest.javaRuntime {
                 _ = try repository.setJavaRuntime(id: created.id, record: runtime)
             }
             var copied: [String] = []
-            for name in ["mods", "mods-disabled", "shaderpacks", "config", "resourcepacks"] {
+            // Enabled mods and shader ZIPs live in the game directory; their provenance records
+            // and disabled mod files live in the instance metadata directory.
+            for name in ["mods", "shaderpacks", "config", "resourcepacks"] {
                 let from = source.gameDirectory.appendingPathComponent(name, isDirectory: true)
                 let to = created.gameDirectory.appendingPathComponent(name, isDirectory: true)
                 if FileManager.default.fileExists(atPath: from.path) {
@@ -143,20 +162,35 @@ public struct InstanceCopyService: Sendable {
                     copied.append(name)
                 }
             }
-            for name in ["mods.json", "shaderpacks.json", "options.txt"] {
-                let from = source.gameDirectory.appendingPathComponent(name, isDirectory: false)
-                let to = created.gameDirectory.appendingPathComponent(name, isDirectory: false)
+            for name in ["mods.json", "shaderpacks.json", "modpack.json"] {
+                let from = source.directory.appendingPathComponent(name, isDirectory: false)
+                let to = created.directory.appendingPathComponent(name, isDirectory: false)
                 if FileManager.default.fileExists(atPath: from.path) {
-                    try copyFile(from, to: to, sourceBase: source.gameDirectory)
+                    try copyFile(from, to: to, sourceBase: source.directory)
                     copied.append(name)
                 }
             }
-            if options.includeSaves {
-                let saves = source.gameDirectory.appendingPathComponent("saves", isDirectory: true)
-                if FileManager.default.fileExists(atPath: saves.path) {
-                    try copyTree(saves, to: created.gameDirectory.appendingPathComponent("saves", isDirectory: true), sourceBase: source.gameDirectory)
-                    copied.append("saves")
-                }
+            let disabled = source.directory.appendingPathComponent("mods-disabled", isDirectory: true)
+            if FileManager.default.fileExists(atPath: disabled.path) {
+                try copyTree(
+                    disabled,
+                    to: created.directory.appendingPathComponent("mods-disabled", isDirectory: true),
+                    sourceBase: source.directory
+                )
+                copied.append("mods-disabled")
+            }
+            let optionsFile = source.gameDirectory.appendingPathComponent("options.txt", isDirectory: false)
+            if FileManager.default.fileExists(atPath: optionsFile.path) {
+                try copyFile(
+                    optionsFile,
+                    to: created.gameDirectory.appendingPathComponent("options.txt", isDirectory: false),
+                    sourceBase: source.gameDirectory
+                )
+                copied.append("options.txt")
+            }
+            if options.includeSaves, hasSaves {
+                try copyTree(saves, to: created.gameDirectory.appendingPathComponent("saves", isDirectory: true), sourceBase: source.gameDirectory)
+                copied.append("saves")
             }
             return InstanceCopyReport(sourceID: source.id, instance: try repository.load(id: created.id), copiedPaths: copied, includeSaves: options.includeSaves)
         } catch {
@@ -213,7 +247,7 @@ public struct InstanceCopyService: Sendable {
             throw LauncherError(.pathEscapesRoot, "Copy source escapes the instance: \(source.path)")
         }
         let keys: [URLResourceKey] = [.isRegularFileKey, .isDirectoryKey, .isSymbolicLinkKey]
-        guard let enumerator = fm.enumerator(at: source, includingPropertiesForKeys: keys, options: [.skipsHiddenFiles]) else {
+        guard let enumerator = fm.enumerator(at: source, includingPropertiesForKeys: keys, options: []) else {
             throw LauncherError(.ioFailure, "Cannot enumerate \(source.path)")
         }
         try fm.createDirectory(at: destination, withIntermediateDirectories: true)

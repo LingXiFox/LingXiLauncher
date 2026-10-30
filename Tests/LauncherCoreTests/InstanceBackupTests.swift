@@ -32,6 +32,13 @@ final class InstanceBackupTests: XCTestCase {
         try write("options.txt", "options", in: source.gameDirectory)
         try write("saves/World/level.dat", "level", in: source.gameDirectory)
         try write("resourcepacks/resource.zip", "resource", in: source.gameDirectory)
+        // Metadata lives in the instance metadata directory, not the game directory.
+        try write("mods.json", """
+        [{"fileName":"example.jar","projectID":"P1","versionID":"V1","versionNumber":"1.0.0","title":"Example","source":"modrinth","sha1":"abc","sha512":"def","enabled":true}]
+        """, in: source.directory)
+        try write("shaderpacks.json", """
+        [{"fileName":"pack.zip","projectID":"S1","versionID":"SV1","versionNumber":"1.0.0","title":"Shader","source":"modrinth","sha1":"s1","sha512":"s2","enabled":false}]
+        """, in: source.directory)
 
         let report = try InstanceCopyService(layout: layout).copy(
             instanceID: source.id,
@@ -44,6 +51,8 @@ final class InstanceBackupTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: source.gameDirectory.appendingPathComponent("mods/example.jar")), Data("jar".utf8))
         XCTAssertEqual(try Data(contentsOf: report.instance.gameDirectory.appendingPathComponent("mods/example.jar")), Data("jar".utf8))
         XCTAssertEqual(try Data(contentsOf: report.instance.gameDirectory.appendingPathComponent("saves/World/level.dat")), Data("level".utf8))
+        XCTAssertEqual(try Data(contentsOf: report.instance.directory.appendingPathComponent("mods.json")), try Data(contentsOf: source.directory.appendingPathComponent("mods.json")))
+        XCTAssertEqual(try Data(contentsOf: report.instance.directory.appendingPathComponent("shaderpacks.json")), try Data(contentsOf: source.directory.appendingPathComponent("shaderpacks.json")))
         XCTAssertEqual(try repository.load(id: source.id).manifest.displayName, "Source")
     }
 
@@ -85,6 +94,42 @@ final class InstanceBackupTests: XCTestCase {
         try manager.deleteBackup(instanceID: instance.id, backupID: summary.id)
         XCTAssertTrue(try manager.listBackups(instanceID: instance.id).isEmpty)
         XCTAssertFalse(FileManager.default.fileExists(atPath: summary.directory.path))
+    }
+
+    func testBackupIncludesHiddenFilesAndVerifiesThem() throws {
+        let instance = try makeInstance()
+        let world = instance.gameDirectory.appendingPathComponent("saves/HiddenWorld", isDirectory: true)
+        try write("level.dat", "level", in: world)
+        try write(".hidden/data.bin", "hidden", in: world)
+        let manager = WorldBackupManager(layout: layout, runtimeRegistry: BackupFixedRuntime(running: false))
+        let summary = try manager.createBackup(instanceID: instance.id, worldName: "HiddenWorld")
+        XCTAssertEqual(summary.fileCount, 2)
+        let manifest = try manager.verifyBackup(instanceID: instance.id, backupID: summary.id)
+        XCTAssertTrue(manifest.files.contains { $0.relativePath == ".hidden/data.bin" })
+    }
+
+    func testModpackSourceIsNeverGuessedAndRoundTrips() async throws {
+        let instance = try makeInstance()
+        let manager = ModpackLifecycleManager(layout: layout)
+        let record = ModpackRecord(
+            versionID: "pack-version-1",
+            minecraftVersion: "1.20.1",
+            loaderKind: "fabric",
+            loaderVersion: "0.20.1",
+            archiveSHA256: "abc",
+            files: [ModpackFileRecord(path: "mods/a.jar", sha256: "def", source: "modrinth")]
+        )
+        try manager.save(record, instanceID: instance.id)
+        let loaded = try manager.record(instanceID: instance.id)
+        XCTAssertEqual(loaded.versionID, record.versionID)
+        XCTAssertEqual(loaded.projectID, nil)
+        XCTAssertEqual(loaded.files, record.files)
+        do {
+            _ = try await manager.checkUpdate(instanceID: instance.id)
+            XCTFail("must not guess a project")
+        } catch let error as LauncherError {
+            XCTAssertEqual(error.code, .missingDependency)
+        }
     }
 
     func testRestoreRefusedWhileGameRuns() throws {

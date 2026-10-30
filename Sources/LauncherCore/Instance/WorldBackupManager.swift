@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(Darwin)
+import Darwin
+#endif
 
 public struct MinecraftWorld: Codable, Sendable, Equatable, Identifiable {
     public let name: String
@@ -98,7 +101,7 @@ public struct WorldBackupManager: Sendable {
         let entries = try FileManager.default.contentsOfDirectory(
             at: saves,
             includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey, .contentModificationDateKey],
-            options: [.skipsHiddenFiles]
+            options: []
         )
         return try entries.compactMap { url -> MinecraftWorld? in
             let values = try url.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey, .contentModificationDateKey])
@@ -135,6 +138,8 @@ public struct WorldBackupManager: Sendable {
     @discardableResult
     public func createBackup(instanceID: String, worldName: String) throws -> WorldBackupSummary {
         let instance = try repository.load(id: instanceID)
+        let lock = try BackupInstanceLock(root: backupRoot(instanceID: instanceID))
+        defer { withExtendedLifetime(lock) {} }
         let component = try PathSafety.validatedPathComponent(worldName)
         let saves = instance.gameDirectory.appendingPathComponent("saves", isDirectory: true)
         let world = saves.appendingPathComponent(component, isDirectory: true)
@@ -145,6 +150,9 @@ public struct WorldBackupManager: Sendable {
         guard PathSafety.isContainedResolvingSymlinks(world, inBase: saves) else {
             throw LauncherError(.pathEscapesRoot, "World path escapes the instance saves directory")
         }
+        guard !runtimeRegistry.isRunning(instanceID: instanceID) else {
+            throw LauncherError(.launchFailed, "Cannot create a world backup while the game is running")
+        }
         let root = try backupRoot(instanceID: instanceID)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let id = backupID()
@@ -153,8 +161,20 @@ public struct WorldBackupManager: Sendable {
         do {
             try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: true)
             let copiedWorld = temporary.appendingPathComponent("world", isDirectory: true)
+            let sourceBefore = try snapshotFiles(at: world)
             try copyDirectory(world, to: copiedWorld, sourceBase: saves)
-            let files = try snapshotFiles(at: copiedWorld)
+            guard !runtimeRegistry.isRunning(instanceID: instanceID) else {
+                throw LauncherError(.launchFailed, "The game started while the backup was being created")
+            }
+            let copiedFiles = try snapshotFiles(at: copiedWorld)
+            let sourceAfter = try snapshotFiles(at: world)
+            guard sourceBefore == sourceAfter, sourceBefore == copiedFiles else {
+                throw LauncherError(
+                    .ioFailure,
+                    "The world changed while the backup was being created; the snapshot was rejected"
+                )
+            }
+            let files = copiedFiles
             let manifest = WorldBackupManifest(
                 id: id,
                 instanceID: instanceID,
@@ -204,6 +224,8 @@ public struct WorldBackupManager: Sendable {
 
     @discardableResult
     public func restore(instanceID: String, backupID: String, worldName: String? = nil) throws -> URL {
+        let lock = try BackupInstanceLock(root: backupRoot(instanceID: instanceID))
+        defer { withExtendedLifetime(lock) {} }
         guard !runtimeRegistry.isRunning(instanceID: instanceID) else {
             throw LauncherError(.launchFailed, "Cannot restore a world while the game is running")
         }
@@ -223,6 +245,9 @@ public struct WorldBackupManager: Sendable {
             throw LauncherError(.pathEscapesRoot, "Refusing to restore over a symbolic link")
         }
 
+        guard !runtimeRegistry.isRunning(instanceID: instanceID) else {
+            throw LauncherError(.launchFailed, "Cannot restore a world while the game is running")
+        }
         let root = try backupRoot(instanceID: instanceID)
         let staging = saves.appendingPathComponent(".lingxi-restore-\(UUID().uuidString)", isDirectory: true)
         let recovery = root.appendingPathComponent(".restore-\(UUID().uuidString)", isDirectory: true)
@@ -230,6 +255,9 @@ public struct WorldBackupManager: Sendable {
             .appendingPathComponent(try PathSafety.validatedPathComponent(backupID), isDirectory: true)
             .appendingPathComponent("world", isDirectory: true)
         do {
+            guard !runtimeRegistry.isRunning(instanceID: instanceID) else {
+                throw LauncherError(.launchFailed, "The game started while the world restore was being staged")
+            }
             try copyDirectory(backupWorld, to: staging, sourceBase: backupWorld)
             let stagedFiles = try snapshotFiles(at: staging)
             let expected = Dictionary(uniqueKeysWithValues: manifest.files.map { ($0.relativePath, $0) })
@@ -254,7 +282,15 @@ public struct WorldBackupManager: Sendable {
             } catch {
                 try? FileManager.default.removeItem(at: target)
                 if FileManager.default.fileExists(atPath: recovery.path) {
-                    try? FileManager.default.moveItem(at: recovery, to: target)
+                    do {
+                        try FileManager.default.moveItem(at: recovery, to: target)
+                    } catch {
+                        throw LauncherError(
+                            .ioFailure,
+                            "World restore failed and the original world could not be restored automatically",
+                            suggestion: "The recovery copy is preserved at \(recovery.path). Do not delete it."
+                        )
+                    }
                 }
                 throw error
             }
@@ -266,6 +302,11 @@ public struct WorldBackupManager: Sendable {
     }
 
     public func deleteBackup(instanceID: String, backupID: String) throws {
+        let lock = try BackupInstanceLock(root: backupRoot(instanceID: instanceID))
+        defer { withExtendedLifetime(lock) {} }
+        guard !runtimeRegistry.isRunning(instanceID: instanceID) else {
+            throw LauncherError(.launchFailed, "Cannot delete a backup while the game is running")
+        }
         let root = try backupRoot(instanceID: instanceID)
         let component = try PathSafety.validatedPathComponent(backupID)
         let directory = root.appendingPathComponent(component, isDirectory: true)
@@ -281,6 +322,36 @@ public struct WorldBackupManager: Sendable {
             throw LauncherError(.ioFailure, "Cannot delete backup: \(error.localizedDescription)")
         }
     }
+
+
+/// Cross-process advisory lock. The file descriptor is intentionally held for the whole
+/// create/restore/delete operation so two launcher processes cannot interleave mutations.
+private final class BackupInstanceLock {
+    private let descriptor: Int32
+
+    init(root: URL) throws {
+        let fm = FileManager.default
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+        let path = root.appendingPathComponent(".lock", isDirectory: false).path
+        descriptor = open(path, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR)
+        guard descriptor >= 0 else {
+            throw LauncherError(.ioFailure, "Cannot open backup lock at \(path)")
+        }
+        #if canImport(Darwin)
+        guard flock(descriptor, LOCK_EX | LOCK_NB) == 0 else {
+            close(descriptor)
+            throw LauncherError(.launchFailed, "Another launcher process is already operating on this instance's backups")
+        }
+        #endif
+    }
+
+    deinit {
+        #if canImport(Darwin)
+        _ = flock(descriptor, LOCK_UN)
+        #endif
+        _ = close(descriptor)
+    }
+}
 
     // MARK: - Safety and filesystem helpers
 
@@ -325,7 +396,7 @@ public struct WorldBackupManager: Sendable {
     private func directorySize(_ directory: URL) throws -> Int {
         var total = 0
         let keys: [URLResourceKey] = [.isRegularFileKey, .isDirectoryKey, .isSymbolicLinkKey, .fileSizeKey]
-        guard let enumerator = FileManager.default.enumerator(at: directory, includingPropertiesForKeys: keys, options: [.skipsHiddenFiles]) else {
+        guard let enumerator = FileManager.default.enumerator(at: directory, includingPropertiesForKeys: keys, options: []) else {
             return 0
         }
         for case let url as URL in enumerator {
@@ -341,7 +412,7 @@ public struct WorldBackupManager: Sendable {
     private func copyDirectory(_ source: URL, to destination: URL, sourceBase: URL) throws {
         let fm = FileManager.default
         let keys: [URLResourceKey] = [.isRegularFileKey, .isDirectoryKey, .isSymbolicLinkKey]
-        guard let enumerator = fm.enumerator(at: source, includingPropertiesForKeys: keys, options: [.skipsHiddenFiles]) else {
+        guard let enumerator = fm.enumerator(at: source, includingPropertiesForKeys: keys, options: []) else {
             throw LauncherError(.ioFailure, "Cannot enumerate \(source.path)")
         }
         try fm.createDirectory(at: destination, withIntermediateDirectories: true)
@@ -382,7 +453,7 @@ public struct WorldBackupManager: Sendable {
     private func snapshotFiles(at root: URL) throws -> [WorldBackupFile] {
         let fm = FileManager.default
         let keys: [URLResourceKey] = [.isRegularFileKey, .isDirectoryKey, .isSymbolicLinkKey, .fileSizeKey]
-        guard let enumerator = fm.enumerator(at: root, includingPropertiesForKeys: keys, options: [.skipsHiddenFiles]) else {
+        guard let enumerator = fm.enumerator(at: root, includingPropertiesForKeys: keys, options: []) else {
             throw LauncherError(.ioFailure, "Cannot enumerate \(root.path)")
         }
         var files: [WorldBackupFile] = []

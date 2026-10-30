@@ -55,6 +55,9 @@ struct InstancesView: View {
                 .environmentObject(model)
                 .environment(\.lxTheme, theme)
         }
+        .sheet(item: $model.showResourcePacksForInstance) { instance in
+            ResourcePacksView(instance: instance, manager: model.makeResourcePackManager())
+        }
         .sheet(item: $model.showGraphicsForInstance) { instance in
             GraphicsView(instance: instance, model: model)
                 .environmentObject(model)
@@ -548,6 +551,9 @@ private struct InstanceDetailPane: View {
             }
             LXButton("图形与光影", systemImage: "sparkles", kind: .secondary) {
                 model.openGraphics(instance: instance)
+            }
+            LXButton("资源包", systemImage: "photo.on.rectangle", kind: .secondary) {
+                model.openResourcePacks(instance: instance)
             }
             LXButton("性能工作台", systemImage: "gauge.with.dots.needle.50percent", kind: .secondary) {
                 model.openPerformance(instance: instance)

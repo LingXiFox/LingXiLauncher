@@ -156,6 +156,7 @@ final class AppModel: ObservableObject {
     @Published var installWizardInitialVersion: String?
     @Published var showModsForInstance: Instance?
     @Published var showGraphicsForInstance: Instance?
+    @Published var showResourcePacksForInstance: Instance?
     @Published var showPerformanceForInstance: Instance?
     @Published var showMrpackImport = false
     @Published var mrpackImportURL: URL?
@@ -347,6 +348,10 @@ final class AppModel: ObservableObject {
         section = .instances
         selectedInstanceID = instance.id
         showModsForInstance = instance
+    }
+
+    func openResourcePacks(instance: Instance) {
+        showResourcePacksForInstance = instance
     }
 
     func openGraphics(instance: Instance) {
@@ -814,6 +819,10 @@ final class AppModel: ObservableObject {
 
     func makeGraphicsSetupManager() -> GraphicsSetupManager {
         GraphicsSetupManager(layout: layout, transport: URLSessionTransport())
+    }
+
+    func makeResourcePackManager() -> ResourcePackManager {
+        ResourcePackManager(layout: layout)
     }
 
     func makeShaderPackManager() -> ShaderPackManager {

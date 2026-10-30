@@ -104,6 +104,8 @@ enum CLI {
             return try await runGraphicsCommand(rest)
         case "shader":
             return try await runShaderCommand(rest)
+        case "resourcepack", "resourcepacks":
+            return try await runResourcePackCommand(rest)
         case "performance", "perf":
             return try await runPerformanceCommand(rest)
         case "verify":
