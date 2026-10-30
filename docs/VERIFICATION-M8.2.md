@@ -62,4 +62,9 @@ swift build -c release --product LingXiMac
 Scripts/build-app.sh --release
 ```
 
-均通过；ARM64 App Bundle 与 ad-hoc 签名有效。CI 链接在提交后补充。
+均通过；ARM64 App Bundle 与 ad-hoc 签名有效。
+
+## GitHub Actions
+
+- [CI #41002223613](https://github.com/LingXiFox/LingXiLauncher/actions/runs/41002223613)（commit `cb70604`）— success。
+- 测试：323 tests，0 failures；App Bundle 和 ad-hoc 签名通过。
