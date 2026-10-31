@@ -1,7 +1,4 @@
 import Foundation
-#if canImport(Darwin)
-#endif
-
 public struct ResourcePackRecord: Codable, Sendable, Equatable, Identifiable {
     public let fileName: String
     public let projectID: String?

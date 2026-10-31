@@ -1,7 +1,4 @@
 import Foundation
-#if canImport(FoundationXML)
-import FoundationXML
-#endif
 
 /// One NeoForge Maven version compatible with a concrete Minecraft release.
 public struct NeoForgeLoaderVersion: Codable, Sendable, Equatable, Identifiable {

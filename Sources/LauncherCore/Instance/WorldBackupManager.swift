@@ -1,7 +1,4 @@
 import Foundation
-#if canImport(Darwin)
-#endif
-
 public struct MinecraftWorld: Codable, Sendable, Equatable, Identifiable {
     public let name: String
     public let byteCount: Int

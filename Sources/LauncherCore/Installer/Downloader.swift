@@ -1,9 +1,4 @@
 import Foundation
-#if canImport(Darwin)
-#elseif canImport(Glibc)
-import Glibc
-#endif
-
 /// Downloads a set of files to disk with bounded concurrency, SHA-1/size verification and
 /// atomic placement.
 ///

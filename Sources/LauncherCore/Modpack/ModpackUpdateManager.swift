@@ -1,7 +1,4 @@
 import Foundation
-#if canImport(Darwin)
-#endif
-
 public enum ModpackUpdateAction: String, CaseIterable, Sendable, Codable {
     case replace
     case preserve
