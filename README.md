@@ -18,7 +18,7 @@ macOS Apple Silicon 原生 **Minecraft: Java Edition** 启动器。当前进度�
 - **M7.3 崩溃诊断与实例管理**：实例绑定的 latest.log/crash-reports/启动器日志采集，确定性 Java/Loader/模组/LWJGL/OpenGL/Iris/内存/文件诊断，未知原因不编造；支持 Markdown/JSON 脱敏导出、异常退出自动打开诊断。新增实例复制、世界存档备份/校验/分阶段恢复/恢复点、运行中拒绝修改；GUI 的「实例管理」提供实例、世界、启动诊断三个页签。
 - **M8 性能工作台**：启动器侧真实采集启动、资源重载、世界加载/区块生成和渲染阶段；记录硬件/Java/Loader/模组上下文，报告持久化与对比，基于实际数据的保守调优建议、确认后应用和恢复。没有游戏内帧计数器时明确标记 FPS 不可用，不用 CPU 占用伪造帧率；仅在 Apple Silicon 原生运行。
 - Fabric 与 NeoForge 已通过真实安装/启动验证；Forge/Quilt 未实现。本地离线身份仅保留给 CLI 技术验证，GUI 不提供绕过所有权的启动入口。
-- **GitHub Actions CI**：Debug 构建、**333 项**完整 XCTest、Release CLI/GUI、App Bundle 与 ad-hoc 签名校验、ZIP Artifact 上传；不执行真实登录、游戏下载或图形启动。Artifact 仅用于测试，不是公证发行版。
+- **GitHub Actions CI**：Debug 构建、**334 项**完整 XCTest、Release CLI/GUI、App Bundle 与 ad-hoc 签名校验、ZIP Artifact 上传；不执行真实登录、游戏下载或图形启动。Artifact 仅用于测试，不是公证发行版。
 
 详见 [docs/VERIFICATION-M8.md](docs/VERIFICATION-M8.md)、[docs/VERIFICATION-M7.3.md](docs/VERIFICATION-M7.3.md)、[docs/VERIFICATION-M7.2.md](docs/VERIFICATION-M7.2.md)、[docs/VERIFICATION-M7.1.md](docs/VERIFICATION-M7.1.md)、[docs/VERIFICATION-M6.3.md](docs/VERIFICATION-M6.3.md)、[docs/VERIFICATION-M6.2.md](docs/VERIFICATION-M6.2.md)、[docs/VERIFICATION-M6.1.md](docs/VERIFICATION-M6.1.md)、[docs/VERIFICATION-M3-M5.md](docs/VERIFICATION-M3-M5.md) 与 [docs/VERIFICATION-M2.5.md](docs/VERIFICATION-M2.5.md)。调试 GUI 可使用 [docs/DEBUG-AUTOMATION.md](docs/DEBUG-AUTOMATION.md) 的 opt-in 接口。这是一个**开发中**项目，不是已发布产品。
 
@@ -287,7 +287,7 @@ value:   refresh token only
 - 世界备份包含隐藏文件、跨进程锁、源/目标 SHA-256 一致性和失败回滚。
 - `ResourcePackManager` 支持 Modrinth 资源包搜索/安装/更新/删除、本地 ZIP 导入和受控的 `options.txt` 启用。
 - 整合包来源写入 `modpack.json`；不会根据名称猜测 Modrinth 项目。
-- M9.0 已完成整合包事务安全的 P0/P1 修复：回滚失败保留备份、备份校验、committed 恢复不回滚、预览签名和用户修改保护。详见 [M9.0 验证记录](docs/VERIFICATION-M9.0.md)。
+- M9.0 已完成整合包事务安全的 P0/P1 修复：回滚失败保留备份、备份校验、committed 恢复不回滚、预览签名和用户修改保护。真实 Vanilla 1.21.1、Fabric 1.20.1、NeoForge 1.21.1、Iris + Sodium 光影、Modrinth 资源包、复制实例和世界备份/恢复均已重新验证；Microsoft 正版登录仍需用户交互，未在自动化环境执行。详见 [M9.0 验证记录](docs/VERIFICATION-M9.0.md)。
 
 ### M8.2 数据安全修复
 
@@ -308,7 +308,7 @@ value:   refresh token only
 - M7.1 只在 Minecraft 1.20.1 + Fabric Loader 0.20.1 + Iris 1.7.6 / Sodium 0.5.12-beta.2 上做了真实世界验证；M7.2 的 NeoForge 验证使用 1.21.1 + NeoForge 21.1.265 + JEI，未在 NeoForge 上重复 Iris/Sodium 世界验证。其他版本即使 Modrinth 声明兼容，也可能因 loader 或显卡驱动差异失败。
 - macOS 只提供 OpenGL 4.1（Metal 转译）；没有 Metal 原生渲染、硬件光追或“RTX”能力。复杂光影在 Apple Silicon 上可能掉帧；启动器只提示，不承诺帧率。
 - 光影“启用”只代表已写入 Iris 配置，是否真正渲染以游戏内为准；测试用的 Complementary r5.9.3 在 Iris 1.7.6 下记录了未识别 custom uniform 警告，未崩溃，但不能据此宣称所有光影包无警告。
-- M9.0 为 Internal Release Candidate：完整 10 项真实游戏矩阵、Microsoft 正版登录和公证未在本阶段重跑/完成，不能标记为正式发行版。
+- M9.0 为 Internal Release Candidate：9/10 真实游戏验证已完成，Microsoft 正版登录需要真实账号交互、未在自动化环境执行；App 为 Ad-hoc 签名且未公证，不能标记为正式发行版。
 - M7.1 的 GUI 真实启动验证使用 CLI/本地测试身份；没有在 M7.1 阶段重新执行 Microsoft 登录流程。
 - M7.3 世界备份默认为手动；没有自动定时备份策略。恢复操作已在真实 `m73-fabric` 世界验证，但仍建议用户保留独立副本。
 - M8 只记录 CPU/内存和启动阶段；外部启动器无法稳定读取 Minecraft 内部帧时间，因此 FPS/1% low 显示为不可用。单轮/无预热基准不应视为稳定性能结论。

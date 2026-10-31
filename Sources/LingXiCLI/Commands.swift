@@ -110,6 +110,8 @@ enum CLI {
             return try await runResourcePackCommand(rest)
         case "performance", "perf":
             return try await runPerformanceCommand(rest)
+        case "world":
+            return try WorldCommands.run(rest)
         case "verify":
             return try await runVerify(rest)
         default:
@@ -823,7 +825,10 @@ enum CLI {
         guard let action = arguments.first else {
             throw LauncherError(.usageError, "Missing instance action", suggestion: "Use `lingxi instance create --name <name>` or `lingxi instance list`.")
         }
-        let spec = ArgumentParser.Spec(valueOptions: ["name", "version", "root", "data-root"])
+        let spec = ArgumentParser.Spec(
+            valueOptions: ["name", "version", "root", "data-root"],
+            flagOptions: ["json", "help", "saves"]
+        )
         let input = try ArgumentParser.parse(Array(arguments.dropFirst()), spec: spec)
         if input.has("help") {
             print("usage: lingxi instance create --name <display-name> [--version <id>] | lingxi instance list")
@@ -841,6 +846,24 @@ enum CLI {
             print("Instance created: \(instance.id)")
             CLIOutput.field("display name", instance.manifest.displayName)
             CLIOutput.field("game directory", instance.gameDirectory.path)
+            return ExitStatus.success.rawValue
+        case "copy":
+            guard let sourceID = input.positionals.first else {
+                throw LauncherError(.usageError, "Missing source instance id", suggestion: "Use `lingxi instance copy <source-id> --name <name>`.")
+            }
+            let report = try InstanceCopyService(layout: layout).copy(
+                instanceID: sourceID,
+                displayName: try input.requireValue("name"),
+                options: InstanceCopyOptions(includeSaves: input.has("saves"))
+            )
+            if input.has("json") {
+                CLIOutput.emitJSON(jsonInstance(report.instance))
+                return ExitStatus.success.rawValue
+            }
+            print("Instance copied: \(report.instance.id)")
+            CLIOutput.field("source", report.sourceID)
+            CLIOutput.field("copied paths", "\(report.copiedPaths.count)")
+            CLIOutput.field("saves", report.includeSaves ? "included" : "excluded")
             return ExitStatus.success.rawValue
         case "list":
             let instances = try registry.list()

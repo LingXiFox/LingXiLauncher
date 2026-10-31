@@ -281,6 +281,37 @@ extension ModpackUpdateManagerTests {
         XCTAssertFalse(manager.pendingTransaction(instanceID: instance.id))
     }
 
+    func testRecoveryFailureKeepsTransactionAndDoesNotPartiallyDelete() throws {
+        let instance = try InstanceRepository(layout: layout).create(id: "recovery-failure", displayName: "Recovery", versionID: nil)
+        let first = instance.gameDirectory.appendingPathComponent("mods/a.jar")
+        let second = instance.gameDirectory.appendingPathComponent("mods/b.jar")
+        try FileManager.default.createDirectory(at: first.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("current-a".utf8).write(to: first)
+        try Data("current-b".utf8).write(to: second)
+        let root = try makeTransactionRoot(instanceID: instance.id)
+        let backupRoot = root.appendingPathComponent("backup/files/mods", isDirectory: true)
+        try FileManager.default.createDirectory(at: backupRoot, withIntermediateDirectories: true)
+        let backupA = backupRoot.appendingPathComponent("a.jar")
+        try Data("old-a".utf8).write(to: backupA)
+        let hashA = try SHA256Digest.hexDigest(ofFileAt: backupA)
+        try writeState(
+            in: root,
+            instanceID: instance.id,
+            status: "applying",
+            paths: ["mods/a.jar", "mods/b.jar"],
+            backups: [
+                "mods/a.jar": ["path": "mods/a.jar", "sha256": hashA, "size": 5, "existed": true],
+                "mods/b.jar": ["path": "mods/b.jar", "sha256": "deadbeef", "size": 5, "existed": true],
+            ]
+        )
+        XCTAssertThrowsError(try ModpackUpdateManager(layout: layout).recover(instanceID: instance.id))
+        XCTAssertEqual(try String(contentsOf: first, encoding: .utf8), "current-a")
+        XCTAssertEqual(try String(contentsOf: second, encoding: .utf8), "current-b")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: root.path))
+        let state = try JSONSerialization.jsonObject(with: Data(contentsOf: root.appendingPathComponent("state.json"))) as? [String: Any]
+        XCTAssertEqual(state?["status"] as? String, "rollbackFailed")
+    }
+
     func testMissingBackupNeverDeletesCurrentFile() throws {
         let instance = try InstanceRepository(layout: layout).create(id: "missing-backup", displayName: "Missing", versionID: nil)
         let file = instance.gameDirectory.appendingPathComponent("mods/protected.jar")
