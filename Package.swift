@@ -35,12 +35,6 @@ platformTargets = [
         path: "Sources/WindowsPlatform",
         swiftSettings: [.swiftLanguageMode(.v6)]
     ),
-    .executableTarget(
-        name: "LingXiCLIWindows",
-        dependencies: cliDependencies,
-        path: "Sources/LingXiCLI",
-        swiftSettings: [.swiftLanguageMode(.v6)]
-    ),
 ]
 #endif
 

@@ -124,7 +124,7 @@ jobs:
         shell: pwsh
         run: |
           swift build --product LauncherCore
-          swift build --product LingXiCLIWindows
+          swift build --product lingxi
 
       - name: Unit tests
         shell: pwsh
