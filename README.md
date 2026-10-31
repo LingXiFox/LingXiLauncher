@@ -1,8 +1,9 @@
 # LingXi Launcher
 
 [![CI](https://github.com/LingXiFox/LingXiLauncher/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/LingXiFox/LingXiLauncher/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/LingXiFox/LingXiLauncher?include_prereleases&label=release)](https://github.com/LingXiFox/LingXiLauncher/releases)
 
-macOS Apple Silicon 原生 **Minecraft: Java Edition** 启动器。当前进度：**M0 + M1 + M2 + M2.5 + M3 + M5-Alpha + M6.1 + M6.1.1 + M6.2 + M6.2.1 + M6.3 + M6.3.1 + M7.1 + M7.1.1 + M7.2 + M7.3 + M8**。
+macOS Apple Silicon 原生 **Minecraft: Java Edition** 启动器。当前进度：**M0 + M1 + M2 + M2.5 + M3 + M5-Alpha + M6.1 + M6.1.1 + M6.2 + M6.2.1 + M6.3 + M6.3.1 + M7.1 + M7.1.1 + M7.2 + M7.3 + M8 + M9.0 + M9.1**。
 
 - **M3 Microsoft 正版认证已实现并通过真机验证**：OAuth 2.0 Authorization Code + PKCE S256、系统浏览器、localhost 回调、Xbox Live → XSTS → Minecraft Services → 所有权/档案、Keychain 存储与刷新。
 - **M5-Alpha SwiftUI GUI 可用**：首页 / 游戏实例 / 版本下载 / 账户管理 / 运行日志 / 设置，直接调用 LauncherCore，不执行 CLI。
@@ -18,9 +19,10 @@ macOS Apple Silicon 原生 **Minecraft: Java Edition** 启动器。当前进度�
 - **M7.3 崩溃诊断与实例管理**：实例绑定的 latest.log/crash-reports/启动器日志采集，确定性 Java/Loader/模组/LWJGL/OpenGL/Iris/内存/文件诊断，未知原因不编造；支持 Markdown/JSON 脱敏导出、异常退出自动打开诊断。新增实例复制、世界存档备份/校验/分阶段恢复/恢复点、运行中拒绝修改；GUI 的「实例管理」提供实例、世界、启动诊断三个页签。
 - **M8 性能工作台**：启动器侧真实采集启动、资源重载、世界加载/区块生成和渲染阶段；记录硬件/Java/Loader/模组上下文，报告持久化与对比，基于实际数据的保守调优建议、确认后应用和恢复。没有游戏内帧计数器时明确标记 FPS 不可用，不用 CPU 占用伪造帧率；仅在 Apple Silicon 原生运行。
 - Fabric 与 NeoForge 已通过真实安装/启动验证；Forge/Quilt 未实现。本地离线身份仅保留给 CLI 技术验证，GUI 不提供绕过所有权的启动入口。
-- **GitHub Actions CI**：Debug 构建、**334 项**完整 XCTest、Release CLI/GUI、App Bundle 与 ad-hoc 签名校验、ZIP Artifact 上传；不执行真实登录、游戏下载或图形启动。Artifact 仅用于测试，不是公证发行版。
+- **M9.1 Release Engineering**：首个 macOS ARM64 公开测试基线 `v0.1.0-beta.1`。语义化 Tag 触发独立 CD，验证版本一致性、完整 XCTest、Release CLI/GUI、ARM64 App Bundle、Ad-hoc 签名、ZIP 与 SHA-256，并创建 Pre-release；普通 main 推送不会发布。
+- **GitHub Actions CI**：Debug 构建、**336 项**完整 XCTest、Release CLI/GUI、App Bundle 与 ad-hoc 签名校验、ZIP Artifact 上传；不执行真实登录、游戏下载或图形启动。Artifact 仅用于测试，不是公证发行版。
 
-详见 [docs/VERIFICATION-M8.md](docs/VERIFICATION-M8.md)、[docs/VERIFICATION-M7.3.md](docs/VERIFICATION-M7.3.md)、[docs/VERIFICATION-M7.2.md](docs/VERIFICATION-M7.2.md)、[docs/VERIFICATION-M7.1.md](docs/VERIFICATION-M7.1.md)、[docs/VERIFICATION-M6.3.md](docs/VERIFICATION-M6.3.md)、[docs/VERIFICATION-M6.2.md](docs/VERIFICATION-M6.2.md)、[docs/VERIFICATION-M6.1.md](docs/VERIFICATION-M6.1.md)、[docs/VERIFICATION-M3-M5.md](docs/VERIFICATION-M3-M5.md) 与 [docs/VERIFICATION-M2.5.md](docs/VERIFICATION-M2.5.md)。调试 GUI 可使用 [docs/DEBUG-AUTOMATION.md](docs/DEBUG-AUTOMATION.md) 的 opt-in 接口。这是一个**开发中**项目，不是已发布产品。
+详见 [docs/VERIFICATION-M9.1.md](docs/VERIFICATION-M9.1.md)、[docs/VERIFICATION-M9.0.md](docs/VERIFICATION-M9.0.md)、[docs/VERIFICATION-M8.md](docs/VERIFICATION-M8.md)、[docs/VERIFICATION-M7.3.md](docs/VERIFICATION-M7.3.md)、[docs/VERIFICATION-M7.2.md](docs/VERIFICATION-M7.2.md)、[docs/VERIFICATION-M7.1.md](docs/VERIFICATION-M7.1.md)、[docs/VERIFICATION-M6.3.md](docs/VERIFICATION-M6.3.md)、[docs/VERIFICATION-M6.2.md](docs/VERIFICATION-M6.2.md)、[docs/VERIFICATION-M6.1.md](docs/VERIFICATION-M6.1.md)、[docs/VERIFICATION-M3-M5.md](docs/VERIFICATION-M3-M5.md) 与 [docs/VERIFICATION-M2.5.md](docs/VERIFICATION-M2.5.md)。调试 GUI 可使用 [docs/DEBUG-AUTOMATION.md](docs/DEBUG-AUTOMATION.md) 的 opt-in 接口。`v0.1.0-beta.1` 是首个公开测试基线（Pre-release），不是稳定版；App 未经 Apple 公证。
 
 ## 设计边界
 

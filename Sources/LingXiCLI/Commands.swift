@@ -90,8 +90,6 @@ enum CLI {
                 return try InstanceToolsCLI.copy(Array(rest.dropFirst()))
             }
             return try runInstanceCommand(rest)
-        case "world":
-            return try InstanceToolsCLI.runWorld(rest)
         case "diagnose":
             return try InstanceToolsCLI.runDiagnose(rest)
         case "install":

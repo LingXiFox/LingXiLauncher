@@ -194,6 +194,58 @@ final class ModpackUpdateManagerTests: XCTestCase {
         XCTAssertEqual(record.modrinthVersionID, "old-version")
         XCTAssertFalse(manager.pendingTransaction(instanceID: instance.id))
     }
+
+    func testLegacyModpackFileRecordUsesSHA256AsBothHashes() throws {
+        let hash = String(repeating: "a", count: 64)
+        let data = Data("""
+        {"path":"mods/legacy.jar","sha256":"\(hash)","source":"modrinth","userModified":false}
+        """.utf8)
+        let record = try JSONDecoder().decode(ModpackFileRecord.self, from: data)
+        XCTAssertEqual(record.originalHash, hash)
+        XCTAssertEqual(record.currentHash, hash)
+        XCTAssertFalse(record.userModified)
+    }
+
+    func testPreservedUserEditKeepsOfficialOriginalHashAndUpdatesCurrentHash() async throws {
+        let (archiveData, archiveURL, target, targetJSON) = try makeTarget()
+        let transport = StubTransport()
+        await transport.setData(archiveData, for: archiveURL)
+        await transport.setData(targetJSON, for: URL(string: "https://api.modrinth.com/v2/version/target-version")!)
+        await transport.setData("updated-fixture-jar-v2", for: URL(string: "https://cdn.modrinth.com/data/proj/versions/v2/fixture.jar")!)
+        let instance = try makeInstance()
+        let manager = ModpackUpdateManager(layout: layout, transport: transport, client: ModrinthClient(transport: transport))
+        let file = instance.gameDirectory.appendingPathComponent("mods/fixture.jar")
+        let userEdit = Data("user-edited-local".utf8)
+        try userEdit.write(to: file)
+        let preview = try await manager.preview(instanceID: instance.id, targetVersionID: target.id)
+        let change = try XCTUnwrap(preview.changes.first(where: { $0.path == "mods/fixture.jar" }))
+        XCTAssertEqual(change.kind, .userModified)
+        XCTAssertEqual(change.currentSHA256, SHA256Digest.hexDigest(userEdit))
+        XCTAssertNotEqual(change.currentSHA256, change.newSHA256)
+
+        let report = try await manager.apply(instanceID: instance.id, targetVersionID: target.id)
+        XCTAssertTrue(report.preserved.contains("mods/fixture.jar"))
+        let record = try ModpackLifecycleManager(layout: layout).record(instanceID: instance.id)
+        let preserved = try XCTUnwrap(record.files.first(where: { $0.path == "mods/fixture.jar" }))
+        XCTAssertEqual(preserved.originalHash, SHA256Digest.hexDigest(Data("old-fixture-jar".utf8)))
+        XCTAssertEqual(preserved.currentHash, SHA256Digest.hexDigest(userEdit))
+        XCTAssertTrue(preserved.userModified)
+
+        let secondPreview = try await manager.preview(instanceID: instance.id, targetVersionID: target.id)
+        let secondChange = try XCTUnwrap(secondPreview.changes.first(where: { $0.path == "mods/fixture.jar" }))
+        XCTAssertEqual(secondChange.kind, .userModified)
+        XCTAssertEqual(secondChange.currentSHA256, SHA256Digest.hexDigest(userEdit))
+
+        try Data("changed-again".utf8).write(to: file)
+        await XCTAssertThrowsErrorAsync {
+            _ = try await manager.apply(
+                instanceID: instance.id,
+                targetVersionID: target.id,
+                expectedPlanSignature: secondPreview.signature
+            )
+        }
+        XCTAssertEqual(try Data(contentsOf: file), Data("changed-again".utf8))
+    }
 }
 
 private extension XCTestCase {

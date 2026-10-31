@@ -14,6 +14,7 @@ public struct ModpackUpdateFileChange: Sendable, Equatable {
     public let path: String
     public let oldSHA256: String?
     public let newSHA256: String?
+    public let currentSHA256: String?
     public let oldSize: Int?
     public let newSize: Int?
     public let userModified: Bool
@@ -25,6 +26,7 @@ public struct ModpackUpdateFileChange: Sendable, Equatable {
         path: String,
         oldSHA256: String?,
         newSHA256: String?,
+        currentSHA256: String? = nil,
         oldSize: Int?,
         newSize: Int?,
         userModified: Bool,
@@ -35,6 +37,7 @@ public struct ModpackUpdateFileChange: Sendable, Equatable {
         self.path = path
         self.oldSHA256 = oldSHA256
         self.newSHA256 = newSHA256
+        self.currentSHA256 = currentSHA256
         self.oldSize = oldSize
         self.newSize = newSize
         self.userModified = userModified
@@ -319,12 +322,14 @@ public struct ModpackUpdateManager: Sendable {
                 switch action {
                 case .skip:
                     skipped.append(change.path)
-                    if let old = current.files.first(where: { $0.path == change.path }) {
+                    if var old = current.files.first(where: { $0.path == change.path }) {
+                        old.currentSHA256 = change.currentSHA256
                         records[change.path] = old
                     }
                 case .preserve:
                     preserved.append(change.path)
-                    if let old = current.files.first(where: { $0.path == change.path }) {
+                    if var old = current.files.first(where: { $0.path == change.path }) {
+                        old.currentSHA256 = change.currentSHA256
                         records[change.path] = old
                     }
                 case .replace:
@@ -347,7 +352,9 @@ public struct ModpackUpdateManager: Sendable {
                         sha1: nil,
                         sha512: nil,
                         source: "modpack-update",
-                        userModified: false
+                        userModified: false,
+                        originalSHA256: hash,
+                        currentSHA256: hash
                     )
                     applied.append(change.path)
                 }
@@ -366,7 +373,9 @@ public struct ModpackUpdateManager: Sendable {
                     sha256: actual,
                     sha1: file.sha1,
                     sha512: file.sha512,
-                    source: "modrinth"
+                    source: "modrinth",
+                    originalSHA256: actual,
+                    currentSHA256: actual
                 )
             }
             for override in package.overrides where records[override.relativePath] == nil && !conflictPaths.contains(override.relativePath) {
@@ -374,10 +383,13 @@ public struct ModpackUpdateManager: Sendable {
                 guard fm.fileExists(atPath: url.path) else {
                     throw LauncherError(.ioFailure, "Untouched override is missing: \(override.relativePath)")
                 }
+                let actual = try SHA256Digest.hexDigest(ofFileAt: url)
                 records[override.relativePath] = ModpackFileRecord(
                     path: override.relativePath,
-                    sha256: try SHA256Digest.hexDigest(ofFileAt: url),
-                    source: "pack-override"
+                    sha256: actual,
+                    source: "pack-override",
+                    originalSHA256: actual,
+                    currentSHA256: actual
                 )
             }
             for (path, value) in records {
@@ -388,11 +400,13 @@ public struct ModpackUpdateManager: Sendable {
                 let actual = try SHA256Digest.hexDigest(ofFileAt: url)
                 records[path] = ModpackFileRecord(
                     path: path,
-                    sha256: actual,
+                    sha256: value.originalHash,
                     sha1: value.sha1,
                     sha512: value.sha512,
                     source: value.source,
-                    userModified: value.userModified || actual != value.sha256
+                    userModified: value.userModified || actual != value.originalHash,
+                    originalSHA256: value.originalHash,
+                    currentSHA256: actual
                 )
             }
             try Task.checkCancellation()
@@ -521,16 +535,17 @@ public struct ModpackUpdateManager: Sendable {
             let targetURL = try PathSafety.safeJoin(base: instance.gameDirectory, relativePath: path)
             let actualHash = try? SHA256Digest.hexDigest(ofFileAt: targetURL)
             if let existing = old[path] {
-                let modified = actualHash != existing.sha256
-                let same = (!entry.sha256.isEmpty && entry.sha256 == existing.sha256)
+                let modified = existing.userModified || actualHash != existing.originalHash
+                let same = (!entry.sha256.isEmpty && entry.sha256 == existing.originalHash)
                     || (entry.sha512 != nil && entry.sha512 == existing.sha512)
                     || (entry.sha1 != nil && entry.sha1 == existing.sha1)
                 if same && !modified { continue }
                 changes.append(ModpackUpdateFileChange(
                     kind: modified ? .userModified : .upgraded,
                     path: path,
-                    oldSHA256: existing.sha256,
+                    oldSHA256: existing.originalHash,
                     newSHA256: entry.sha256.isEmpty ? (entry.sha512 ?? entry.sha1) : entry.sha256,
+                    currentSHA256: actualHash,
                     oldSize: nil,
                     newSize: entry.size,
                     userModified: modified,
@@ -543,13 +558,13 @@ public struct ModpackUpdateManager: Sendable {
                 if actualHash != nil {
                     changes.append(ModpackUpdateFileChange(
                         kind: .conflict, path: path, oldSHA256: actualHash, newSHA256: entry.sha256,
-                        oldSize: nil, newSize: entry.size, userModified: true, isOptional: entry.optional,
+                        currentSHA256: actualHash, oldSize: nil, newSize: entry.size, userModified: true, isOptional: entry.optional,
                         reason: "An unmanaged file already exists at this path"
                     ))
                 } else {
                     changes.append(ModpackUpdateFileChange(
                         kind: .added, path: path, oldSHA256: nil, newSHA256: entry.sha256,
-                        oldSize: nil, newSize: entry.size, userModified: false, isOptional: entry.optional,
+                        currentSHA256: nil, oldSize: nil, newSize: entry.size, userModified: false, isOptional: entry.optional,
                         reason: "New file in pack"
                     ))
                 }
@@ -559,12 +574,13 @@ public struct ModpackUpdateManager: Sendable {
         for (path, existing) in old where !targetPaths.contains(path) {
             let targetURL = try PathSafety.safeJoin(base: instance.gameDirectory, relativePath: path)
             let actualHash = try? SHA256Digest.hexDigest(ofFileAt: targetURL)
-            let modified = actualHash != existing.sha256
+            let modified = existing.userModified || actualHash != existing.originalHash
             changes.append(ModpackUpdateFileChange(
                 kind: modified ? .userModified : .removed,
                 path: path,
-                oldSHA256: existing.sha256,
+                oldSHA256: existing.originalHash,
                 newSHA256: nil,
+                currentSHA256: actualHash,
                 oldSize: nil,
                 newSize: nil,
                 userModified: modified,
@@ -584,7 +600,7 @@ public struct ModpackUpdateManager: Sendable {
             target.id,
             current.packVersionID ?? current.versionID,
             changes.sorted { $0.path < $1.path }.map {
-                "\($0.kind.rawValue)|\($0.path)|\($0.oldSHA256 ?? "")|\($0.newSHA256 ?? "")|\($0.userModified)"
+                "\($0.kind.rawValue)|\($0.path)|\($0.oldSHA256 ?? "")|\($0.newSHA256 ?? "")|\($0.currentSHA256 ?? "")|\($0.userModified)"
             }.joined(separator: "\n"),
         ].joined(separator: "\n")
         let signature = SHA256Digest.hexDigest(Data(signatureMaterial.utf8))
@@ -885,7 +901,7 @@ public struct ModpackUpdateManager: Sendable {
         for file in record.files {
             let url = try PathSafety.safeJoin(base: instance.gameDirectory, relativePath: file.path)
             guard fm.fileExists(atPath: url.path) else { throw LauncherError(.ioFailure, "Missing updated file \(file.path)") }
-            guard try SHA256Digest.hexDigest(ofFileAt: url) == file.sha256 else {
+            guard try SHA256Digest.hexDigest(ofFileAt: url) == file.currentHash else {
                 throw LauncherError(.ioFailure, "Updated file failed verification: \(file.path)")
             }
         }

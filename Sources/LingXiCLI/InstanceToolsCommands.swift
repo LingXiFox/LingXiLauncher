@@ -13,22 +13,6 @@ enum InstanceToolsCLI {
         let includeSaves: Bool
     }
 
-    private struct WorldJSON: Encodable {
-        let name: String
-        let byteCount: Int
-        let modifiedAt: Date?
-    }
-
-    private struct BackupJSON: Encodable {
-        let id: String
-        let instanceID: String
-        let worldName: String
-        let fileCount: Int
-        let totalBytes: Int
-        let createdAt: Date
-        let directory: String
-    }
-
     private struct DiagnosisJSON: Encodable {
         let report: CrashDiagnosticReport
     }
@@ -72,65 +56,6 @@ enum InstanceToolsCLI {
         return ExitStatus.success.rawValue
     }
 
-    static func runWorld(_ arguments: [String]) throws -> Int32 {
-        guard let action = arguments.first else {
-            throw LauncherError(.usageError, "Missing world action", suggestion: "Use `lingxi world list --instance <id>`.")
-        }
-        let spec = ArgumentParser.Spec(valueOptions: ["instance", "world", "backup", "root", "data-root"], flagOptions: ["json", "help"])
-        let input = try ArgumentParser.parse(Array(arguments.dropFirst()), spec: spec)
-        if input.has("help") {
-            print("usage: lingxi world list|backup|restore|delete --instance <id> [--world <name>] [--backup <id>]")
-            return ExitStatus.success.rawValue
-        }
-        let layout = try CLI.resolveLayout(input, requireGameRoot: false)
-        let manager = WorldBackupManager(layout: layout)
-        let instanceID = try input.requireValue("instance")
-        switch action {
-        case "list":
-            let worlds = try manager.listWorlds(instanceID: instanceID)
-            let backups = try manager.listBackups(instanceID: instanceID)
-            if input.has("json") {
-                struct Payload: Encodable {
-                    let worlds: [WorldJSON]
-                    let backups: [BackupJSON]
-                }
-                CLIOutput.emitJSON(Payload(
-                    worlds: worlds.map { WorldJSON(name: $0.name, byteCount: $0.byteCount, modifiedAt: $0.modifiedAt) },
-                    backups: backups.map(backupJSON)
-                ))
-            } else {
-                print("Worlds:")
-                for world in worlds {
-                    print("  \(world.name)  \(world.byteCount) bytes")
-                }
-                print("Backups:")
-                for backup in backups {
-                    print("  \(backup.id)  \(backup.worldName)  \(backup.fileCount) files  \(backup.totalBytes) bytes")
-                }
-            }
-        case "backup":
-            let summary = try manager.createBackup(instanceID: instanceID, worldName: input.requireValue("world"))
-            print("Backup created: \(summary.id)")
-            CLIOutput.field("world", summary.worldName)
-            CLIOutput.field("files", "\(summary.fileCount)")
-            CLIOutput.field("bytes", "\(summary.totalBytes)")
-        case "restore":
-            let world = try manager.restore(
-                instanceID: instanceID,
-                backupID: input.requireValue("backup"),
-                worldName: input.value("world")
-            )
-            print("Restored world: \(world.lastPathComponent)")
-            CLIOutput.field("instance", instanceID)
-        case "delete":
-            try manager.deleteBackup(instanceID: instanceID, backupID: input.requireValue("backup"))
-            print("Backup deleted: \(try input.requireValue("backup"))")
-        default:
-            throw LauncherError(.usageError, "Unknown world action '\(action)'")
-        }
-        return ExitStatus.success.rawValue
-    }
-
     static func runDiagnose(_ arguments: [String]) throws -> Int32 {
         let spec = ArgumentParser.Spec(valueOptions: ["instance", "root", "data-root", "exit-code"], flagOptions: ["json", "help"])
         let input = try ArgumentParser.parse(arguments, spec: spec)
@@ -159,15 +84,5 @@ enum InstanceToolsCLI {
         return ExitStatus.success.rawValue
     }
 
-    private static func backupJSON(_ summary: WorldBackupSummary) -> BackupJSON {
-        BackupJSON(
-            id: summary.id,
-            instanceID: summary.instanceID,
-            worldName: summary.worldName,
-            fileCount: summary.fileCount,
-            totalBytes: summary.totalBytes,
-            createdAt: summary.createdAt,
-            directory: summary.directory.path
-        )
-    }
+
 }

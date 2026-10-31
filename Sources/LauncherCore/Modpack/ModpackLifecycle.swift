@@ -7,14 +7,33 @@ public struct ModpackFileRecord: Codable, Sendable, Equatable {
     public let sha512: String?
     public let source: String
     public var userModified: Bool
+    /// Hash of the file as supplied by the verified pack. This must not be overwritten when a
+    /// local file is preserved; it is the baseline for detecting future user edits.
+    public var originalSHA256: String?
+    /// Hash observed on disk after the last install/update. Nil on legacy records.
+    public var currentSHA256: String?
 
-    public init(path: String, sha256: String, sha1: String? = nil, sha512: String? = nil, source: String, userModified: Bool = false) {
+    public var originalHash: String { originalSHA256 ?? sha256 }
+    public var currentHash: String { currentSHA256 ?? sha256 }
+
+    public init(
+        path: String,
+        sha256: String,
+        sha1: String? = nil,
+        sha512: String? = nil,
+        source: String,
+        userModified: Bool = false,
+        originalSHA256: String? = nil,
+        currentSHA256: String? = nil
+    ) {
         self.path = path
         self.sha256 = sha256
         self.sha1 = sha1
         self.sha512 = sha512
         self.source = source
         self.userModified = userModified
+        self.originalSHA256 = originalSHA256 ?? sha256
+        self.currentSHA256 = currentSHA256 ?? sha256
     }
 }
 
@@ -67,6 +86,7 @@ public struct ModpackFileChange: Sendable, Equatable {
     public let path: String
     public let oldHash: String?
     public let newHash: String?
+    public let currentHash: String?
     public let userModified: Bool
 }
 
@@ -143,20 +163,30 @@ public struct ModpackLifecycleManager: Sendable {
         let new = Dictionary(uniqueKeysWithValues: newFiles.map { ($0.filename, $0) })
         for (path, file) in new {
             if let existing = old[path] {
-                if (existing.sha512 != nil && existing.sha512 == file.hashes.sha512)
-                    || (existing.sha1 != nil && existing.sha1 == file.hashes.sha1) {
-                    continue
-                }
-                changes.append(ModpackFileChange(kind: .upgraded, path: path, oldHash: existing.sha256, newHash: file.hashes.sha512 ?? file.hashes.sha1, userModified: existing.userModified))
+                let targetURL = try PathSafety.safeJoin(base: try InstanceRepository(layout: layout).load(id: instanceID).gameDirectory, relativePath: path)
+                let actual = try? SHA256Digest.hexDigest(ofFileAt: targetURL)
+                let modified = actual != existing.currentHash
+                let same = (!modified)
+                    && ((existing.sha512 != nil && existing.sha512 == file.hashes.sha512)
+                        || (existing.sha1 != nil && existing.sha1 == file.hashes.sha1))
+                if same { continue }
+                changes.append(ModpackFileChange(
+                    kind: modified ? .userModified : .upgraded,
+                    path: path,
+                    oldHash: existing.originalHash,
+                    newHash: file.hashes.sha512 ?? file.hashes.sha1,
+                    currentHash: actual,
+                    userModified: modified
+                ))
             } else {
-                changes.append(ModpackFileChange(kind: .added, path: path, oldHash: nil, newHash: file.hashes.sha512 ?? file.hashes.sha1, userModified: false))
+                changes.append(ModpackFileChange(kind: .added, path: path, oldHash: nil, newHash: file.hashes.sha512 ?? file.hashes.sha1, currentHash: nil, userModified: false))
             }
         }
         for (path, file) in old where new[path] == nil {
-            changes.append(ModpackFileChange(kind: .removed, path: path, oldHash: file.sha256, newHash: nil, userModified: file.userModified))
+            changes.append(ModpackFileChange(kind: .removed, path: path, oldHash: file.originalHash, newHash: nil, currentHash: file.currentHash, userModified: file.userModified))
         }
         let loader = target.loaders.contains(current.loaderKind) ? current.loaderKind : (target.loaders.first ?? current.loaderKind)
-        preserved = current.files.filter(\.userModified).map(\.path)
+        preserved = current.files.filter { $0.userModified || $0.currentHash != $0.originalHash }.map(\.path)
         return ModpackUpdatePreview(
             instanceID: instanceID,
             currentVersionID: current.versionID,

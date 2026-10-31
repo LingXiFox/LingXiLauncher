@@ -55,7 +55,7 @@ public struct LaunchContext: Sendable {
 
 public enum LauncherInfo {
     public static let name = "LingXi Launcher"
-    public static let version = "0.3.0"
+    public static let version = "0.1.0-beta.1"
 }
 
 /// The immutable, fully resolved launch command.

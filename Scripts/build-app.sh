@@ -21,7 +21,9 @@ cp "$ROOT/Apps/LingXiMac/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
 printf 'APPL????' > "$APP/Contents/PkgInfo"
 chmod +x "$APP/Contents/MacOS/LingXiMac"
 
-# Ad-hoc signature is enough for local development; distribution signing/notarization is M5+.
-codesign --force --sign - "$APP" >/dev/null 2>&1 || echo "warning: ad-hoc codesign failed; the app may still run locally"
+# Ad-hoc signing is required for a usable local bundle. A signing failure must never produce
+# a bundle that is silently treated as releasable.
+codesign --force --sign - "$APP"
+codesign --verify --deep --strict "$APP"
 
 echo "Built: $APP"

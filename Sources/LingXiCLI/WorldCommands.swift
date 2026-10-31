@@ -62,8 +62,14 @@ enum WorldCommands {
     }
 
     private static func restore(_ arguments: [String]) throws -> Int32 {
-        let spec = ArgumentParser.Spec(valueOptions: ["instance", "backup", "world", "root", "data-root"])
+        let spec = ArgumentParser.Spec(
+            valueOptions: ["instance", "backup", "world", "root", "data-root"],
+            flagOptions: ["json", "help", "confirm"]
+        )
         let input = try ArgumentParser.parse(arguments, spec: spec)
+        guard input.has("confirm") else {
+            throw LauncherError(.usageError, "Restore requires --confirm", suggestion: "Run `lingxi world restore ... --confirm` after checking the backup.")
+        }
         let layout = try CLI.resolveLayout(input)
         let manager = WorldBackupManager(layout: layout)
         let url = try manager.restore(
@@ -76,8 +82,14 @@ enum WorldCommands {
     }
 
     private static func delete(_ arguments: [String]) throws -> Int32 {
-        let spec = ArgumentParser.Spec(valueOptions: ["instance", "backup", "root", "data-root"])
+        let spec = ArgumentParser.Spec(
+            valueOptions: ["instance", "backup", "root", "data-root"],
+            flagOptions: ["json", "help", "confirm"]
+        )
         let input = try ArgumentParser.parse(arguments, spec: spec)
+        guard input.has("confirm") else {
+            throw LauncherError(.usageError, "Delete requires --confirm", suggestion: "Run `lingxi world delete ... --confirm` after checking the backup.")
+        }
         let layout = try CLI.resolveLayout(input)
         try WorldBackupManager(layout: layout).deleteBackup(
             instanceID: try input.requireValue("instance"),

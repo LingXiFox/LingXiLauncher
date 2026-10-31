@@ -107,7 +107,7 @@ Scripts/build-app.sh --release
 - [x] 状态持久化与损坏检测
 - [x] 预览后变更签名校验
 - [x] 本地修改默认保留
-- [x] 333 自动化测试通过
+- [x] 334 自动化测试通过
 - [x] Debug/Release 构建与 App 打包
 - [x] 9/10 真实游戏矩阵重跑；Microsoft 正版登录无法在自动化环境执行
 - [ ] Microsoft 正版登录实测（需要用户交互，明确未验证）

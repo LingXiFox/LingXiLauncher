@@ -1,0 +1,228 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      validation_only:
+        description: 'Build and package only; never create a GitHub Release'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Validate and package macOS ARM64
+    runs-on: xcode-27
+    timeout-minutes: 45
+    env:
+      SWIFT_DETERMINISTIC_HASHING: "1"
+      NSUnbufferedIO: "YES"
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      version: ${{ steps.version.outputs.version }}
+      zip: ${{ steps.package.outputs.zip }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Show toolchain
+        run: |
+          set -euo pipefail
+          sw_vers
+          xcodebuild -version
+          swift --version
+          uname -m
+
+      - name: Resolve and validate version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            TAG="${GITHUB_REF_NAME}"
+            [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-(alpha|beta|rc)\.[0-9]+)?$ ]] || {
+              echo "Tag '$TAG' is not a semantic version tag" >&2
+              exit 1
+            }
+            VERSION="${TAG#v}"
+          else
+            TAG=""
+            VERSION="$(sed -n 's/.*public static let version = "\(.*\)"/\1/p' Sources/LauncherCore/Models/LaunchPlan.swift | head -n 1)"
+          fi
+          test -n "$VERSION"
+          SOURCE_VERSION="$(sed -n 's/.*public static let version = "\(.*\)"/\1/p' Sources/LauncherCore/Models/LaunchPlan.swift | head -n 1)"
+          test "$SOURCE_VERSION" = "$VERSION" || {
+            echo "LauncherInfo.version '$SOURCE_VERSION' does not match release version '$VERSION'" >&2
+            exit 1
+          }
+          BASE_VERSION="${VERSION%%-*}"
+          PLIST_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Apps/LingXiMac/Info.plist)"
+          test "$PLIST_VERSION" = "$BASE_VERSION" || {
+            echo "Info.plist version '$PLIST_VERSION' does not match '$BASE_VERSION'" >&2
+            exit 1
+          }
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Validated version $VERSION (tag ${TAG:-manual validation})" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Debug build
+        run: swift build
+
+      - name: Full XCTest suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          swift test 2>&1 | tee "$RUNNER_TEMP/swift-test.log"
+          SUMMARY="$(grep -E 'Executed [0-9]+ tests?, with [0-9]+ failures?' "$RUNNER_TEMP/swift-test.log" | tail -n 1)"
+          test -n "$SUMMARY"
+          echo "$SUMMARY" >> "$GITHUB_STEP_SUMMARY"
+          if grep -qi 'skipped' "$RUNNER_TEMP/swift-test.log"; then
+            echo "XCTest reported skipped tests; release requires an explicit review." >&2
+            exit 1
+          fi
+
+      - name: Release CLI build
+        run: swift build -c release --product lingxi
+
+      - name: Release GUI build
+        run: swift build -c release --product LingXiMac
+
+      - name: Package ad-hoc signed app
+        run: Scripts/build-app.sh --release
+
+      - name: Verify bundle, arch, version and ad-hoc signature
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP="dist/LingXiMac.app"
+          test -d "$APP"
+          test -x "$APP/Contents/MacOS/LingXiMac"
+          plutil -lint "$APP/Contents/Info.plist"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Contents/Info.plist")" = "com.lingxifox.LingXiLauncher"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP/Contents/Info.plist")" = "LingXiMac"
+          BASE_VERSION="${{ steps.version.outputs.version }}"
+          BASE_VERSION="${BASE_VERSION%%-*}"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist")" = "$BASE_VERSION"
+          lipo -info "$APP/Contents/MacOS/LingXiMac" | tee "$RUNNER_TEMP/lipo.txt"
+          grep -q 'arm64' "$RUNNER_TEMP/lipo.txt"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          codesign -dv --verbose=4 "$APP" 2>&1 | tee "$RUNNER_TEMP/codesign.txt"
+          grep -q 'Signature=adhoc' "$RUNNER_TEMP/codesign.txt"
+          echo "Ad-hoc signed; not notarized and not a stable release." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Package ZIP, checksums and release notes
+        id: package
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.version.outputs.tag }}"
+          VERSION="${{ steps.version.outputs.version }}"
+          ARTIFACT_TAG="${TAG:-v$VERSION}"
+          ZIP="LingXiLauncher-${ARTIFACT_TAG}-macOS-arm64.zip"
+          mkdir -p release-assets
+          ditto -c -k --sequesterRsrc --keepParent "dist/LingXiMac.app" "release-assets/$ZIP"
+          (cd release-assets && shasum -a 256 "$ZIP" > SHA256SUMS.txt)
+          cat > release-assets/release-notes.md <<EOF
+          # LingXi Launcher ${ARTIFACT_TAG}
+
+          macOS Apple Silicon (arm64) internal beta. Minimum macOS 14.
+
+          ## Installation
+          1. Download the ZIP and verify it against \`SHA256SUMS.txt\`.
+          2. Move \`LingXiMac.app\` to Applications.
+          3. This build is ad-hoc signed and **not notarized by Apple**. On first launch, use Finder's contextual menu **Open** and confirm **Open**, or allow it once in **System Settings → Privacy & Security**. Do not disable Gatekeeper permanently.
+
+          ## Compatibility
+          - Vanilla, Fabric and NeoForge profiles.
+          - Microsoft authentication is implemented; a live interactive sign-in was not part of automated release validation.
+          - Existing instance layout is preserved.
+
+          ## Known limitations
+          - No Apple Developer ID signature or notarization.
+          - Microsoft live login remains manually validated only.
+          - Loader-changing modpack updates are intentionally blocked; create a new instance.
+          - In-game FPS sampling is unavailable unless a future telemetry module is added.
+          - World backups are manual.
+
+          ## Verification
+          - Full XCTest suite passed in this workflow.
+          - Release CLI/GUI and ARM64 app bundle passed signature checks.
+          - SHA-256: \`$(cut -d' ' -f1 release-assets/SHA256SUMS.txt)\`
+          EOF
+          test -s "release-assets/$ZIP"
+          test -s release-assets/SHA256SUMS.txt
+          test -s release-assets/release-notes.md
+          echo "zip=$ZIP" >> "$GITHUB_OUTPUT"
+          ls -lh release-assets
+
+      - name: Upload release assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-assets-${{ github.sha }}
+          path: release-assets/
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    name: Publish GitHub Pre-release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: xcode-27
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Download validated assets
+        uses: actions/download-artifact@v4
+        with:
+          name: release-assets-${{ github.sha }}
+          path: release-assets
+
+      - name: Refuse duplicate release
+        id: guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${{ needs.build.outputs.tag }}"
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $TAG already exists; refusing to overwrite it." >&2
+            exit 1
+          fi
+
+      - name: Verify downloaded assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd release-assets
+          shasum -a 256 -c SHA256SUMS.txt
+          test -s release-notes.md
+
+      - name: Create Pre-release
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${{ needs.build.outputs.tag }}"
+          ZIP="${{ needs.build.outputs.zip }}"
+          gh release create "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --prerelease \
+            --title "LingXi Launcher $TAG" \
+            --notes-file release-assets/release-notes.md \
+            "release-assets/$ZIP" \
+            "release-assets/SHA256SUMS.txt"
