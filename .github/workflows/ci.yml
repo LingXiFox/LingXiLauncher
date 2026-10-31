@@ -94,3 +94,37 @@ jobs:
           path: dist/LingXiMac-${{ github.sha }}.zip
           if-no-files-found: error
           retention-days: 7
+
+  windows-core:
+    name: Core build and tests (Windows x86_64)
+    runs-on: windows-2025
+    timeout-minutes: 30
+    env:
+      SWIFT_DETERMINISTIC_HASHING: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Install Swift
+        uses: swift-actions/setup-swift@v2
+        with:
+          swift-version: "6.1.2"
+
+      - name: Show toolchain
+        shell: pwsh
+        run: |
+          swift --version
+          [System.Environment]::OSVersion.VersionString
+
+      - name: Debug build Core and CLI
+        shell: pwsh
+        run: |
+          swift build --product LauncherCore
+          swift build --product LingXiCLIWindows
+
+      - name: Unit tests
+        shell: pwsh
+        run: swift test

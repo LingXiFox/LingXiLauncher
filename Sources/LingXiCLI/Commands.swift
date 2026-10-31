@@ -1,6 +1,10 @@
 import Foundation
 import LauncherCore
+#if canImport(MacPlatform)
 import MacPlatform
+#elseif canImport(WindowsPlatform)
+import WindowsPlatform
+#endif
 
 /// Composition root: the CLI is a thin shell that wires concrete Core services together.
 /// It contains no launcher business logic of its own.

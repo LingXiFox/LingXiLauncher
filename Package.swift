@@ -27,6 +27,7 @@ platformTargets = [
 ]
 #elseif os(Windows)
 cliDependencies.append("WindowsPlatform")
+testDependencies.append("WindowsPlatform")
 platformTargets = [
     .target(
         name: "WindowsPlatform",

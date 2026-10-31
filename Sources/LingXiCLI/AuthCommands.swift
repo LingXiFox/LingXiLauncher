@@ -1,6 +1,10 @@
 import Foundation
 import LauncherCore
+#if canImport(MacPlatform)
 import MacPlatform
+#elseif canImport(WindowsPlatform)
+import WindowsPlatform
+#endif
 
 extension CLI {
     static func microsoftService(layout: GameDataLayout) throws -> MicrosoftAuthenticationService {

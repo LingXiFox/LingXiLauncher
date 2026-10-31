@@ -5,8 +5,13 @@ import LauncherCore
 struct ProcessBrowserOpener: BrowserOpening {
     func open(_ url: URL) throws {
         let process = Process()
+        #if os(macOS)
         process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
         process.arguments = [url.absoluteString]
+        #else
+        process.executableURL = URL(fileURLWithPath: "C:\\Windows\\System32\\cmd.exe")
+        process.arguments = ["/c", "start", "", url.absoluteString]
+        #endif
         do {
             try process.run()
             process.waitUntilExit()
