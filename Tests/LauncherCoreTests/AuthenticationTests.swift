@@ -1,4 +1,7 @@
 import XCTest
+#if os(macOS)
+import MacPlatform
+#endif
 @testable import LauncherCore
 
 final class AuthenticationConfigurationTests: XCTestCase {
@@ -443,7 +446,11 @@ final class MicrosoftAuthenticationServiceTests: XCTestCase {
 
     func testKeychainRoundTrip() throws {
         let serviceName = "com.lingxifox.LingXiLauncher.tests.\(UUID().uuidString)"
-        let store = KeychainRefreshTokenStore(service: serviceName)
+        #if os(macOS)
+        let store = MacKeychainCredentialStore(service: serviceName)
+        #else
+        let store = InMemoryRefreshTokenStore()
+        #endif
         let accountID = UUID()
         do {
             try store.save(refreshToken: "keychain-test-token", for: accountID)

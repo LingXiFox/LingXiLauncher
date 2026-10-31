@@ -9,5 +9,6 @@ public enum MacPlatform {
             system: MacSystemProfiler(),
             graphics: MacGraphicsProbe()
         )
+        PlatformRuntime.install(credentials: MacKeychainCredentialStore())
     }
 }

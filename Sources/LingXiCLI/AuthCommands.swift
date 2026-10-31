@@ -127,7 +127,7 @@ extension CLI {
         }
         let layout = try resolveLayout(input, requireGameRoot: false)
         let store = MicrosoftAccountStore(layout: layout)
-        let tokenStore = KeychainRefreshTokenStore()
+        let tokenStore = PlatformRuntime.credentials
         let activeStore = ActiveAccountStore(layout: layout)
         let accounts = try store.list()
 

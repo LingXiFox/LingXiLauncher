@@ -18,6 +18,7 @@ public enum PlatformRuntime {
     nonisolated(unsafe) private static var installedHost: (any PlatformHostProviding)?
     nonisolated(unsafe) private static var installedSystem: (any SystemProfiling)?
     nonisolated(unsafe) private static var installedGraphics: (any GraphicsProbing)?
+    nonisolated(unsafe) private static var installedCredentials: (any RefreshTokenStoring)?
 
     public static func install(fileLock: any FileLocking) {
         lock.lock()
@@ -41,6 +42,17 @@ public enum PlatformRuntime {
     public static var system: any SystemProfiling {
         lock.lock(); defer { lock.unlock() }
         return installedSystem ?? GenericSystemProfiler()
+    }
+
+    public static func install(credentials: any RefreshTokenStoring) {
+        lock.lock()
+        installedCredentials = credentials
+        lock.unlock()
+    }
+
+    public static var credentials: any RefreshTokenStoring {
+        lock.lock(); defer { lock.unlock() }
+        return installedCredentials ?? InMemoryRefreshTokenStore()
     }
 
     public static var graphics: any GraphicsProbing {

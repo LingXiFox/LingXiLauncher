@@ -6,9 +6,11 @@ import PackageDescription
 
 var cliDependencies: [Target.Dependency] = ["LauncherCore"]
 var platformTargets: [Target] = []
+var testDependencies: [Target.Dependency] = ["LauncherCore"]
 
 #if os(macOS)
 cliDependencies.append("MacPlatform")
+testDependencies.append("MacPlatform")
 platformTargets = [
     .target(
         name: "MacPlatform",
@@ -54,7 +56,7 @@ var packageTargets: [Target] = [
     ),
     .testTarget(
         name: "LauncherCoreTests",
-        dependencies: ["LauncherCore"],
+        dependencies: testDependencies,
         resources: [.copy("Fixtures")],
         swiftSettings: [.swiftLanguageMode(.v6)]
     ),

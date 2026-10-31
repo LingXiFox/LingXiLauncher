@@ -279,7 +279,7 @@ public enum MicrosoftAuthenticationFactory {
             configuration: configuration,
             http: http,
             authorizer: LoopbackOAuthAuthorizer(browser: browser),
-            tokenStore: KeychainRefreshTokenStore(),
+            tokenStore: PlatformRuntime.credentials,
             accountStore: MicrosoftAccountStore(layout: layout)
         )
     }
