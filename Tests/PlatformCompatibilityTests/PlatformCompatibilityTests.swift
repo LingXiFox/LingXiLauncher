@@ -134,6 +134,17 @@ final class PlatformCompatibilityTests: XCTestCase {
         XCTAssertThrowsError(try PlatformRuntime.archive.readEntries(try Data(contentsOf: archive), limits: ArchiveLimits()))
     }
 
+    private func crc32(_ bytes: [UInt8]) -> Int {
+        var crc = 0xFFFF_FFFF
+        for byte in bytes {
+            crc ^= Int(byte)
+            for _ in 0..<8 {
+                crc = (crc >> 1) ^ (0xEDB8_8320 & (0 - (crc & 1)))
+            }
+        }
+        return crc ^ 0xFFFF_FFFF
+    }
+
     private func makeStoredZIP(name: String, content: String) -> Data {
         let nameBytes = Array(name.utf8)
         let contentBytes = Array(content.utf8)
@@ -141,12 +152,13 @@ final class PlatformCompatibilityTests: XCTestCase {
         func u32(_ value: Int) -> [UInt8] { [UInt8(value & 0xff), UInt8((value >> 8) & 0xff), UInt8((value >> 16) & 0xff), UInt8((value >> 24) & 0xff)] }
         var local: [UInt8] = [0x50, 0x4b, 0x03, 0x04]
         local += u16(20) + u16(0) + u16(0) + u16(0) + u16(0)
-        local += u32(0) + u32(contentBytes.count) + u32(contentBytes.count)
+        let crc = crc32(contentBytes)
+        local += u32(crc) + u32(contentBytes.count) + u32(contentBytes.count)
         local += u16(nameBytes.count) + u16(0) + nameBytes + contentBytes
         let centralOffset = local.count
         var central: [UInt8] = [0x50, 0x4b, 0x01, 0x02]
         central += u16(20) + u16(20) + u16(0) + u16(0) + u16(0) + u16(0)
-        central += u32(0) + u32(contentBytes.count) + u32(contentBytes.count)
+        central += u32(crc) + u32(contentBytes.count) + u32(contentBytes.count)
         central += u16(nameBytes.count) + u16(0) + u16(0) + u16(0) + u16(0)
         central += u32(0) + u32(0) + nameBytes
         var end: [UInt8] = [0x50, 0x4b, 0x05, 0x06]
