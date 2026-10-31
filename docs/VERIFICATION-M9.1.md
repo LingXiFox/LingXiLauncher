@@ -47,7 +47,8 @@ lingxi world delete ... --confirm
 - ZIP：`LingXiLauncher-v0.1.0-beta.1-macOS-arm64.zip`
 - 本地 SHA-256：`3fd505efaa676b08d46b01fe477c797361444121b228f9c0562af677a8f0eefc`
 
-> 最终发布包由 GitHub Actions CD 重新构建，最终 SHA-256 以 Release 页面 `SHA256SUMS.txt` 为准。
+> 最终发布包由 GitHub Actions CD 重新构建。Release 资产实测 SHA-256：
+> `8626a2f3d0cd74ef03609e387feb763eee221b6e683ba751e50a08f88271d68e`（4,645,204 bytes）。
 
 ## 3. CD 设计
 
@@ -62,6 +63,12 @@ lingxi world delete ... --confirm
 - 发布 Job 仅拥有 `contents: write`；重复 Tag 直接失败。
 - 创建 Pre-release，上传 ZIP 与 SHA256SUMS。
 - 不执行真实 Microsoft 登录、大型游戏下载或图形启动。
+
+实际运行：
+
+- 手动验证（只构建、不发布）：[run 41157085234](https://github.com/LingXiFox/LingXiLauncher/actions/runs/41157085234) — success。
+- Tag `v0.1.0-beta.1` 发布：[run 41157425202](https://github.com/LingXiFox/LingXiLauncher/actions/runs/41157425202) — success，Pre-release 已创建。
+- Release：[v0.1.0-beta.1](https://github.com/LingXiFox/LingXiLauncher/releases/tag/v0.1.0-beta.1)。
 
 ## 4. 真实游戏验证
 
@@ -94,6 +101,7 @@ M9.1 不重复下载大型游戏，沿用 M9.0 已完成的真实证据：
 - [x] 发布工作流版本/Tag/签名/校验和/重复发布保护。
 - [x] M9.0 真实游戏矩阵证据保留。
 - [ ] Microsoft 真实交互登录（需用户账号）。
+- [x] GitHub Actions CD 手动验证和 Tag 发布均成功，Release 资产 SHA-256 校验通过。
 - [ ] Apple Developer ID 签名与公证（明确排除）。
 
 ## 6. 已知问题
