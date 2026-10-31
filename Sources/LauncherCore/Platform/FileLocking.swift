@@ -10,6 +10,23 @@ public protocol FileLocking: Sendable {
     func acquireExclusive(at url: URL) throws -> any FileLockToken
 }
 
+/// A same-volume replacement of an existing file. Implementations must not delete the
+/// destination before the replacement is durable enough to report success.
+public protocol FileReplacing: Sendable {
+    func replaceItem(at destination: URL, with item: URL) throws
+}
+
+public struct FoundationFileReplacing: FileReplacing {
+    public init() {}
+    public func replaceItem(at destination: URL, with item: URL) throws {
+        if FileManager.default.fileExists(atPath: destination.path) {
+            _ = try FileManager.default.replaceItemAt(destination, withItemAt: item)
+        } else {
+            try FileManager.default.moveItem(at: item, to: destination)
+        }
+    }
+}
+
 /// Process-wide platform registry. The macOS app and CLI install MacPlatform services at startup;
 /// tests and unsupported hosts get a Foundation-only fallback.
 public enum PlatformRuntime {
@@ -21,6 +38,7 @@ public enum PlatformRuntime {
     nonisolated(unsafe) private static var installedCredentials: (any RefreshTokenStoring)?
     nonisolated(unsafe) private static var installedArchive: (any ArchiveHandling)?
     nonisolated(unsafe) private static var installedProcess: (any ProcessInspecting)?
+    nonisolated(unsafe) private static var installedReplacer: (any FileReplacing)?
 
     public static func install(fileLock: any FileLocking) {
         lock.lock()
@@ -62,6 +80,17 @@ public enum PlatformRuntime {
         lock.lock()
         installedProcess = process
         lock.unlock()
+    }
+
+    public static func install(replacer: any FileReplacing) {
+        lock.lock()
+        installedReplacer = replacer
+        lock.unlock()
+    }
+
+    public static var replacer: any FileReplacing {
+        lock.lock(); defer { lock.unlock() }
+        return installedReplacer ?? FoundationFileReplacing()
     }
 
     public static var process: any ProcessInspecting {

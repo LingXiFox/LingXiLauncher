@@ -327,7 +327,7 @@ public struct FabricInstaller: Sendable {
             let temporary = destination.appendingPathExtension("part-\(UUID().uuidString.prefix(6))")
             try data.write(to: temporary, options: [.atomic])
             if FileManager.default.fileExists(atPath: destination.path) {
-                _ = try FileManager.default.replaceItemAt(destination, withItemAt: temporary)
+                try PlatformRuntime.replacer.replaceItem(at: destination, with: temporary)
             } else {
                 try FileManager.default.moveItem(at: temporary, to: destination)
             }

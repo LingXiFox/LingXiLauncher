@@ -535,7 +535,7 @@ final class NeoForgeFileTransaction {
                 .appendingPathComponent(".\(destination.lastPathComponent).new-\(UUID().uuidString.prefix(6))")
             try FileManager.default.copyItem(at: source, to: temporary)
             if existed {
-                _ = try FileManager.default.replaceItemAt(destination, withItemAt: temporary)
+                try PlatformRuntime.replacer.replaceItem(at: destination, with: temporary)
             } else {
                 try FileManager.default.moveItem(at: temporary, to: destination)
             }
