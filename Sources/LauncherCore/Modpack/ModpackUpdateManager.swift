@@ -1,6 +1,5 @@
 import Foundation
 #if canImport(Darwin)
-import Darwin
 #endif
 
 public enum ModpackUpdateAction: String, CaseIterable, Sendable, Codable {
@@ -118,27 +117,18 @@ private struct ModpackUpdateTransactionState: Codable {
 }
 
 private final class ModpackUpdateLock {
-    private let descriptor: Int32
+    private let token: any FileLockToken
 
     init(layout: GameDataLayout, instanceID: String) throws {
         let directory = layout.dataRoot.appendingPathComponent("locks", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let safe = instanceID.replacingOccurrences(of: "/", with: "_")
-        let path = directory.appendingPathComponent("modpack-update-\(safe).lock").path
-        descriptor = open(path, O_CREAT | O_RDWR, 0o600)
-        guard descriptor >= 0 else {
-            throw LauncherError(.ioFailure, "Cannot open modpack update lock")
-        }
-        guard flock(descriptor, LOCK_EX | LOCK_NB) == 0 else {
-            close(descriptor)
-            throw LauncherError(.ioFailure, "Another launcher is updating this instance")
-        }
+        token = try PlatformRuntime.fileLock.acquireExclusive(
+            at: directory.appendingPathComponent("modpack-update-\(safe).lock", isDirectory: false)
+        )
     }
 
-    deinit {
-        _ = flock(descriptor, LOCK_UN)
-        close(descriptor)
-    }
+    deinit { token.release() }
 }
 
 /// Downloads a target `.mrpack`, parses its real internal file list and applies a transactional

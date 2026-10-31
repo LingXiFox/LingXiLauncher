@@ -1,6 +1,5 @@
 import Foundation
 #if canImport(Darwin)
-import Darwin
 #endif
 
 public struct MinecraftWorld: Codable, Sendable, Equatable, Identifiable {
@@ -324,33 +323,18 @@ public struct WorldBackupManager: Sendable {
     }
 
 
-/// Cross-process advisory lock. The file descriptor is intentionally held for the whole
-/// create/restore/delete operation so two launcher processes cannot interleave mutations.
+/// Cross-process advisory lock held for the whole create/restore/delete operation.
 private final class BackupInstanceLock {
-    private let descriptor: Int32
+    private let token: any FileLockToken
 
     init(root: URL) throws {
-        let fm = FileManager.default
-        try fm.createDirectory(at: root, withIntermediateDirectories: true)
-        let path = root.appendingPathComponent(".lock", isDirectory: false).path
-        descriptor = open(path, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR)
-        guard descriptor >= 0 else {
-            throw LauncherError(.ioFailure, "Cannot open backup lock at \(path)")
-        }
-        #if canImport(Darwin)
-        guard flock(descriptor, LOCK_EX | LOCK_NB) == 0 else {
-            close(descriptor)
-            throw LauncherError(.launchFailed, "Another launcher process is already operating on this instance's backups")
-        }
-        #endif
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        token = try PlatformRuntime.fileLock.acquireExclusive(
+            at: root.appendingPathComponent(".lock", isDirectory: false)
+        )
     }
 
-    deinit {
-        #if canImport(Darwin)
-        _ = flock(descriptor, LOCK_UN)
-        #endif
-        _ = close(descriptor)
-    }
+    deinit { token.release() }
 }
 
     // MARK: - Safety and filesystem helpers

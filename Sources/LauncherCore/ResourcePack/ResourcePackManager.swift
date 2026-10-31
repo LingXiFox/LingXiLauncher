@@ -1,6 +1,5 @@
 import Foundation
 #if canImport(Darwin)
-import Darwin
 #endif
 
 public struct ResourcePackRecord: Codable, Sendable, Equatable, Identifiable {
@@ -75,27 +74,18 @@ public struct ResourcePackUpdate: Sendable, Equatable {
 }
 
 private final class ResourcePackProcessLock {
-    private let descriptor: Int32
+    private let token: any FileLockToken
 
     init(layout: GameDataLayout, instanceID: String) throws {
         let directory = layout.dataRoot.appendingPathComponent("locks", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let safe = instanceID.replacingOccurrences(of: "/", with: "_")
-        let path = directory.appendingPathComponent("resourcepack-\(safe).lock").path
-        descriptor = open(path, O_CREAT | O_RDWR, 0o600)
-        guard descriptor >= 0 else {
-            throw LauncherError(.ioFailure, "Cannot open resource pack lock")
-        }
-        guard flock(descriptor, LOCK_EX | LOCK_NB) == 0 else {
-            close(descriptor)
-            throw LauncherError(.ioFailure, "Another launcher is updating resource packs for this instance")
-        }
+        token = try PlatformRuntime.fileLock.acquireExclusive(
+            at: directory.appendingPathComponent("resourcepack-\(safe).lock", isDirectory: false)
+        )
     }
 
-    deinit {
-        _ = flock(descriptor, LOCK_UN)
-        close(descriptor)
-    }
+    deinit { token.release() }
 }
 
 public struct ResourcePackManager: Sendable {

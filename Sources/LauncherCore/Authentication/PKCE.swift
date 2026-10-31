@@ -1,4 +1,4 @@
-import CryptoKit
+import Crypto
 import Foundation
 
 /// OAuth 2.0 PKCE S256 helper.

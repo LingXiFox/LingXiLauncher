@@ -1,8 +1,14 @@
 import SwiftUI
+import MacPlatform
 
 @main
 struct LingXiMacApp: App {
-    @StateObject private var model = AppModel()
+    @StateObject private var model: AppModel
+
+    init() {
+        MacPlatform.install()
+        _model = StateObject(wrappedValue: AppModel())
+    }
 
     var body: some Scene {
         WindowGroup("LingXi Launcher") {

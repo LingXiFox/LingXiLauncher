@@ -1,8 +1,65 @@
 // swift-tools-version: 6.0
-// LingXi Launcher — macOS Apple Silicon native Minecraft: Java Edition launcher.
-// Zero third-party dependencies: LauncherCore is the only place business logic lives.
+// LingXi Launcher — native Minecraft: Java Edition launcher.
+// Platform-specific code lives only in MacPlatform/WindowsPlatform; LauncherCore is portable.
 
 import PackageDescription
+
+var cliDependencies: [Target.Dependency] = ["LauncherCore"]
+var platformTargets: [Target] = []
+
+#if os(macOS)
+cliDependencies.append("MacPlatform")
+platformTargets = [
+    .target(
+        name: "MacPlatform",
+        dependencies: ["LauncherCore"],
+        path: "Sources/MacPlatform",
+        swiftSettings: [.swiftLanguageMode(.v6)]
+    ),
+    .executableTarget(
+        name: "LingXiMac",
+        dependencies: ["LauncherCore", "MacPlatform"],
+        path: "Apps/LingXiMac/Sources",
+        swiftSettings: [.swiftLanguageMode(.v6)]
+    ),
+]
+#elseif os(Windows)
+cliDependencies.append("WindowsPlatform")
+platformTargets = [
+    .target(
+        name: "WindowsPlatform",
+        dependencies: ["LauncherCore"],
+        path: "Sources/WindowsPlatform",
+        swiftSettings: [.swiftLanguageMode(.v6)]
+    ),
+    .executableTarget(
+        name: "LingXiCLIWindows",
+        dependencies: cliDependencies,
+        path: "Sources/LingXiCLI",
+        swiftSettings: [.swiftLanguageMode(.v6)]
+    ),
+]
+#endif
+
+var packageTargets: [Target] = [
+    .target(
+        name: "LauncherCore",
+        dependencies: [.product(name: "Crypto", package: "swift-crypto")],
+        swiftSettings: [.swiftLanguageMode(.v6)]
+    ),
+    .executableTarget(
+        name: "LingXiCLI",
+        dependencies: cliDependencies,
+        swiftSettings: [.swiftLanguageMode(.v6)]
+    ),
+    .testTarget(
+        name: "LauncherCoreTests",
+        dependencies: ["LauncherCore"],
+        resources: [.copy("Fixtures")],
+        swiftSettings: [.swiftLanguageMode(.v6)]
+    ),
+]
+packageTargets.append(contentsOf: platformTargets)
 
 let package = Package(
     name: "LingXiLauncher",
@@ -13,27 +70,8 @@ let package = Package(
         .library(name: "LauncherCore", targets: ["LauncherCore"]),
         .executable(name: "lingxi", targets: ["LingXiCLI"]),
     ],
-    targets: [
-        .target(
-            name: "LauncherCore",
-            swiftSettings: [.swiftLanguageMode(.v6)]
-        ),
-        .executableTarget(
-            name: "LingXiCLI",
-            dependencies: ["LauncherCore"],
-            swiftSettings: [.swiftLanguageMode(.v6)]
-        ),
-        .executableTarget(
-            name: "LingXiMac",
-            dependencies: ["LauncherCore"],
-            path: "Apps/LingXiMac/Sources",
-            swiftSettings: [.swiftLanguageMode(.v6)]
-        ),
-        .testTarget(
-            name: "LauncherCoreTests",
-            dependencies: ["LauncherCore"],
-            resources: [.copy("Fixtures")],
-            swiftSettings: [.swiftLanguageMode(.v6)]
-        ),
-    ]
+    dependencies: [
+        .package(url: "https://github.com/apple/swift-crypto.git", from: "3.15.1"),
+    ],
+    targets: packageTargets
 )
