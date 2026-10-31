@@ -35,13 +35,22 @@ platformTargets = [
         path: "Sources/WindowsPlatform",
         swiftSettings: [.swiftLanguageMode(.v6)]
     ),
-    .executableTarget(
-        name: "LingXiCLIWindows",
-        dependencies: cliDependencies,
-        path: "Sources/LingXiCLI",
-        swiftSettings: [.swiftLanguageMode(.v6)]
-    ),
 ]
+#endif
+
+#if os(Windows)
+let cliTarget = Target.executableTarget(
+    name: "LingXiCLIWindows",
+    dependencies: cliDependencies,
+    path: "Sources/LingXiCLI",
+    swiftSettings: [.swiftLanguageMode(.v6)]
+)
+#else
+let cliTarget = Target.executableTarget(
+    name: "LingXiCLI",
+    dependencies: cliDependencies,
+    swiftSettings: [.swiftLanguageMode(.v6)]
+)
 #endif
 
 var packageTargets: [Target] = [
@@ -50,11 +59,7 @@ var packageTargets: [Target] = [
         dependencies: [.product(name: "Crypto", package: "swift-crypto")],
         swiftSettings: [.swiftLanguageMode(.v6)]
     ),
-    .executableTarget(
-        name: "LingXiCLI",
-        dependencies: cliDependencies,
-        swiftSettings: [.swiftLanguageMode(.v6)]
-    ),
+    cliTarget,
     .testTarget(
         name: "PlatformCompatibilityTests",
         dependencies: testDependencies,
