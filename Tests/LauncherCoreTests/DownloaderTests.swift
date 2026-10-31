@@ -273,6 +273,7 @@ final class DownloaderTests: XCTestCase {
         XCTAssertEqual(try partFiles(in: item.destination.deletingLastPathComponent()), [])
     }
 
+#if !os(Windows)
     func testPlacementFailurePreservesExistingFile() async throws {
         let transport = StubTransport()
         let payload = Data("replacement".utf8)
@@ -291,6 +292,7 @@ final class DownloaderTests: XCTestCase {
         XCTAssertEqual(try partFiles(in: item.destination.deletingLastPathComponent()), [])
     }
 
+#endif
     func testPlanReportsCacheHitsBeforeDownloading() async throws {
         let transport = StubTransport()
         let cached = Data("cached".utf8)

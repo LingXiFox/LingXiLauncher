@@ -235,25 +235,17 @@ public struct Downloader: Sendable {
     }
 
     private static func place(_ partURL: URL, at destination: URL) throws {
-        let fileManager = FileManager.default
         do {
-            try fileManager.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(
+                at: destination.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try PlatformRuntime.replacer.replaceItem(at: destination, with: partURL)
         } catch {
-            try? fileManager.removeItem(at: partURL)
-            throw LauncherError(.ioFailure, "Cannot create directory for \(destination.path): \(error.localizedDescription)")
-        }
-
-        // POSIX rename(2) atomically replaces an existing file on the same filesystem and never
-        // removes the old destination unless it succeeds. The .part file is created next to the
-        // destination, so this is always a same-volume rename (never a copy+delete).
-        if rename(partURL.path, destination.path) != 0 {
-            let code = errno
-            let message = String(cString: strerror(code))
-            try? fileManager.removeItem(at: partURL)
-            let launcherCode: LauncherError.Code = (code == EACCES || code == EPERM) ? .permissionDenied : .ioFailure
+            try? FileManager.default.removeItem(at: partURL)
             throw LauncherError(
-                launcherCode,
-                "Cannot atomically replace \(destination.path): \(message)",
+                .ioFailure,
+                "Cannot atomically replace \(destination.path): \(error.localizedDescription)",
                 suggestion: "The existing file was left untouched. Check directory permissions and free space, then retry."
             )
         }
