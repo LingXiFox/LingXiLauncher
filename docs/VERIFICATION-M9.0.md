@@ -68,7 +68,9 @@ Scripts/build-app.sh --release
 - Debug tests：**333 tests, 0 failures**
 - Release CLI/GUI：通过
 - App Bundle：`dist/LingXiMac.app`，arm64，Ad-hoc 签名通过
-- CI：见提交后的 Actions 运行链接
+- CI：[GitHub Actions #41150667658](https://github.com/LingXiFox/LingXiLauncher/actions/runs/41150667658)（commit `40269f6`）— **success**。
+- CI 单元测试日志：**333 tests, 0 failures, 0 unexpected**；Debug、Release CLI/GUI、App Bundle、Info.plist、arm64、Ad-hoc 签名和 Artifact 上传全部通过。
+- CI Artifact：`LingXiMac-ci-40269f668c16a3ba82c4e064175136ece44667a6`（4.61 MB，7 天保留，仅 CI 测试用）。
 
 ## 6. 真实游戏验证矩阵
 
