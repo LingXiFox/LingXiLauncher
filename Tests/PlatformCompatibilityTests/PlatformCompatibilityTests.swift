@@ -111,6 +111,50 @@ final class PlatformCompatibilityTests: XCTestCase {
         XCTAssertGreaterThan(ArchiveLimits().maxEntrySize, 0)
     }
 
+
+    func testZIPReadEntriesAndSafeExtraction() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("lingxi-zip-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let archive = directory.appendingPathComponent("sample.zip")
+        try makeStoredZIP(name: "hello.txt", content: "hello").write(to: archive)
+        let entries = try PlatformRuntime.archive.readEntries(try Data(contentsOf: archive), limits: ArchiveLimits())
+        XCTAssertEqual(entries.map(\.name), ["hello.txt"])
+        let output = directory.appendingPathComponent("out")
+        _ = try PlatformRuntime.archive.extract(archive: archive, into: output, excluding: [], limits: ArchiveLimits())
+        XCTAssertEqual(try String(contentsOf: output.appendingPathComponent("hello.txt"), encoding: .utf8), "hello")
+    }
+
+    func testZIPTraversalIsRejectedBeforeExtraction() throws {
+        let archive = FileManager.default.temporaryDirectory
+            .appendingPathComponent("lingxi-evil-\(UUID().uuidString).zip")
+        defer { try? FileManager.default.removeItem(at: archive) }
+        try makeStoredZIP(name: "../evil.txt", content: "x").write(to: archive)
+        XCTAssertThrowsError(try PlatformRuntime.archive.readEntries(try Data(contentsOf: archive), limits: ArchiveLimits()))
+    }
+
+    private func makeStoredZIP(name: String, content: String) -> Data {
+        let nameBytes = Array(name.utf8)
+        let contentBytes = Array(content.utf8)
+        func u16(_ value: Int) -> [UInt8] { [UInt8(value & 0xff), UInt8((value >> 8) & 0xff)] }
+        func u32(_ value: Int) -> [UInt8] { [UInt8(value & 0xff), UInt8((value >> 8) & 0xff), UInt8((value >> 16) & 0xff), UInt8((value >> 24) & 0xff)] }
+        var local: [UInt8] = [0x50, 0x4b, 0x03, 0x04]
+        local += u16(20) + u16(0) + u16(0) + u16(0) + u16(0)
+        local += u32(0) + u32(contentBytes.count) + u32(contentBytes.count)
+        local += u16(nameBytes.count) + u16(0) + nameBytes + contentBytes
+        let centralOffset = local.count
+        var central: [UInt8] = [0x50, 0x4b, 0x01, 0x02]
+        central += u16(20) + u16(20) + u16(0) + u16(0) + u16(0) + u16(0)
+        central += u32(0) + u32(contentBytes.count) + u32(contentBytes.count)
+        central += u16(nameBytes.count) + u16(0) + u16(0) + u16(0) + u16(0)
+        central += u32(0) + u32(0) + nameBytes
+        var end: [UInt8] = [0x50, 0x4b, 0x05, 0x06]
+        end += u16(0) + u16(0) + u16(1) + u16(1)
+        end += u32(central.count) + u32(centralOffset) + u16(0)
+        return Data(local + central + end)
+    }
+
     func testRuntimeServicesAreInstalled() {
         XCTAssertNotNil(PlatformRuntime.fileLock as Any)
         XCTAssertNotNil(PlatformRuntime.host as Any)
