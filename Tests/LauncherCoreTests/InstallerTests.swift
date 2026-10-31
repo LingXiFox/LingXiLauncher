@@ -1,4 +1,5 @@
 import XCTest
+import MacPlatform
 @testable import LauncherCore
 
 final class InstallerTests: XCTestCase {
@@ -6,6 +7,7 @@ final class InstallerTests: XCTestCase {
     private var layout: GameDataLayout!
 
     override func setUpWithError() throws {
+        MacPlatform.install()
         root = try FixtureLoader.temporaryDirectory("lingxi-installer")
         layout = GameDataLayout(
             gameRoot: root.appendingPathComponent("mc", isDirectory: true),

@@ -1,10 +1,12 @@
 import XCTest
+import MacPlatform
 @testable import LauncherCore
 
 final class SafeZipExtractorTests: XCTestCase {
     private var directory: URL!
 
     override func setUpWithError() throws {
+        MacPlatform.install()
         directory = try FixtureLoader.temporaryDirectory("lingxi-zip")
     }
 

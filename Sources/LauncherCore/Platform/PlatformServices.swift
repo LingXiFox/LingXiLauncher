@@ -119,3 +119,53 @@ public struct GenericGraphicsProbe: GraphicsProbing {
         GraphicsCapabilities(openGLVersion: nil, renderer: nil, shadingLanguageVersion: nil, isAppleSilicon: false, probeError: "Graphics probing is not configured")
     }
 }
+
+public struct ArchiveLimits: Sendable, Equatable {
+    public var maxEntrySize: Int
+    public var maxTotalSize: Int
+    public var maxEntries: Int
+
+    public init(maxEntrySize: Int = 256 * 1024 * 1024, maxTotalSize: Int = 1024 * 1024 * 1024, maxEntries: Int = 20_000) {
+        self.maxEntrySize = maxEntrySize
+        self.maxTotalSize = maxTotalSize
+        self.maxEntries = maxEntries
+    }
+}
+
+public struct ArchiveEntry: Sendable, Equatable {
+    public let name: String
+    public let isDirectory: Bool
+    public let isSymlink: Bool
+    public let data: Data
+
+    public init(name: String, isDirectory: Bool, isSymlink: Bool = false, data: Data) {
+        self.name = name
+        self.isDirectory = isDirectory
+        self.isSymlink = isSymlink
+        self.data = data
+    }
+}
+
+public struct ArchiveExtractedEntry: Sendable, Equatable {
+    public let name: String
+    public let bytes: Int
+    public init(name: String, bytes: Int) {
+        self.name = name
+        self.bytes = bytes
+    }
+}
+
+public protocol ArchiveHandling: Sendable {
+    func readEntries(_ data: Data, limits: ArchiveLimits) throws -> [ArchiveEntry]
+    func extract(archive: URL, into directory: URL, excluding excludedPrefixes: [String], limits: ArchiveLimits) throws -> [ArchiveExtractedEntry]
+}
+
+public struct UnsupportedArchiveHandler: ArchiveHandling {
+    public init() {}
+    public func readEntries(_ data: Data, limits: ArchiveLimits) throws -> [ArchiveEntry] {
+        throw LauncherError(.unsupportedVersion, "ZIP handling is not configured on this platform")
+    }
+    public func extract(archive: URL, into directory: URL, excluding excludedPrefixes: [String], limits: ArchiveLimits) throws -> [ArchiveExtractedEntry] {
+        throw LauncherError(.unsupportedVersion, "ZIP handling is not configured on this platform")
+    }
+}

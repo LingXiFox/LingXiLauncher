@@ -10,5 +10,6 @@ public enum MacPlatform {
             graphics: MacGraphicsProbe()
         )
         PlatformRuntime.install(credentials: MacKeychainCredentialStore())
+        PlatformRuntime.install(archive: MacArchiveHandler())
     }
 }

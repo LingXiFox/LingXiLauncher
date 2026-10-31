@@ -19,6 +19,7 @@ public enum PlatformRuntime {
     nonisolated(unsafe) private static var installedSystem: (any SystemProfiling)?
     nonisolated(unsafe) private static var installedGraphics: (any GraphicsProbing)?
     nonisolated(unsafe) private static var installedCredentials: (any RefreshTokenStoring)?
+    nonisolated(unsafe) private static var installedArchive: (any ArchiveHandling)?
 
     public static func install(fileLock: any FileLocking) {
         lock.lock()
@@ -48,6 +49,17 @@ public enum PlatformRuntime {
         lock.lock()
         installedCredentials = credentials
         lock.unlock()
+    }
+
+    public static func install(archive: any ArchiveHandling) {
+        lock.lock()
+        installedArchive = archive
+        lock.unlock()
+    }
+
+    public static var archive: any ArchiveHandling {
+        lock.lock(); defer { lock.unlock() }
+        return installedArchive ?? UnsupportedArchiveHandler()
     }
 
     public static var credentials: any RefreshTokenStoring {
