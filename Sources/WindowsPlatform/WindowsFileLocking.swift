@@ -47,7 +47,7 @@ private final class WindowsFileLockToken: FileLockToken, @unchecked Sendable {
         var token = WindowsFileLockToken(handle: handle)
         let locked = LockFileEx(
             handle,
-            DWORD(LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY),
+            DWORD(LOCKFILE_EXCLUSIVE_LOCK) | DWORD(LOCKFILE_FAIL_IMMEDIATELY),
             0,
             1,
             0,
