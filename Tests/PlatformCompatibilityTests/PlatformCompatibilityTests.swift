@@ -121,6 +121,7 @@ final class PlatformCompatibilityTests: XCTestCase {
         try makeStoredZIP(name: "hello.txt", content: "hello").write(to: archive)
         let entries = try PlatformRuntime.archive.readEntries(try Data(contentsOf: archive), limits: ArchiveLimits())
         XCTAssertEqual(entries.map(\.name), ["hello.txt"])
+        XCTAssertEqual(entries.first?.data, Data("hello".utf8))
         let output = directory.appendingPathComponent("out")
         _ = try PlatformRuntime.archive.extract(archive: archive, into: output, excluding: [], limits: ArchiveLimits())
         XCTAssertEqual(try String(contentsOf: output.appendingPathComponent("hello.txt"), encoding: .utf8), "hello")

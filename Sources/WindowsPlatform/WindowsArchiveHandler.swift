@@ -8,15 +8,44 @@ public struct WindowsArchiveHandler: ArchiveHandling {
     public init() {}
 
     public func readEntries(_ data: Data, limits: ArchiveLimits) throws -> [ArchiveEntry] {
+        let verified = try validateEntries(data, limits: limits)
+        let temp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("lingxi-read-\(UUID().uuidString)", isDirectory: true)
+        let zip = temp.appendingPathComponent("archive.zip")
+        try FileManager.default.createDirectory(at: temp, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: temp) }
+        try data.write(to: zip, options: .atomic)
+        let output = temp.appendingPathComponent("files", isDirectory: true)
+        try runTar(archive: zip, into: output)
+        try validateExtractedTree(output, limits: limits)
+        return try verified.map { entry in
+            let contents: Data
+            if entry.isDirectory {
+                contents = Data()
+            } else {
+                contents = try Data(contentsOf: output.appendingPathComponent(entry.name))
+            }
+            return ArchiveEntry(
+                name: entry.name,
+                isDirectory: entry.isDirectory,
+                isSymlink: entry.isSymlink,
+                data: contents
+            )
+        }
+    }
+
+    private func validateEntries(_ data: Data, limits: ArchiveLimits) throws -> [ZIPCentralEntry] {
         let entries = try ZIPCentralDirectory.parse(data)
         guard entries.count <= limits.maxEntries else {
             throw LauncherError(.ioFailure, "Archive has too many entries")
         }
         var total = 0
         var seen = Set<String>()
-        var result: [ArchiveEntry] = []
         for entry in entries {
             try validate(name: entry.name)
+            guard !entry.isSymlink else {
+                throw LauncherError(.pathEscapesRoot, "Archive contains a symbolic link")
+            }
             let key = entry.name.lowercased()
             guard seen.insert(key).inserted else {
                 throw LauncherError(.pathEscapesRoot, "Archive contains case-colliding paths")
@@ -28,22 +57,11 @@ public struct WindowsArchiveHandler: ArchiveHandling {
             guard total <= limits.maxTotalSize else {
                 throw LauncherError(.ioFailure, "Archive exceeds total size limit")
             }
-            result.append(ArchiveEntry(name: entry.name, isDirectory: entry.isDirectory, isSymlink: entry.isSymlink, data: Data()))
         }
-        return result
+        return entries
     }
 
-    public func extract(
-        archive: URL,
-        into directory: URL,
-        excluding excludedPrefixes: [String],
-        limits: ArchiveLimits
-    ) throws -> [ArchiveExtractedEntry] {
-        let data = try Data(contentsOf: archive, options: .mappedIfSafe)
-        let entries = try readEntries(data, limits: limits)
-        let included = entries.filter { entry in
-            !excludedPrefixes.contains { entry.name.hasPrefix($0) }
-        }
+    private func runTar(archive: URL, into directory: URL) throws {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "C:\\Windows\\System32\\tar.exe")
@@ -57,6 +75,17 @@ public struct WindowsArchiveHandler: ArchiveHandling {
             let message = String(decoding: errorPipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
             throw LauncherError(.ioFailure, "Windows archive extraction failed: \(message)")
         }
+    }
+
+    public func extract(
+        archive: URL,
+        into directory: URL,
+        excluding excludedPrefixes: [String],
+        limits: ArchiveLimits
+    ) throws -> [ArchiveExtractedEntry] {
+        let data = try Data(contentsOf: archive, options: .mappedIfSafe)
+        let entries = try validateEntries(data, limits: limits)
+        try runTar(archive: archive, into: directory)
         do {
             let extracted = try validateExtractedTree(directory, limits: limits)
             for prefix in excludedPrefixes {
