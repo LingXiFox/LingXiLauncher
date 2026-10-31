@@ -33,8 +33,8 @@ W1.2 **尚未完成**。本阶段 Stage A 的文件安全基础已落地，Stage
 
 - macOS：**336 tests / 0 failures**；Release CLI/GUI、App Bundle、arm64、ad-hoc 签名通过。
 - Windows：**19 tests / 0 failures**；Core/CLI Debug、Release CLI 构建在 CI。
-- CI：[41181114746](https://github.com/LingXiFox/LingXiLauncher/actions/runs/41181114746) — success。
-- 代码提交：`d5e712c`；文档：`ac26439`。
+- CI：[41184348722](https://github.com/LingXiFox/LingXiLauncher/actions/runs/41184348722) — success。
+- 代码提交：`c8ef226`；文档：`ef04773`。
 - 额外修复：`Downloader` 与 `ModpackUpdateManager` 的状态/下载文件提交改用平台原子替换，解决 Windows `replaceItemAt` 崩溃。
 
 ## Stage B 诊断结果
