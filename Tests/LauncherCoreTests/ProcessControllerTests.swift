@@ -202,6 +202,7 @@ final class ProcessControllerTests: XCTestCase {
         XCTAssertFalse(exit.isSuccess)
     }
 
+#if !os(Windows)
     func testSignalDeathIsReportedAsSignalled() async throws {
         let workDirectory = try makeWorkingDirectory("process-signal")
         defer { try? FileManager.default.removeItem(at: workDirectory) }
@@ -227,6 +228,7 @@ final class ProcessControllerTests: XCTestCase {
 
     // MARK: - Launch failures
 
+#endif
     func testStartThrowsLaunchFailedForMissingExecutable() async throws {
         let workDirectory = try makeWorkingDirectory("process-missing-exe")
         defer { try? FileManager.default.removeItem(at: workDirectory) }
