@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 /// Orchestrates Microsoft → Xbox → Minecraft authentication, secure token storage and session
 /// refresh. Used by both CLI and GUI; no UI or CLI parsing lives here.

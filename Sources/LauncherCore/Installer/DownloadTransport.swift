@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 /// Failures raised by a `DownloadTransport`. Kept separate from `LauncherError` so the
 /// downloader can decide what is retryable / whether another source may help.

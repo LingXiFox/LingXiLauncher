@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 /// Minimal HTTP abstraction for Microsoft/Xbox/Minecraft endpoints.
 ///
