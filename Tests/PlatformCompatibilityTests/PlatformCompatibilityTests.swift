@@ -185,6 +185,20 @@ final class PlatformCompatibilityTests: XCTestCase {
         return Data(local + central + end)
     }
 
+
+#if canImport(WindowsPlatform)
+    func testDPAPIRefreshTokenPersistsAndDeletes() throws {
+        let store = WindowsCredentialStore()
+        let id = UUID()
+        defer { try? store.deleteRefreshToken(for: id) }
+        XCTAssertNil(try store.loadRefreshToken(for: id))
+        try store.save(refreshToken: "dpapi-test-token", for: id)
+        XCTAssertEqual(try store.loadRefreshToken(for: id), "dpapi-test-token")
+        try store.deleteRefreshToken(for: id)
+        XCTAssertNil(try store.loadRefreshToken(for: id))
+    }
+#endif
+
     func testRuntimeServicesAreInstalled() {
         XCTAssertNotNil(PlatformRuntime.fileLock as Any)
         XCTAssertNotNil(PlatformRuntime.host as Any)
