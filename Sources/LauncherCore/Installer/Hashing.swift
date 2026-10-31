@@ -36,7 +36,7 @@ public enum SHA1 {
 /// SHA-256 helpers for trusted runtime archives (Adoptium publishes SHA-256).
 public enum SHA256Digest {
     public static func hexDigest(_ data: Data) -> String {
-        CryptoKit.SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 
     public static func hexDigest(ofFileAt url: URL, chunkSize: Int = 1 << 20) throws -> String {
@@ -47,7 +47,7 @@ public enum SHA256Digest {
             throw LauncherError(.ioFailure, "Cannot read \(url.path): \(error.localizedDescription)")
         }
         defer { try? handle.close() }
-        var hasher = CryptoKit.SHA256()
+        var hasher = SHA256()
         do {
             while true {
                 guard let chunk = try handle.read(upToCount: chunkSize), !chunk.isEmpty else { break }
@@ -63,7 +63,7 @@ public enum SHA256Digest {
 /// SHA-512 helpers for Modrinth file hashes when the API supplies them.
 public enum SHA512Digest {
     public static func hexDigest(_ data: Data) -> String {
-        CryptoKit.SHA512.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        SHA512.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 
     public static func hexDigest(ofFileAt url: URL, chunkSize: Int = 1 << 20) throws -> String {
@@ -74,7 +74,7 @@ public enum SHA512Digest {
             throw LauncherError(.ioFailure, "Cannot read \(url.path): \(error.localizedDescription)")
         }
         defer { try? handle.close() }
-        var hasher = CryptoKit.SHA512()
+        var hasher = SHA512()
         do {
             while true {
                 guard let chunk = try handle.read(upToCount: chunkSize), !chunk.isEmpty else { break }

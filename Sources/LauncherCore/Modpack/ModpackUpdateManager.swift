@@ -613,7 +613,8 @@ public struct ModpackUpdateManager: Sendable {
         guard !plan.requiresMinecraftChange, !plan.requiresLoaderChange else {
             throw LauncherError(.usageError, "The target pack changes Minecraft/Loader; create a new instance instead")
         }
-        let volume = try instance.gameDirectory.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]).volumeAvailableCapacityForImportantUsage ?? 0
+        let attributes = try FileManager.default.attributesOfFileSystem(forPath: instance.gameDirectory.path)
+        let volume = (attributes[.systemFreeSize] as? NSNumber)?.int64Value ?? 0
         let required = Int64(plan.totalDownloadBytes) * 2
         guard volume > required else {
             throw LauncherError(.ioFailure, "Not enough free disk space for the pack update")
@@ -761,22 +762,13 @@ public struct ModpackUpdateManager: Sendable {
         let temporary = directory.appendingPathComponent(".state-\(UUID().uuidString).tmp")
         do {
             try data.write(to: temporary, options: [])
-            let fileDescriptor = open(temporary.path, O_RDONLY)
-            guard fileDescriptor >= 0 else {
-                throw LauncherError(.ioFailure, "Cannot open transaction state for sync")
-            }
-            guard fsync(fileDescriptor) == 0 else {
-                close(fileDescriptor)
-                throw LauncherError(.ioFailure, "Cannot sync transaction state")
-            }
-            close(fileDescriptor)
-            guard rename(temporary.path, url.path) == 0 else {
-                throw LauncherError(.ioFailure, "Cannot replace transaction state")
-            }
-            let directoryDescriptor = open(directory.path, O_RDONLY)
-            if directoryDescriptor >= 0 {
-                _ = fsync(directoryDescriptor)
-                close(directoryDescriptor)
+            let handle = try FileHandle(forWritingTo: temporary)
+            try handle.synchronize()
+            try handle.close()
+            if FileManager.default.fileExists(atPath: url.path) {
+                _ = try FileManager.default.replaceItemAt(url, withItemAt: temporary)
+            } else {
+                try FileManager.default.moveItem(at: temporary, to: url)
             }
         } catch {
             try? FileManager.default.removeItem(at: temporary)

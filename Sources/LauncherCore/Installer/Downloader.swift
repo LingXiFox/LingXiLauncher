@@ -296,8 +296,8 @@ public struct Downloader: Sendable {
         guard required > 0 else { return }
         guard let destination = pending.first?.destination else { return }
         let volumeURL = Self.volumeRoot(for: destination)
-        guard let values = try? volumeURL.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]),
-              let available = values.volumeAvailableCapacityForImportantUsage else {
+        guard let attributes = try? FileManager.default.attributesOfFileSystem(forPath: volumeURL.path),
+              let available = (attributes[.systemFreeSize] as? NSNumber)?.int64Value else {
             return
         }
         // Keep a small safety margin for metadata, logs and the .part file of the largest entry.
