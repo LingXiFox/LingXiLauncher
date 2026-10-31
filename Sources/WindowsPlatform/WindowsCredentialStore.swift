@@ -24,9 +24,9 @@ public struct WindowsCredentialStore: RefreshTokenStoring, Sendable {
         $bytes = [Text.Encoding]::UTF8.GetBytes($plain)
         $entropy = [Text.Encoding]::UTF8.GetBytes('LingXiLauncher')
         $protected = [Security.Cryptography.ProtectedData]::Protect($bytes, $entropy, 'CurrentUser')
-        [IO.File]::WriteAllBytes($args[0], $protected)
+        [IO.File]::WriteAllBytes($env:LINGXI_DPAPI_PATH, $protected)
         """
-        _ = try runPowerShell(script, arguments: [temporary.path], stdin: refreshToken)
+        _ = try runPowerShell(script, path: temporary.path, stdin: refreshToken)
         guard FileManager.default.fileExists(atPath: temporary.path) else {
             throw LauncherError(.ioFailure, "DPAPI did not produce a credential file")
         }
@@ -42,12 +42,12 @@ public struct WindowsCredentialStore: RefreshTokenStoring, Sendable {
         guard FileManager.default.fileExists(atPath: target.path) else { return nil }
         let script = """
         Add-Type -AssemblyName System.Security
-        $protected = [IO.File]::ReadAllBytes($args[0])
+        $protected = [IO.File]::ReadAllBytes($env:LINGXI_DPAPI_PATH)
         $entropy = [Text.Encoding]::UTF8.GetBytes('LingXiLauncher')
         $plain = [Security.Cryptography.ProtectedData]::Unprotect($protected, $entropy, 'CurrentUser')
         [Console]::Out.Write([Convert]::ToBase64String($plain))
         """
-        let output = try runPowerShell(script, arguments: [target.path], stdin: nil)
+        let output = try runPowerShell(script, path: target.path, stdin: nil)
         guard let data = Data(base64Encoded: output.trimmingCharacters(in: .whitespacesAndNewlines)),
               let token = String(data: data, encoding: .utf8), !token.isEmpty else {
             throw LauncherError(.keychainFailure, "The saved Windows credential is damaged")
@@ -66,10 +66,13 @@ public struct WindowsCredentialStore: RefreshTokenStoring, Sendable {
         directory.appendingPathComponent("\(accountID.uuidString.lowercased()).bin", isDirectory: false)
     }
 
-    private func runPowerShell(_ script: String, arguments: [String], stdin: String?) throws -> String {
+    private func runPowerShell(_ script: String, path: String, stdin: String?) throws -> String {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe")
-        process.arguments = ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script] + arguments
+        process.arguments = ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script]
+        var environment = ProcessInfo.processInfo.environment
+        environment["LINGXI_DPAPI_PATH"] = path
+        process.environment = environment
         let input = Pipe()
         let output = Pipe()
         let errors = Pipe()
