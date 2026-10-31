@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import LauncherCore
+import MacPlatform
 import SwiftUI
 
 @MainActor
@@ -467,7 +468,7 @@ final class AppModel: ObservableObject {
         do {
             let service = try MicrosoftAuthenticationFactory.makeDefault(
                 layout: layout,
-                browser: ProcessBrowser()
+                authorizer: LoopbackOAuthAuthorizer(browser: ProcessBrowser())
             )
             authService = service
             authObserver = Task { [weak self] in

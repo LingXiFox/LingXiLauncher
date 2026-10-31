@@ -1,24 +1,6 @@
 import Foundation
-#if canImport(Darwin)
 import Darwin
-#elseif canImport(Glibc)
-import Glibc
-#endif
-
-/// Opens the system browser. Implemented by CLI/GUI (AppKit), not by LauncherCore.
-public protocol BrowserOpening: Sendable {
-    func open(_ url: URL) throws
-}
-
-/// Performs an Authorization Code + PKCE round-trip and returns the code with its state.
-public protocol OAuthAuthorizing: Sendable {
-    func authorize(
-        configuration: MicrosoftAuthenticationConfiguration,
-        state: String,
-        codeChallenge: String,
-        timeout: TimeInterval
-    ) async throws -> OAuthCallback
-}
+import LauncherCore
 
 /// Runs a tiny loopback HTTP server, opens the system browser and waits for the redirect.
 public struct LoopbackOAuthAuthorizer: OAuthAuthorizing {
@@ -124,11 +106,7 @@ public final class LoopbackCallbackServer: @unchecked Sendable {
         callbackStream = pair.stream
         callbackContinuation = pair.continuation
 
-        #if canImport(Darwin)
         let fd = socket(AF_INET, SOCK_STREAM, 0)
-        #else
-        let fd = socket(AF_INET, Int32(SOCK_STREAM.rawValue), 0)
-        #endif
         guard fd >= 0 else {
             throw LauncherError(.networkFailure, "Could not create the OAuth callback socket")
         }
@@ -199,10 +177,9 @@ public final class LoopbackCallbackServer: @unchecked Sendable {
         lock.unlock()
 
         guard !alreadyClosed, fd >= 0 else { return }
-        #if canImport(Darwin) || canImport(Glibc)
         shutdown(fd, Int32(SHUT_RDWR))
         close(fd)
-        #endif
+        
     }
 
     private func acceptLoop() {

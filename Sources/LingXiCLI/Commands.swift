@@ -1,5 +1,6 @@
 import Foundation
 import LauncherCore
+import MacPlatform
 
 /// Composition root: the CLI is a thin shell that wires concrete Core services together.
 /// It contains no launcher business logic of its own.
@@ -586,7 +587,7 @@ enum CLI {
         case "microsoft":
             let service = try MicrosoftAuthenticationFactory.makeDefault(
                 layout: layout,
-                browser: ProcessBrowserOpener()
+                authorizer: LoopbackOAuthAuthorizer(browser: ProcessBrowserOpener())
             )
             let accounts = try await service.accounts()
             let identifier = parts[1]

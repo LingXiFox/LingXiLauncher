@@ -1,9 +1,13 @@
 import Foundation
 import LauncherCore
+import MacPlatform
 
 extension CLI {
     static func microsoftService(layout: GameDataLayout) throws -> MicrosoftAuthenticationService {
-        try MicrosoftAuthenticationFactory.makeDefault(layout: layout, browser: ProcessBrowserOpener())
+        try MicrosoftAuthenticationFactory.makeDefault(
+            layout: layout,
+            authorizer: LoopbackOAuthAuthorizer(browser: ProcessBrowserOpener())
+        )
     }
 
     static func runMicrosoftAccountCommand(_ arguments: [String]) async throws -> Int32 {

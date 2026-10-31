@@ -270,7 +270,7 @@ extension XboxMinecraftAuthenticator: MinecraftAuthenticatorProtocol {}
 public enum MicrosoftAuthenticationFactory {
     public static func makeDefault(
         layout: GameDataLayout,
-        browser: any BrowserOpening,
+        authorizer: any OAuthAuthorizing,
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) throws -> MicrosoftAuthenticationService {
         let configuration = try MicrosoftAuthenticationConfiguration.load(dataRoot: layout.dataRoot, environment: environment)
@@ -278,7 +278,7 @@ public enum MicrosoftAuthenticationFactory {
         return MicrosoftAuthenticationService(
             configuration: configuration,
             http: http,
-            authorizer: LoopbackOAuthAuthorizer(browser: browser),
+            authorizer: authorizer,
             tokenStore: PlatformRuntime.credentials,
             accountStore: MicrosoftAccountStore(layout: layout)
         )
