@@ -446,6 +446,7 @@ final class MicrosoftAuthenticationServiceTests: XCTestCase {
 }
 
 
+#if os(macOS)
     func testKeychainRoundTrip() throws {
         let serviceName = "com.lingxifox.LingXiLauncher.tests.\(UUID().uuidString)"
         #if os(macOS)
@@ -529,3 +530,4 @@ final class LoopbackAuthorizationTests: XCTestCase {
         }
     }
 }
+#endif
