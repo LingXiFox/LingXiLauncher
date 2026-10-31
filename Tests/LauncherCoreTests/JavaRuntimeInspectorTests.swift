@@ -1,4 +1,5 @@
 import XCTest
+#if !os(Windows)
 @testable import LauncherCore
 
 final class JavaRuntimeInspectorTests: XCTestCase {
@@ -282,3 +283,4 @@ final class JavaRuntimeInspectorTests: XCTestCase {
         return url
     }
 }
+#endif

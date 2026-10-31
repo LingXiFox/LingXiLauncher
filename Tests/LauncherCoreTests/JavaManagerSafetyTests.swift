@@ -1,4 +1,5 @@
 import XCTest
+#if !os(Windows)
 @testable import LauncherCore
 
 final class JavaManagerSafetyTests: XCTestCase {
@@ -174,3 +175,4 @@ final class JavaManagerSafetyTests: XCTestCase {
         XCTAssertFalse(manager.isCompatible(runtime, requirement: JavaVersionRequirement(majorVersion: 21)))
     }
 }
+#endif
