@@ -765,11 +765,7 @@ public struct ModpackUpdateManager: Sendable {
             let handle = try FileHandle(forWritingTo: temporary)
             try handle.synchronize()
             try handle.close()
-            if FileManager.default.fileExists(atPath: url.path) {
-                _ = try FileManager.default.replaceItemAt(url, withItemAt: temporary)
-            } else {
-                try FileManager.default.moveItem(at: temporary, to: url)
-            }
+            try PlatformRuntime.replacer.replaceItem(at: url, with: temporary)
         } catch {
             try? FileManager.default.removeItem(at: temporary)
             throw error
