@@ -3,7 +3,7 @@
 [![CI](https://github.com/LingXiFox/LingXiLauncher/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/LingXiFox/LingXiLauncher/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/LingXiFox/LingXiLauncher?include_prereleases&label=release)](https://github.com/LingXiFox/LingXiLauncher/releases)
 
-macOS Apple Silicon 原生 **Minecraft: Java Edition** 启动器。当前进度：**M0 + M1 + M2 + M2.5 + M3 + M5-Alpha + M6.1 + M6.1.1 + M6.2 + M6.2.1 + M6.3 + M6.3.1 + M7.1 + M7.1.1 + M7.2 + M7.3 + M8 + M9.0 + M9.1**。
+macOS Apple Silicon 原生 **Minecraft: Java Edition** 启动器。当前进度：**M0 + M1 + M2 + M2.5 + M3 + M5-Alpha + M6.1 + M6.1.1 + M6.2 + M6.2.1 + M6.3 + M6.3.1 + M7.1 + M7.1.1 + M7.2 + M7.3 + M8 + M9.0 + M9.1 + W1**。
 
 - **M3 Microsoft 正版认证已实现并通过真机验证**：OAuth 2.0 Authorization Code + PKCE S256、系统浏览器、localhost 回调、Xbox Live → XSTS → Minecraft Services → 所有权/档案、Keychain 存储与刷新。
 - **M5-Alpha SwiftUI GUI 可用**：首页 / 游戏实例 / 版本下载 / 账户管理 / 运行日志 / 设置，直接调用 LauncherCore，不执行 CLI。
@@ -20,16 +20,17 @@ macOS Apple Silicon 原生 **Minecraft: Java Edition** 启动器。当前进度�
 - **M8 性能工作台**：启动器侧真实采集启动、资源重载、世界加载/区块生成和渲染阶段；记录硬件/Java/Loader/模组上下文，报告持久化与对比，基于实际数据的保守调优建议、确认后应用和恢复。没有游戏内帧计数器时明确标记 FPS 不可用，不用 CPU 占用伪造帧率；仅在 Apple Silicon 原生运行。
 - Fabric 与 NeoForge 已通过真实安装/启动验证；Forge/Quilt 未实现。本地离线身份仅保留给 CLI 技术验证，GUI 不提供绕过所有权的启动入口。
 - **M9.1 Release Engineering**：首个 macOS ARM64 公开测试基线 `v0.1.0-beta.1`。语义化 Tag 触发独立 CD，验证版本一致性、完整 XCTest、Release CLI/GUI、ARM64 App Bundle、Ad-hoc 签名、ZIP 与 SHA-256，并创建 Pre-release；普通 main 推送不会发布。
-- **GitHub Actions CI**：Debug 构建、**336 项**完整 XCTest、Release CLI/GUI、App Bundle 与 ad-hoc 签名校验、ZIP Artifact 上传；不执行真实登录、游戏下载或图形启动。Artifact 仅用于测试，不是公证发行版。
+- **W1 跨平台 Core**：`LauncherCore` 移除平台条件分支，macOS/Windows 平台能力通过 `PlatformRuntime` 注入；macOS 完整 336 项测试，Windows x86_64 Core/CLI 构建与 16 项平台契约测试通过。Windows 目前仅验证 Core/CLI，GUI、Microsoft 回环登录、ZIP 安装和图形探测仍未实现，详见 [docs/VERIFICATION-W1.md](docs/VERIFICATION-W1.md)。
+- **GitHub Actions CI**：macOS ARM64 Debug 构建、**336 项**完整 XCTest、Release CLI/GUI、App Bundle 与 ad-hoc 签名校验、ZIP Artifact 上传；Windows x86_64 额外执行 Core/CLI 构建和 16 项平台兼容测试。不执行真实登录、游戏下载或图形启动。Artifact 仅用于测试，不是公证发行版。
 
-详见 [docs/VERIFICATION-M9.1.md](docs/VERIFICATION-M9.1.md)、[docs/VERIFICATION-M9.0.md](docs/VERIFICATION-M9.0.md)、[docs/VERIFICATION-M8.md](docs/VERIFICATION-M8.md)、[docs/VERIFICATION-M7.3.md](docs/VERIFICATION-M7.3.md)、[docs/VERIFICATION-M7.2.md](docs/VERIFICATION-M7.2.md)、[docs/VERIFICATION-M7.1.md](docs/VERIFICATION-M7.1.md)、[docs/VERIFICATION-M6.3.md](docs/VERIFICATION-M6.3.md)、[docs/VERIFICATION-M6.2.md](docs/VERIFICATION-M6.2.md)、[docs/VERIFICATION-M6.1.md](docs/VERIFICATION-M6.1.md)、[docs/VERIFICATION-M3-M5.md](docs/VERIFICATION-M3-M5.md) 与 [docs/VERIFICATION-M2.5.md](docs/VERIFICATION-M2.5.md)。调试 GUI 可使用 [docs/DEBUG-AUTOMATION.md](docs/DEBUG-AUTOMATION.md) 的 opt-in 接口。`v0.1.0-beta.1` 是首个公开测试基线（Pre-release），不是稳定版；App 未经 Apple 公证。
+详见 [docs/VERIFICATION-W1.md](docs/VERIFICATION-W1.md)、[docs/VERIFICATION-M9.1.md](docs/VERIFICATION-M9.1.md)、[docs/VERIFICATION-M9.0.md](docs/VERIFICATION-M9.0.md)、[docs/VERIFICATION-M8.md](docs/VERIFICATION-M8.md)、[docs/VERIFICATION-M7.3.md](docs/VERIFICATION-M7.3.md)、[docs/VERIFICATION-M7.2.md](docs/VERIFICATION-M7.2.md)、[docs/VERIFICATION-M7.1.md](docs/VERIFICATION-M7.1.md)、[docs/VERIFICATION-M6.3.md](docs/VERIFICATION-M6.3.md)、[docs/VERIFICATION-M6.2.md](docs/VERIFICATION-M6.2.md)、[docs/VERIFICATION-M6.1.md](docs/VERIFICATION-M6.1.md)、[docs/VERIFICATION-M3-M5.md](docs/VERIFICATION-M3-M5.md) 与 [docs/VERIFICATION-M2.5.md](docs/VERIFICATION-M2.5.md)。调试 GUI 可使用 [docs/DEBUG-AUTOMATION.md](docs/DEBUG-AUTOMATION.md) 的 opt-in 接口。`v0.1.0-beta.1` 是首个公开测试基线（Pre-release），不是稳定版；App 未经 Apple 公证。
 
 ## 设计边界
 
 - `LauncherCore` 是独立 Swift library，不依赖 SwiftUI/AppKit/CLI 参数解析，不进行用户交互。
 - `lingxi` 只是薄外壳：解析 argv → 调用 Core API → 映射退出码。
 - `LingXiMac` 直接调用同一个 library，**不会**通过执行 CLI 获取核心功能。
-- 零第三方依赖：Foundation / CryptoKit / Compression / Security（系统框架）。
+- 平台能力通过 `PlatformRuntime` 注入；唯一第三方包是官方 `apple/swift-crypto`（3.15.1），用于跨平台哈希/HMAC/PKCE。macOS 仍使用系统 Security/Compression/OpenGL 框架。
 
 ```text
 LingXiMac (SwiftUI)              lingxi (CLI)
@@ -54,7 +55,7 @@ LingXiMac (SwiftUI)              lingxi (CLI)
 
 ## 快速开始
 
-CI 使用 GitHub 官方 `xcode-27` Apple Silicon Runner，执行 Debug 构建、完整单元测试、Release CLI/GUI 构建、`Scripts/build-app.sh` 打包及 Info.plist/App Bundle/ad-hoc 签名校验，并上传临时 Artifact。CI Artifact 仅用于验证，**不是** Developer ID 签名或公证发行版。
+CI 使用 GitHub 官方 `xcode-27` Apple Silicon Runner，执行 Debug 构建、完整单元测试、Release CLI/GUI 构建、`Scripts/build-app.sh` 打包及 Info.plist/App Bundle/ad-hoc 签名校验，并上传临时 Artifact；另使用 `windows-2022` Runner 构建 Windows Core/CLI 并运行 16 项平台兼容测试。CI Artifact 仅用于验证，**不是** Developer ID 签名或公证发行版。
 
 要求：macOS 14+、Apple Silicon、Swift 6 工具链（Xcode 26/27 自带）。开发期游戏文件全部放在仓库内 `.dev-sandbox/`（已 gitignore），不写系统目录。
 
