@@ -35,6 +35,12 @@ platformTargets = [
         path: "Sources/WindowsPlatform",
         swiftSettings: [.swiftLanguageMode(.v6)]
     ),
+    .executableTarget(
+        name: "LingXiCLIWindows",
+        dependencies: cliDependencies,
+        path: "Sources/LingXiCLI",
+        swiftSettings: [.swiftLanguageMode(.v6)]
+    ),
 ]
 #endif
 
@@ -50,13 +56,26 @@ var packageTargets: [Target] = [
         swiftSettings: [.swiftLanguageMode(.v6)]
     ),
     .testTarget(
-        name: "LauncherCoreTests",
+        name: "PlatformCompatibilityTests",
         dependencies: testDependencies,
-        resources: [.copy("Fixtures")],
         swiftSettings: [.swiftLanguageMode(.v6)]
     ),
 ]
+#if os(macOS)
+packageTargets.append(.testTarget(
+    name: "LauncherCoreTests",
+    dependencies: testDependencies,
+    resources: [.copy("Fixtures")],
+    swiftSettings: [.swiftLanguageMode(.v6)]
+))
+#endif
 packageTargets.append(contentsOf: platformTargets)
+
+#if os(Windows)
+let cliProduct = Product.executable(name: "lingxi", targets: ["LingXiCLIWindows"])
+#else
+let cliProduct = Product.executable(name: "lingxi", targets: ["LingXiCLI"])
+#endif
 
 let package = Package(
     name: "LingXiLauncher",
@@ -65,7 +84,7 @@ let package = Package(
     ],
     products: [
         .library(name: "LauncherCore", targets: ["LauncherCore"]),
-        .executable(name: "lingxi", targets: ["LingXiCLI"]),
+        cliProduct,
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-crypto.git", from: "3.15.1"),
