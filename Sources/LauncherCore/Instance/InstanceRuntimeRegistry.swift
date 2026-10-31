@@ -1,7 +1,4 @@
 import Foundation
-#if canImport(Darwin)
-import Darwin
-#endif
 
 /// A cross-process record of which instance owns a live game process.
 ///
@@ -80,12 +77,6 @@ public struct InstanceRuntimeRegistry: InstanceRuntimeChecking, Sendable {
     }
 
     private static func processExists(_ pid: Int32) -> Bool {
-        guard pid > 0 else { return false }
-        #if canImport(Darwin)
-        if kill(pid, 0) == 0 { return true }
-        return errno == EPERM
-        #else
-        return false
-        #endif
+        PlatformRuntime.process.isRunning(pid: pid)
     }
 }

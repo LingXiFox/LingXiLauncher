@@ -1,11 +1,5 @@
 import Foundation
 
-#if canImport(Darwin)
-import Darwin
-#elseif canImport(Glibc)
-import Glibc
-#endif
-
 /// Starts a `LaunchPlan` as a child `java` process and streams its output.
 ///
 /// Design notes:
@@ -151,7 +145,7 @@ private final class GameProcessSession: RunningGameControlling, @unchecked Senda
         // different process here; kill() may report ESRCH if it exited in the meantime, which
         // is harmless.
         if !isExited {
-            kill(process.processIdentifier, SIGKILL)
+            try? PlatformRuntime.process.terminate(pid: process.processIdentifier, force: true)
         }
         _ = await waitForExit(upTo: 2)
     }

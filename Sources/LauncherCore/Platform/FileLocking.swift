@@ -20,6 +20,7 @@ public enum PlatformRuntime {
     nonisolated(unsafe) private static var installedGraphics: (any GraphicsProbing)?
     nonisolated(unsafe) private static var installedCredentials: (any RefreshTokenStoring)?
     nonisolated(unsafe) private static var installedArchive: (any ArchiveHandling)?
+    nonisolated(unsafe) private static var installedProcess: (any ProcessInspecting)?
 
     public static func install(fileLock: any FileLocking) {
         lock.lock()
@@ -55,6 +56,17 @@ public enum PlatformRuntime {
         lock.lock()
         installedArchive = archive
         lock.unlock()
+    }
+
+    public static func install(process: any ProcessInspecting) {
+        lock.lock()
+        installedProcess = process
+        lock.unlock()
+    }
+
+    public static var process: any ProcessInspecting {
+        lock.lock(); defer { lock.unlock() }
+        return installedProcess ?? FoundationProcessInspector()
     }
 
     public static var archive: any ArchiveHandling {

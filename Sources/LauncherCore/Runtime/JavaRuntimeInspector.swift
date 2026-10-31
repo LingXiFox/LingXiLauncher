@@ -1,11 +1,5 @@
 import Foundation
 
-#if canImport(Darwin)
-import Darwin
-#elseif canImport(Glibc)
-import Glibc
-#endif
-
 /// Discovers the version, architecture and vendor of a local `java` executable by running it.
 ///
 /// The probe executes the binary directly (never through `sh -c` / `bash -c`) with the

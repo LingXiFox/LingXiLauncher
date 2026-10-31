@@ -11,5 +11,6 @@ public enum MacPlatform {
         )
         PlatformRuntime.install(credentials: MacKeychainCredentialStore())
         PlatformRuntime.install(archive: MacArchiveHandler())
+        PlatformRuntime.install(process: MacProcessInspector())
     }
 }

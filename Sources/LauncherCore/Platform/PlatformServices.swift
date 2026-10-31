@@ -169,3 +169,33 @@ public struct UnsupportedArchiveHandler: ArchiveHandling {
         throw LauncherError(.unsupportedVersion, "ZIP handling is not configured on this platform")
     }
 }
+
+public protocol ProcessInspecting: Sendable {
+    func isRunning(pid: Int32) -> Bool
+    func terminate(pid: Int32, force: Bool) throws
+}
+
+public struct FoundationProcessInspector: ProcessInspecting {
+    public init() {}
+    public func isRunning(pid: Int32) -> Bool {
+        guard pid > 0 else { return false }
+        let os = ProcessInfo.processInfo.environment["OS"]
+        let p = Process()
+        if os == "Windows_NT" {
+            p.executableURL = URL(fileURLWithPath: "C:\\Windows\\System32\\tasklist.exe")
+            p.arguments = ["/FI", "PID eq \(pid)", "/NH"]
+        } else {
+            p.executableURL = URL(fileURLWithPath: "/bin/kill")
+            p.arguments = ["-0", String(pid)]
+        }
+        p.standardOutput = FileHandle.nullDevice
+        p.standardError = FileHandle.nullDevice
+        do { try p.run(); p.waitUntilExit() } catch { return false }
+        return p.terminationStatus == 0
+    }
+
+    public func terminate(pid: Int32, force: Bool) throws {
+        guard pid > 0 else { return }
+        throw LauncherError(.launchFailed, "Process termination is not configured on this platform")
+    }
+}
