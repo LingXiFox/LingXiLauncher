@@ -32,7 +32,7 @@
 - Windows Host：x86_64、`;` 路径分隔符、`%APPDATA%` 数据目录。
 - 系统信息：逻辑核心、物理内存。
 - 进程检测：`tasklist` / `taskkill`。
-- 文件锁：当前仍是独占锁文件 + 重试，不是 Win32 `LockFileEx`。
+- 文件锁：`LockFileEx` 内核级字节锁，10 秒超时、进程退出自动释放；锁文件不删除以避免 inode 竞态。
 - 图形探测：明确 unavailable。
 - 凭据存储：仍是内存实现。
 - OAuth：明确 unsupported。
@@ -41,15 +41,15 @@
 
 - macOS：**336 tests / 0 failures**。
 - Windows：**18 tests / 0 failures**。
-- Windows CI：Core、CLI Debug 构建，`PlatformCompatibilityTests`。
+- Windows CI：Core、CLI Debug 构建，`PlatformCompatibilityTests`（含 Win32 锁互斥和 ZIP 安全用例）。
 - macOS CI：完整测试、Release CLI/GUI、App Bundle、签名、Artifact。
-- CI 运行：[41171050683](https://github.com/LingXiFox/LingXiLauncher/actions/runs/41171050683) — success。
-- 最终代码提交：`3d04963`。
+- CI 运行：[41173827305](https://github.com/LingXiFox/LingXiLauncher/actions/runs/41173827305) — success。
+- 最终代码提交：`b8f2f48`。
 
 ## 3. 未完成（阻塞 W1.1 验收）
 
 1. **Win32 原子替换未实现**：Core 仍使用 Foundation `replaceItemAt` 或是移动操作；Windows 未接入 `MoveFileExW`/`ReplaceFileW`。
-2. **Win32 文件锁未实现**：`WindowsFileLocking` 仍是锁文件删除方案，没有 `LockFileEx`，异常退出自动释放和超时语义未验证。
+2. **Win32 文件锁已实现但仍需跨进程 CLI 验证**：已使用 `LockFileEx` 并通过同进程互斥测试；尚无两个独立 `lingxi` 进程的真实竞争测试。
 3. **Windows ZIP 不是完整 ZIP 实现**：`readEntries` 不返回条目内容；依赖 `tar.exe`，尚未覆盖所有 JAR/`.mrpack` 解压路径。
 4. **Windows OAuth 未实现**：没有 loopback listener，CLI 登录返回 unsupported。
 5. **Windows Token 存储未实现**：仍是 `InMemoryRefreshTokenStore`，不持久化、不具备 DPAPI/Credential Manager 语义。
@@ -67,7 +67,7 @@
 | Windows Core/CLI 构建 | 通过 |
 | Windows ZIP 安全测试 | 通过（18 项中的 ZIP 用例） |
 | Win32 原子替换 | 未完成 |
-| Win32 文件锁 | 未完成 |
+| Win32 文件锁 | 基本通过，跨进程 CLI 验证待补 |
 | Windows OAuth/凭据 | 未完成 |
 | 共享 Core 业务测试双平台 | 未完成 |
 | macOS CI/CD 保持 | 通过 |
