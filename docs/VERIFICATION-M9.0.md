@@ -69,8 +69,9 @@ Scripts/build-app.sh --release
 - Release CLI/GUI：通过
 - App Bundle：`dist/LingXiMac.app`，arm64，Ad-hoc 签名通过
 - CI：[GitHub Actions #41150667658](https://github.com/LingXiFox/LingXiLauncher/actions/runs/41150667658)（commit `40269f6`）— **success**。
-- CI 单元测试日志：**333 tests, 0 failures, 0 unexpected**（提交后新增 1 项故障恢复测试，本地最终为 334）；Debug、Release CLI/GUI、App Bundle、Info.plist、arm64、Ad-hoc 签名和 Artifact 上传全部通过。
-- CI Artifact：`LingXiMac-ci-40269f668c16a3ba82c4e064175136ece44667a6`（4.61 MB，7 天保留，仅 CI 测试用）。
+- CI：[GitHub Actions #41154860785](https://github.com/LingXiFox/LingXiLauncher/actions/runs/41154860785)（commit `e2de646`）— **success**。
+- CI 单元测试日志：**334 tests, 0 failures, 0 unexpected**；Debug、Release CLI/GUI、App Bundle、Info.plist、arm64、Ad-hoc 签名和 Artifact 上传全部通过。
+- CI Artifact：`LingXiMac-ci-e2de6464866f3ea9b9eace44f664a3946e98b2f7`（4.61 MB，7 天保留，仅 CI 测试用；Artifact ID `13024372779`）。
 
 ## 6. 真实游戏验证矩阵
 
