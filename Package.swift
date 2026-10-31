@@ -66,14 +66,12 @@ var packageTargets: [Target] = [
         swiftSettings: [.swiftLanguageMode(.v6)]
     ),
 ]
-#if os(macOS)
 packageTargets.append(.testTarget(
     name: "LauncherCoreTests",
     dependencies: testDependencies,
     resources: [.copy("Fixtures")],
     swiftSettings: [.swiftLanguageMode(.v6)]
 ))
-#endif
 packageTargets.append(contentsOf: platformTargets)
 
 #if os(Windows)

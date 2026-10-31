@@ -1,5 +1,4 @@
 import XCTest
-import MacPlatform
 @testable import LauncherCore
 
 /// M2.5 — JVM/native architecture selection and Mach-O verification.
@@ -7,7 +6,7 @@ final class JVMArchitectureTests: XCTestCase {
     private var root: URL!
 
     override func setUpWithError() throws {
-        MacPlatform.install()
+        TestPlatform.install()
         root = try FixtureLoader.temporaryDirectory("lingxi-jvm-arch")
     }
 

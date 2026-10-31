@@ -1,5 +1,4 @@
 import XCTest
-import MacPlatform
 @testable import LauncherCore
 
 final class ModpackUpdateManagerTests: XCTestCase {
@@ -7,7 +6,7 @@ final class ModpackUpdateManagerTests: XCTestCase {
     private var layout: GameDataLayout!
 
     override func setUpWithError() throws {
-        MacPlatform.install()
+        TestPlatform.install()
         root = try FixtureLoader.temporaryDirectory("lingxi-mrpack-update")
         layout = GameDataLayout(
             gameRoot: root.appendingPathComponent("mc", isDirectory: true),

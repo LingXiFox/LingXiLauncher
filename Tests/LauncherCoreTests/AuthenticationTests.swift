@@ -2,6 +2,8 @@ import XCTest
 #if os(macOS)
 import MacPlatform
 #endif
+#if os(macOS)
+#endif
 @testable import LauncherCore
 
 final class AuthenticationConfigurationTests: XCTestCase {
