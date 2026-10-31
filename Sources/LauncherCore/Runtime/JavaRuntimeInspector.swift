@@ -220,7 +220,7 @@ public struct JavaRuntimeInspector: JavaRuntimeInspecting {
             }
             _ = collector.waitForTermination(timeout: 2)
             if process.isRunning {
-                kill(process.processIdentifier, SIGKILL)
+                try? PlatformRuntime.process.terminate(pid: process.processIdentifier, force: true)
             }
             throw LauncherError(
                 .javaNotFound,
