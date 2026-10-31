@@ -53,7 +53,7 @@ private final class WindowsFileLockToken: FileLockToken, @unchecked Sendable {
             0,
             &token.overlapped
         )
-        if locked == 0 {
+        if !locked {
             CloseHandle(handle)
             token.handle = nil
             return nil
