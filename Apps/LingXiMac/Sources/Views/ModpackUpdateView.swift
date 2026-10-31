@@ -20,6 +20,7 @@ struct ModpackUpdateView: View {
     @State private var error: String?
     @State private var status: String?
     @State private var confirmApply = false
+    @State private var applyTask: Task<Void, Never>?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -61,7 +62,10 @@ struct ModpackUpdateView: View {
         .background(theme.canvas)
         .task { await load() }
         .confirmationDialog("应用整合包更新？", isPresented: $confirmApply, titleVisibility: .visible) {
-            Button("确认更新", role: .destructive) { Task { await apply() } }
+            Button("确认更新", role: .destructive) {
+                applyTask?.cancel()
+                applyTask = Task { await apply() }
+            }
             Button("取消", role: .cancel) {}
         } message: {
             Text("更新会修改实例文件；本地修改和未知文件默认保留。任何失败都会回滚。")
@@ -102,8 +106,12 @@ struct ModpackUpdateView: View {
             }
             Spacer()
             LXButton("关闭", kind: .ghost) { dismiss() }
-            if plan != nil {
-                LXButton("应用更新", systemImage: "arrow.down.circle", kind: .primary, isDisabled: applying) {
+            if applying {
+                LXButton("取消更新", systemImage: "xmark.circle", kind: .destructive) {
+                    applyTask?.cancel()
+                }
+            } else if plan != nil {
+                LXButton("应用更新", systemImage: "arrow.down.circle", kind: .primary) {
                     confirmApply = true
                 }
             }
@@ -315,18 +323,24 @@ struct ModpackUpdateView: View {
         guard let target else { return }
         applying = true
         error = nil
+        defer {
+            applying = false
+            applyTask = nil
+        }
         do {
             let report = try await manager.apply(
                 instanceID: instance.id,
                 targetVersionID: target.id,
-                actions: actions
+                actions: actions,
+                expectedPlanSignature: plan?.signature
             )
             status = "已应用 \(report.applied.count) 项变更，保留 \(report.preserved.count) 项，移除 \(report.removed.count) 项。"
             plan = nil
             current = try manager.record(instanceID: instance.id)
+        } catch is CancellationError {
+            status = "更新已取消，事务已回滚或清理。"
         } catch {
             self.error = error.localizedDescription
         }
-        applying = false
     }
 }

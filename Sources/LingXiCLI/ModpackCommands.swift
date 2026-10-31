@@ -11,6 +11,7 @@ private struct JSONPackUpdatePlan: Encodable {
     let requiresLoaderChange: Bool
     let files: Int
     let downloadBytes: Int
+    let signature: String
     let changes: [JSONPackUpdateChange]
     enum CodingKeys: String, CodingKey {
         case loader, files, changes
@@ -21,6 +22,7 @@ private struct JSONPackUpdatePlan: Encodable {
         case requiresMinecraftChange = "requires_minecraft_change"
         case requiresLoaderChange = "requires_loader_change"
         case downloadBytes = "download_bytes"
+        case signature
     }
 }
 
@@ -156,6 +158,7 @@ extension CLI {
                 requiresLoaderChange: plan.requiresLoaderChange,
                 files: plan.changes.count,
                 downloadBytes: plan.totalDownloadBytes,
+                signature: plan.signature,
                 changes: plan.changes.map {
                     JSONPackUpdateChange(kind: $0.kind.rawValue, path: $0.path, userModified: $0.userModified, reason: $0.reason)
                 }
@@ -166,6 +169,7 @@ extension CLI {
             CLIOutput.field("loader", plan.targetLoaderKind + (plan.targetLoaderVersion.map { " \($0)" } ?? ""))
             CLIOutput.field("changes", "\(plan.changes.count)")
             CLIOutput.field("download", Downloader.format(bytes: plan.totalDownloadBytes))
+            CLIOutput.field("signature", plan.signature)
             for change in plan.changes where change.kind == .userModified || change.kind == .conflict {
                 CLIOutput.field(change.kind.rawValue, change.path)
             }
@@ -175,7 +179,7 @@ extension CLI {
 
     private static func modpackUpdateApply(_ arguments: [String]) async throws -> Int32 {
         let spec = ArgumentParser.Spec(
-            valueOptions: ["instance", "target", "preserve", "root", "data-root"],
+            valueOptions: ["instance", "target", "preserve", "signature", "root", "data-root"],
             flagOptions: ["json", "yes", "help"]
         )
         let input = try ArgumentParser.parse(arguments, spec: spec)
@@ -192,7 +196,12 @@ extension CLI {
         for path in input.value("preserve")?.split(separator: ",") ?? [] {
             actions[String(path)] = .preserve
         }
-        let report = try await manager.apply(instanceID: instanceID, targetVersionID: target.id, actions: actions)
+        let report = try await manager.apply(
+            instanceID: instanceID,
+            targetVersionID: target.id,
+            actions: actions,
+            expectedPlanSignature: input.value("signature")
+        )
         if input.has("json") {
             CLIOutput.emitJSON(JSONPackUpdateReport(
                 applied: report.applied, preserved: report.preserved,

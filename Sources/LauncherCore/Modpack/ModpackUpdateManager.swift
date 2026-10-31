@@ -57,6 +57,7 @@ public struct ModpackUpdatePlan: Sendable, Equatable {
     public let totalDownloadBytes: Int
     public let archiveURL: URL
     public let archiveSHA256: String
+    public let signature: String
 
     public var hasBlockingChanges: Bool {
         changes.contains { $0.kind == .conflict }
@@ -71,12 +72,46 @@ public struct ModpackUpdateReport: Sendable, Equatable {
     public let transactionID: String
 }
 
+private struct ModpackBackupEntry: Codable {
+    let path: String
+    let sha256: String
+    let size: Int
+    let existed: Bool
+}
+
 private struct ModpackUpdateTransactionState: Codable {
     let id: String
     let instanceID: String
     var status: String
     var affectedPaths: [String]
     var hadRecord: Bool
+    var backups: [String: ModpackBackupEntry] = [:]
+    var recordBackupSHA256: String?
+    var error: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, instanceID, status, affectedPaths, hadRecord, backups, recordBackupSHA256, error
+    }
+
+    init(id: String, instanceID: String, status: String, affectedPaths: [String], hadRecord: Bool) {
+        self.id = id
+        self.instanceID = instanceID
+        self.status = status
+        self.affectedPaths = affectedPaths
+        self.hadRecord = hadRecord
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        instanceID = try c.decode(String.self, forKey: .instanceID)
+        status = try c.decode(String.self, forKey: .status)
+        affectedPaths = try c.decode([String].self, forKey: .affectedPaths)
+        hadRecord = try c.decode(Bool.self, forKey: .hadRecord)
+        backups = try c.decodeIfPresent([String: ModpackBackupEntry].self, forKey: .backups) ?? [:]
+        recordBackupSHA256 = try c.decodeIfPresent(String.self, forKey: .recordBackupSHA256)
+        error = try c.decodeIfPresent(String.self, forKey: .error)
+    }
 }
 
 private final class ModpackUpdateLock {
@@ -139,8 +174,9 @@ public struct ModpackUpdateManager: Sendable {
         }) ?? false
     }
 
-    /// Recover an interrupted update before any new operation. Returns true if a transaction was
-    /// rolled back.
+    /// Recover an interrupted update before any new operation. A committed transaction is only
+    /// cleaned; a prepared transaction never touched user files; applying/rollback-failed
+    /// transactions are restored from verified backups.
     @discardableResult
     public func recover(instanceID: String) throws -> Bool {
         let lock = try ModpackUpdateLock(layout: layout, instanceID: instanceID)
@@ -148,9 +184,33 @@ public struct ModpackUpdateManager: Sendable {
         guard let root = try transactionRoots(instanceID: instanceID).first(where: {
             fm.fileExists(atPath: $0.appendingPathComponent("state.json").path)
         }) else { return false }
-        try restore(transactionRoot: root, instance: try loadInstance(instanceID))
-        try? fm.removeItem(at: root)
-        return true
+        let state = try readState(transactionRoot: root)
+        guard state.instanceID == instanceID else {
+            throw LauncherError(.ioFailure, "Update transaction belongs to another instance")
+        }
+        switch state.status {
+        case "committed":
+            try fm.removeItem(at: root)
+            return false
+        case "prepared":
+            try fm.removeItem(at: root)
+            return false
+        case "applying", "rollbackFailed":
+            do {
+                try restore(transactionRoot: root, instance: try loadInstance(instanceID))
+                try fm.removeItem(at: root)
+                return true
+            } catch {
+                try? markTransactionStatus(transactionRoot: root, status: "rollbackFailed", error: error.localizedDescription)
+                throw LauncherError(
+                    .ioFailure,
+                    "Automatic pack update recovery failed; recovery files were preserved",
+                    suggestion: "Transaction: \(root.path). " + error.localizedDescription
+                )
+            }
+        default:
+            throw LauncherError(.ioFailure, "Unknown pack update transaction state '\(state.status)'")
+        }
     }
 
     public func latestUpdate(instanceID: String) async throws -> ModrinthVersion? {
@@ -190,7 +250,8 @@ public struct ModpackUpdateManager: Sendable {
     public func apply(
         instanceID: String,
         targetVersionID: String,
-        actions: [String: ModpackUpdateAction] = [:]
+        actions: [String: ModpackUpdateAction] = [:],
+        expectedPlanSignature: String? = nil
     ) async throws -> ModpackUpdateReport {
         guard !pendingTransaction(instanceID: instanceID) else {
             throw LauncherError(.usageError, "An unfinished pack update exists", suggestion: "Recover the previous update first.")
@@ -205,16 +266,27 @@ public struct ModpackUpdateManager: Sendable {
             throw LauncherError(.usageError, "The target version belongs to a different Modrinth project")
         }
         let context = try makeContext(instance: instance, current: current, target: target)
-        var succeeded = false
+        var prepared = false
         defer {
-            if !succeeded { try? restore(transactionRoot: context.transactionRoot, instance: instance) }
-            try? fm.removeItem(at: context.transactionRoot)
+            // Before prepareTransaction no instance file has been changed; only scratch data exists.
+            if !prepared { try? fm.removeItem(at: context.transactionRoot) }
         }
         let (archive, package) = try await downloadAndParse(context: context, target: target)
+        try Task.checkCancellation()
         let plan = try makePlan(instance: instance, current: current, target: target, package: package, context: context)
+        if let expectedPlanSignature, expectedPlanSignature != plan.signature {
+            throw LauncherError(
+                .usageError,
+                "Instance files changed since the preview; review the update again",
+                suggestion: "No files were modified. Run preview again and confirm the new diff."
+            )
+        }
         try validate(plan: plan, current: current, instance: instance)
         let staged = try await stageFiles(plan: plan, package: package, context: context, archive: archive, actions: actions)
+        try Task.checkCancellation()
         let transaction = try prepareTransaction(instance: instance, plan: plan, current: current, context: context)
+        prepared = true
+        try markTransactionStatus(transactionRoot: context.transactionRoot, status: "applying")
         do {
             var newRecord = current
             newRecord.versionID = package.versionID
@@ -242,6 +314,7 @@ public struct ModpackUpdateManager: Sendable {
             var skipped: [String] = []
             var removed: [String] = []
             for change in plan.changes {
+                try Task.checkCancellation()
                 let action = actions[change.path] ?? defaultAction(for: change)
                 switch action {
                 case .skip:
@@ -322,11 +395,12 @@ public struct ModpackUpdateManager: Sendable {
                     userModified: value.userModified || actual != value.sha256
                 )
             }
+            try Task.checkCancellation()
             newRecord.files = records.values.sorted { $0.path < $1.path }
             try verify(record: newRecord, instance: instance)
             try ModpackLifecycleManager(layout: layout).save(newRecord, instanceID: instanceID)
             try markCommitted(transaction: transaction)
-            succeeded = true
+            try? fm.removeItem(at: context.transactionRoot)
             return ModpackUpdateReport(
                 applied: applied.sorted(),
                 preserved: preserved.sorted(),
@@ -334,9 +408,24 @@ public struct ModpackUpdateManager: Sendable {
                 removed: removed.sorted(),
                 transactionID: transaction.id
             )
-        } catch {
-            try? restore(transactionRoot: context.transactionRoot, instance: instance)
-            throw (error as? LauncherError) ?? LauncherError(.ioFailure, "Pack update failed: \(error.localizedDescription)")
+        } catch let failure {
+            do {
+                try restore(transactionRoot: context.transactionRoot, instance: instance)
+                try? fm.removeItem(at: context.transactionRoot)
+            } catch let rollbackError {
+                try? markTransactionStatus(
+                    transactionRoot: context.transactionRoot,
+                    status: "rollbackFailed",
+                    error: rollbackError.localizedDescription
+                )
+                throw LauncherError(
+                    .ioFailure,
+                    "Pack update failed and automatic rollback also failed; recovery files were preserved",
+                    suggestion: "Transaction: \(context.transactionRoot.path). Rollback: \(rollbackError.localizedDescription). Original: \(failure.localizedDescription)"
+                )
+            }
+            if failure is CancellationError { throw CancellationError() }
+            throw (failure as? LauncherError) ?? LauncherError(.ioFailure, "Pack update failed: \(failure.localizedDescription)")
         }
     }
 
@@ -436,7 +525,7 @@ public struct ModpackUpdateManager: Sendable {
                 let same = (!entry.sha256.isEmpty && entry.sha256 == existing.sha256)
                     || (entry.sha512 != nil && entry.sha512 == existing.sha512)
                     || (entry.sha1 != nil && entry.sha1 == existing.sha1)
-                if same { continue }
+                if same && !modified { continue }
                 changes.append(ModpackUpdateFileChange(
                     kind: modified ? .userModified : .upgraded,
                     path: path,
@@ -446,7 +535,9 @@ public struct ModpackUpdateManager: Sendable {
                     newSize: entry.size,
                     userModified: modified,
                     isOptional: entry.optional,
-                    reason: modified ? "Local file differs from the managed version" : "New pack version"
+                    reason: modified
+                        ? (same ? "Local file differs from the managed version; pack file is unchanged" : "Local file differs from the managed version")
+                        : "New pack version"
                 ))
             } else {
                 if actualHash != nil {
@@ -489,6 +580,14 @@ public struct ModpackUpdateManager: Sendable {
         case let .neoforge(v): loaderKind = "neoforge"; loaderVersion = v
         }
         let archiveURL = target.primaryArchive.flatMap(\.downloadURL)!
+        let signatureMaterial = [
+            target.id,
+            current.packVersionID ?? current.versionID,
+            changes.sorted { $0.path < $1.path }.map {
+                "\($0.kind.rawValue)|\($0.path)|\($0.oldSHA256 ?? "")|\($0.newSHA256 ?? "")|\($0.userModified)"
+            }.joined(separator: "\n"),
+        ].joined(separator: "\n")
+        let signature = SHA256Digest.hexDigest(Data(signatureMaterial.utf8))
         return ModpackUpdatePlan(
             instanceID: instance.id,
             currentVersionID: current.packVersionID ?? current.versionID,
@@ -502,7 +601,8 @@ public struct ModpackUpdateManager: Sendable {
             changes: changes.sorted { $0.path < $1.path },
             totalDownloadBytes: changes.filter { $0.kind != .removed && $0.kind != .userModified }.reduce(0) { $0 + max(0, $1.newSize ?? 0) },
             archiveURL: archiveURL,
-            archiveSHA256: package.archiveSHA256
+            archiveSHA256: package.archiveSHA256,
+            signature: signature
         )
     }
 
@@ -533,6 +633,7 @@ public struct ModpackUpdateManager: Sendable {
             return action == .replace
         }.map(\.path))
         for file in package.files where policy.contains(file.relativePath) {
+            try Task.checkCancellation()
             let destination = try PathSafety.safeJoin(base: context.stagingRoot, relativePath: file.relativePath)
             try fm.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
             let url = file.downloadURL
@@ -572,7 +673,7 @@ public struct ModpackUpdateManager: Sendable {
         current: ModpackRecord,
         context: Context
     ) throws -> ModpackUpdateTransactionState {
-        let state = ModpackUpdateTransactionState(
+        var state = ModpackUpdateTransactionState(
             id: context.id,
             instanceID: instance.id,
             status: "prepared",
@@ -580,60 +681,194 @@ public struct ModpackUpdateManager: Sendable {
             hadRecord: true
         )
         let recordURL = instance.directory.appendingPathComponent("modpack.json")
-        try fm.copyItem(at: recordURL, to: context.backupRoot.appendingPathComponent("modpack.json"))
+        let recordBackup = context.backupRoot.appendingPathComponent("modpack.json")
+        guard fm.fileExists(atPath: recordURL.path) else {
+            throw LauncherError(.ioFailure, "Cannot back up modpack.json before update")
+        }
+        try fm.copyItem(at: recordURL, to: recordBackup)
+        state.recordBackupSHA256 = try SHA256Digest.hexDigest(ofFileAt: recordBackup)
+
         for path in plan.changes.map(\.path) {
             let source = try PathSafety.safeJoin(base: instance.gameDirectory, relativePath: path)
-            guard fm.fileExists(atPath: source.path) else { continue }
-            let backup = try PathSafety.safeJoin(base: context.backupRoot.appendingPathComponent("files", isDirectory: true), relativePath: path)
-            try fm.createDirectory(at: backup.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try fm.copyItem(at: source, to: backup)
+            let backup = try PathSafety.safeJoin(
+                base: context.backupRoot.appendingPathComponent("files", isDirectory: true),
+                relativePath: path
+            )
+            if fm.fileExists(atPath: source.path) {
+                try fm.createDirectory(at: backup.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try fm.copyItem(at: source, to: backup)
+                let size = (try fm.attributesOfItem(atPath: backup.path)[.size] as? NSNumber)?.intValue ?? 0
+                state.backups[path] = ModpackBackupEntry(
+                    path: path,
+                    sha256: try SHA256Digest.hexDigest(ofFileAt: backup),
+                    size: size,
+                    existed: true
+                )
+            } else {
+                state.backups[path] = ModpackBackupEntry(path: path, sha256: "", size: 0, existed: false)
+            }
         }
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys]
-        try encoder.encode(state).write(to: context.transactionRoot.appendingPathComponent("state.json"), options: [.atomic])
+        try writeState(state, transactionRoot: context.transactionRoot)
         _ = current
         return state
     }
 
     private func markCommitted(transaction: ModpackUpdateTransactionState) throws {
-        // The caller removes the transaction directory only after the new record and all files
-        // have passed verification. No old files are deleted before that point.
-        let stateURL = layout.dataRoot
+        let root = layout.dataRoot
             .appendingPathComponent("modpack-updates", isDirectory: true)
             .appendingPathComponent(try PathSafety.validatedPathComponent(transaction.instanceID), isDirectory: true)
             .appendingPathComponent(transaction.id, isDirectory: true)
-            .appendingPathComponent("state.json")
-        var committed = transaction
-        committed.status = "committed"
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys]
-        try encoder.encode(committed).write(to: stateURL, options: [.atomic])
+        try markTransactionStatus(transactionRoot: root, status: "committed")
     }
 
-    private func restore(transactionRoot: URL, instance: Instance) throws {
+    private func markTransactionStatus(transactionRoot: URL, status: String, error: String? = nil) throws {
+        var state = try readState(transactionRoot: transactionRoot)
+        state.status = status
+        state.error = error
+        try writeState(state, transactionRoot: transactionRoot)
+    }
+
+    private func readState(transactionRoot: URL) throws -> ModpackUpdateTransactionState {
         let stateURL = transactionRoot.appendingPathComponent("state.json")
-        guard let data = try? Data(contentsOf: stateURL),
-              let state = try? JSONDecoder().decode(ModpackUpdateTransactionState.self, from: data) else {
-            return
+        guard let data = try? Data(contentsOf: stateURL) else {
+            throw LauncherError(.ioFailure, "Pack update state is missing")
         }
-        for path in state.affectedPaths {
-            let target = try PathSafety.safeJoin(base: instance.gameDirectory, relativePath: path)
-            if fm.fileExists(atPath: target.path) { try fm.removeItem(at: target) }
-            let backup = try? PathSafety.safeJoin(
-                base: transactionRoot.appendingPathComponent("backup/files", isDirectory: true),
-                relativePath: path
+        do {
+            return try JSONDecoder().decode(ModpackUpdateTransactionState.self, from: data)
+        } catch {
+            throw LauncherError(
+                .ioFailure,
+                "Pack update state is corrupt; recovery files were preserved",
+                suggestion: transactionRoot.path
             )
-            if let backup, fm.fileExists(atPath: backup.path) {
-                try fm.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
-                try fm.copyItem(at: backup, to: target)
+        }
+    }
+
+    private func writeState(_ state: ModpackUpdateTransactionState, transactionRoot: URL) throws {
+        try fm.createDirectory(at: transactionRoot, withIntermediateDirectories: true)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let data = try encoder.encode(state)
+        try Self.durableWrite(data, to: transactionRoot.appendingPathComponent("state.json"))
+    }
+
+    private static func durableWrite(_ data: Data, to url: URL) throws {
+        let directory = url.deletingLastPathComponent()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let temporary = directory.appendingPathComponent(".state-\(UUID().uuidString).tmp")
+        do {
+            try data.write(to: temporary, options: [])
+            let fileDescriptor = open(temporary.path, O_RDONLY)
+            guard fileDescriptor >= 0 else {
+                throw LauncherError(.ioFailure, "Cannot open transaction state for sync")
+            }
+            guard fsync(fileDescriptor) == 0 else {
+                close(fileDescriptor)
+                throw LauncherError(.ioFailure, "Cannot sync transaction state")
+            }
+            close(fileDescriptor)
+            guard rename(temporary.path, url.path) == 0 else {
+                throw LauncherError(.ioFailure, "Cannot replace transaction state")
+            }
+            let directoryDescriptor = open(directory.path, O_RDONLY)
+            if directoryDescriptor >= 0 {
+                _ = fsync(directoryDescriptor)
+                close(directoryDescriptor)
+            }
+        } catch {
+            try? FileManager.default.removeItem(at: temporary)
+            throw error
+        }
+    }
+
+    /// Restore only after verifying every required backup. This method must never remove a target
+    /// when its backup is missing or fails its checksum.
+    private func restore(transactionRoot: URL, instance: Instance) throws {
+        let state = try readState(transactionRoot: transactionRoot)
+        guard state.instanceID == instance.id else {
+            throw LauncherError(.ioFailure, "Update transaction belongs to another instance")
+        }
+        guard state.status != "committed" else { return }
+
+        let fileBackupRoot = transactionRoot.appendingPathComponent("backup/files", isDirectory: true)
+        var verified: [(entry: ModpackBackupEntry, backup: URL?)] = []
+        for path in state.affectedPaths {
+            guard let entry = state.backups[path] else {
+                throw LauncherError(.ioFailure, "Transaction has no backup record for \(path)")
+            }
+            let target = try PathSafety.safeJoin(base: instance.gameDirectory, relativePath: path)
+            _ = target
+            if entry.existed {
+                let backup = try PathSafety.safeJoin(base: fileBackupRoot, relativePath: path)
+                guard fm.fileExists(atPath: backup.path) else {
+                    throw LauncherError(.ioFailure, "Backup is missing for \(path); refusing to delete the original")
+                }
+                let size = (try fm.attributesOfItem(atPath: backup.path)[.size] as? NSNumber)?.intValue ?? -1
+                guard size == entry.size,
+                      try SHA256Digest.hexDigest(ofFileAt: backup) == entry.sha256 else {
+                    throw LauncherError(.ioFailure, "Backup checksum failed for \(path); refusing recovery")
+                }
+                verified.append((entry, backup))
+            } else {
+                verified.append((entry, nil))
             }
         }
+
+        let recordBackup = transactionRoot.appendingPathComponent("backup/modpack.json")
         if state.hadRecord {
-            let recordBackup = transactionRoot.appendingPathComponent("backup/modpack.json")
+            guard fm.fileExists(atPath: recordBackup.path),
+                  let expected = state.recordBackupSHA256,
+                  try SHA256Digest.hexDigest(ofFileAt: recordBackup) == expected else {
+                throw LauncherError(.ioFailure, "modpack.json backup is missing or corrupt; refusing recovery")
+            }
+        }
+
+        let restoreRoot = transactionRoot.appendingPathComponent("restore-temp", isDirectory: true)
+        try? fm.removeItem(at: restoreRoot)
+        try fm.createDirectory(at: restoreRoot, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: restoreRoot) }
+
+        for (index, item) in verified.enumerated() {
+            let target = try PathSafety.safeJoin(base: instance.gameDirectory, relativePath: item.entry.path)
+            if item.entry.existed, let backup = item.backup {
+                let staged = restoreRoot.appendingPathComponent("file-\(index)")
+                try fm.copyItem(at: backup, to: staged)
+                guard try SHA256Digest.hexDigest(ofFileAt: staged) == item.entry.sha256 else {
+                    throw LauncherError(.ioFailure, "Restore copy checksum failed for \(item.entry.path)")
+                }
+                try fm.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+                let old = restoreRoot.appendingPathComponent("old-\(index)")
+                if fm.fileExists(atPath: target.path) {
+                    try fm.moveItem(at: target, to: old)
+                }
+                do {
+                    try fm.moveItem(at: staged, to: target)
+                    try? fm.removeItem(at: old)
+                } catch {
+                    if fm.fileExists(atPath: old.path), !fm.fileExists(atPath: target.path) {
+                        try? fm.moveItem(at: old, to: target)
+                    }
+                    throw error
+                }
+            } else if !item.entry.existed, fm.fileExists(atPath: target.path) {
+                try fm.removeItem(at: target)
+            }
+        }
+
+        if state.hadRecord {
             let record = instance.directory.appendingPathComponent("modpack.json")
-            if fm.fileExists(atPath: recordBackup.path) {
-                if fm.fileExists(atPath: record.path) { try fm.removeItem(at: record) }
-                try fm.copyItem(at: recordBackup, to: record)
+            let staged = restoreRoot.appendingPathComponent("modpack.json")
+            try fm.copyItem(at: recordBackup, to: staged)
+            let old = restoreRoot.appendingPathComponent("old-modpack.json")
+            if fm.fileExists(atPath: record.path) { try fm.moveItem(at: record, to: old) }
+            do {
+                try fm.moveItem(at: staged, to: record)
+                try? fm.removeItem(at: old)
+            } catch {
+                if fm.fileExists(atPath: old.path), !fm.fileExists(atPath: record.path) {
+                    try? fm.moveItem(at: old, to: record)
+                }
+                throw error
             }
         }
     }

@@ -30,8 +30,8 @@ struct HomeView: View {
         ) {
             HStack(spacing: 8) {
                 LXBadge(
-                    text: model.isGameRunning ? "游戏运行中" : "环境就绪",
-                    tone: model.isGameRunning ? .success : .accent,
+                    text: model.isGameRunning ? "游戏运行中" : environmentBadgeText,
+                    tone: model.isGameRunning ? .success : environmentBadgeTone,
                     dot: true
                 )
                 if let pid = model.gamePID {
@@ -161,6 +161,19 @@ struct HomeView: View {
         .padding(.top, 2)
     }
 
+    private var environmentBadgeText: String {
+        if model.selectedInstance == nil { return "尚未创建实例" }
+        if model.selectedJavaRuntime == nil { return "需要 Java" }
+        if model.activeMicrosoftAccount == nil { return "需要登录" }
+        return "环境就绪"
+    }
+
+    private var environmentBadgeTone: LXBadgeTone {
+        if model.selectedInstance == nil { return .neutral }
+        if model.selectedJavaRuntime == nil || model.activeMicrosoftAccount == nil { return .warning }
+        return .accent
+    }
+
     private func shortPath(_ path: String) -> String {
         let parts = path.split(separator: "/")
         guard parts.count > 3 else { return path }
@@ -202,6 +215,10 @@ private struct InstanceHeroCard: View {
         }
     }
 
+    private func loaderName(_ instance: Instance) -> String {
+        (try? ModCompatibilityResolver.resolve(instance: instance, layout: model.layout))?.loader.displayName ?? "Vanilla"
+    }
+
     private func loadedContent(_ instance: Instance) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .top) {
@@ -240,7 +257,7 @@ private struct InstanceHeroCard: View {
 
             HStack(spacing: 7) {
                 heroTag(instance.manifest.versionID ?? "未指定版本", icon: "cube.fill")
-                heroTag("Vanilla", icon: "shippingbox.fill")
+                heroTag(loaderName(instance), icon: "shippingbox.fill")
                 if let memory = instance.manifest.memoryMiB {
                     heroTag("\(memory) MiB", icon: "memorychip")
                 } else {
@@ -290,7 +307,7 @@ private struct InstanceHeroCard: View {
                         Text(model.isGameRunning ? "游戏进程正在运行" : canLaunch(instance) ? "Java 与文件会在启动前校验" : readinessHint(instance))
                             .font(LXFont.bodyStrong)
                             .foregroundStyle(model.isGameRunning ? theme.success : canLaunch(instance) ? theme.textSecondary : theme.warning)
-                        Text(model.isGameRunning ? "PID \(model.gamePID.map(String.init) ?? "—") · 退出后将记录结果" : "\(instance.manifest.versionID ?? "—") · Vanilla · \(model.selectedJavaRuntime?.displayDescription ?? "Java 未选择")")
+                        Text(model.isGameRunning ? "PID \(model.gamePID.map(String.init) ?? "—") · 退出后将记录结果" : "\(instance.manifest.versionID ?? "—") · \(loaderName(instance)) · \(model.selectedJavaRuntime?.displayDescription ?? "Java 未选择")")
                             .font(LXFont.caption)
                             .foregroundStyle(theme.textTertiary)
                             .lineLimit(1)

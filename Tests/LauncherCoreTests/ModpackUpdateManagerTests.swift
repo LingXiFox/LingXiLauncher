@@ -109,6 +109,75 @@ final class ModpackUpdateManagerTests: XCTestCase {
         XCTAssertEqual(try String(contentsOf: instance.gameDirectory.appendingPathComponent("mods/fixture.jar"), encoding: .utf8), "old-fixture-jar")
     }
 
+    func testPreviewSignatureRejectsFilesChangedAfterPreview() async throws {
+        let (archiveData, archiveURL, target, targetJSON) = try makeTarget()
+        let transport = StubTransport()
+        await transport.setData(archiveData, for: archiveURL)
+        await transport.setData(targetJSON, for: URL(string: "https://api.modrinth.com/v2/version/target-version")!)
+        await transport.setData("updated-fixture-jar-v2", for: URL(string: "https://cdn.modrinth.com/data/proj/versions/v2/fixture.jar")!)
+        let instance = try makeInstance()
+        let manager = ModpackUpdateManager(layout: layout, transport: transport, client: ModrinthClient(transport: transport))
+        let preview = try await manager.preview(instanceID: instance.id, targetVersionID: target.id)
+        let file = instance.gameDirectory.appendingPathComponent("mods/fixture.jar")
+        try Data("changed-after-preview".utf8).write(to: file)
+        await XCTAssertThrowsErrorAsync {
+            _ = try await manager.apply(
+                instanceID: instance.id,
+                targetVersionID: target.id,
+                expectedPlanSignature: preview.signature
+            )
+        }
+        XCTAssertEqual(try String(contentsOf: file, encoding: .utf8), "changed-after-preview")
+    }
+
+    func testUserModifiedFileIsReportedWhenTargetFileIsUnchanged() async throws {
+        let fixture = try FixtureLoader.url("mrpack/update-target.mrpack")
+        let package = try MrpackParser.parse(
+            archive: fixture,
+            extractionRoot: root.appendingPathComponent("identity-extract", isDirectory: true)
+        )
+        guard let targetFile = package.files.first(where: { $0.relativePath == "mods/fixture.jar" }),
+              let sha1 = targetFile.sha1, let sha512 = targetFile.sha512 else {
+            return XCTFail("fixture is missing hashes")
+        }
+        let instance = try makeInstance()
+        let existing = try ModpackLifecycleManager(layout: layout).record(instanceID: instance.id)
+        let modifiedRecord = ModpackRecord(
+            projectID: existing.projectID,
+            versionID: existing.versionID,
+            packVersionID: existing.packVersionID,
+            modrinthProjectID: existing.modrinthProjectID,
+            modrinthVersionID: existing.modrinthVersionID,
+            minecraftVersion: existing.minecraftVersion,
+            loaderKind: existing.loaderKind,
+            loaderVersion: existing.loaderVersion,
+            archiveSHA256: existing.archiveSHA256,
+            files: [ModpackFileRecord(
+                path: "mods/fixture.jar",
+                sha256: String(repeating: "f", count: 64),
+                sha1: sha1, sha512: sha512,
+                source: "modrinth", userModified: false
+            )]
+        )
+        try ModpackLifecycleManager(layout: layout).save(modifiedRecord, instanceID: instance.id)
+        let (archiveData, archiveURL, target, targetJSON) = try makeTarget()
+        let transport = StubTransport()
+        await transport.setData(archiveData, for: archiveURL)
+        await transport.setData(targetJSON, for: URL(string: "https://api.modrinth.com/v2/version/target-version")!)
+        await transport.setData("updated-fixture-jar-v2", for: URL(string: "https://cdn.modrinth.com/data/proj/versions/v2/fixture.jar")!)
+        let manager = ModpackUpdateManager(layout: layout, transport: transport, client: ModrinthClient(transport: transport))
+        let preview = try await manager.preview(instanceID: instance.id, targetVersionID: target.id)
+        let change = try XCTUnwrap(preview.changes.first(where: { $0.path == "mods/fixture.jar" }))
+        XCTAssertEqual(change.kind, .userModified)
+        XCTAssertTrue(change.userModified)
+        let report = try await manager.apply(instanceID: instance.id, targetVersionID: target.id)
+        XCTAssertTrue(report.preserved.contains("mods/fixture.jar"))
+        XCTAssertEqual(
+            try String(contentsOf: instance.gameDirectory.appendingPathComponent("mods/fixture.jar"), encoding: .utf8),
+            "old-fixture-jar"
+        )
+    }
+
     func testDownloadFailureLeavesCurrentInstanceUntouched() async throws {
         let (archiveData, archiveURL, target, targetJSON) = try makeTarget()
         let transport = StubTransport()
@@ -133,5 +202,102 @@ private extension XCTestCase {
             try await expression()
             XCTFail("Expected error")
         } catch {}
+    }
+}
+
+// MARK: - M9.0 transaction failure tests
+
+extension ModpackUpdateManagerTests {
+    private func makeTransactionRoot(instanceID: String) throws -> URL {
+        let root = layout.dataRoot
+            .appendingPathComponent("modpack-updates", isDirectory: true)
+            .appendingPathComponent(instanceID, isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        return root
+    }
+
+    private func writeState(
+        in root: URL,
+        instanceID: String,
+        status: String,
+        paths: [String],
+        backups: [String: [String: Any]] = [:]
+    ) throws {
+        let state: [String: Any] = [
+            "id": root.lastPathComponent,
+            "instanceID": instanceID,
+            "status": status,
+            "affectedPaths": paths,
+            "hadRecord": false,
+            "backups": backups,
+        ]
+        let data = try JSONSerialization.data(withJSONObject: state, options: [.sortedKeys])
+        try data.write(to: root.appendingPathComponent("state.json"), options: [.atomic])
+    }
+
+    func testCommittedTransactionRecoveryOnlyCleansAndNeverRollsBack() throws {
+        let instance = try InstanceRepository(layout: layout).create(id: "committed-recovery", displayName: "Committed", versionID: nil)
+        let file = instance.gameDirectory.appendingPathComponent("mods/new.jar")
+        try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("committed-new-file".utf8).write(to: file)
+        let root = try makeTransactionRoot(instanceID: instance.id)
+        try writeState(in: root, instanceID: instance.id, status: "committed", paths: ["mods/new.jar"])
+        XCTAssertFalse(try ModpackUpdateManager(layout: layout).recover(instanceID: instance.id))
+        XCTAssertEqual(try String(contentsOf: file, encoding: .utf8), "committed-new-file")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.path))
+    }
+
+    func testCorruptStateIsPreservedAndRejected() throws {
+        let instance = try InstanceRepository(layout: layout).create(id: "corrupt-state", displayName: "Corrupt", versionID: nil)
+        let root = try makeTransactionRoot(instanceID: instance.id)
+        try Data("not-json".utf8).write(to: root.appendingPathComponent("state.json"))
+        XCTAssertThrowsError(try ModpackUpdateManager(layout: layout).recover(instanceID: instance.id))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: root.path))
+    }
+
+    func testGameRunningRefusesUpdateBeforeAnyFileChanges() async throws {
+        struct Running: InstanceRuntimeChecking {
+            func isRunning(instanceID: String) -> Bool { true }
+        }
+        let (archiveData, archiveURL, target, targetJSON) = try makeTarget()
+        let transport = StubTransport()
+        await transport.setData(archiveData, for: archiveURL)
+        await transport.setData(targetJSON, for: URL(string: "https://api.modrinth.com/v2/version/target-version")!)
+        let instance = try makeInstance()
+        let manager = ModpackUpdateManager(
+            layout: layout,
+            transport: transport,
+            client: ModrinthClient(transport: transport),
+            runtime: Running()
+        )
+        await XCTAssertThrowsErrorAsync {
+            _ = try await manager.apply(instanceID: instance.id, targetVersionID: target.id)
+        }
+        XCTAssertEqual(
+            try String(contentsOf: instance.gameDirectory.appendingPathComponent("mods/fixture.jar"), encoding: .utf8),
+            "old-fixture-jar"
+        )
+        XCTAssertFalse(manager.pendingTransaction(instanceID: instance.id))
+    }
+
+    func testMissingBackupNeverDeletesCurrentFile() throws {
+        let instance = try InstanceRepository(layout: layout).create(id: "missing-backup", displayName: "Missing", versionID: nil)
+        let file = instance.gameDirectory.appendingPathComponent("mods/protected.jar")
+        try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("user-data-must-survive".utf8).write(to: file)
+        let root = try makeTransactionRoot(instanceID: instance.id)
+        try writeState(
+            in: root,
+            instanceID: instance.id,
+            status: "applying",
+            paths: ["mods/protected.jar"],
+            backups: ["mods/protected.jar": ["path": "mods/protected.jar", "sha256": "deadbeef", "size": 23, "existed": true]]
+        )
+        XCTAssertThrowsError(try ModpackUpdateManager(layout: layout).recover(instanceID: instance.id))
+        XCTAssertEqual(try String(contentsOf: file, encoding: .utf8), "user-data-must-survive")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: root.path))
+        let state = try JSONSerialization.jsonObject(with: Data(contentsOf: root.appendingPathComponent("state.json"))) as? [String: Any]
+        XCTAssertEqual(state?["status"] as? String, "rollbackFailed")
     }
 }
