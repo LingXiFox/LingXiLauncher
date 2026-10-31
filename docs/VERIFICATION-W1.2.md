@@ -36,6 +36,17 @@ W1.2 **尚未完成**。本阶段 Stage A 的文件安全基础已落地，Stage
 - CI：[41175243536](https://github.com/LingXiFox/LingXiLauncher/actions/runs/41175243536) — success。
 - 代码提交：`1c2d336`。
 
+## Stage B 诊断结果
+
+已尝试把完整 `LauncherCoreTests` 在 Windows 上执行，并临时把 CI 命令改为 `swift test`。Windows 编译通过，但运行出现至少 11 个失败用例 / 38 条错误，包括：
+
+- Windows 不可执行位语义导致 JavaRuntimeInspector 测试失败。
+- Downloader 旧 POSIX rename 逻辑在 Windows 存在目标时失败（已改为平台 replacer）。
+- Modrinth mod 删除在 Windows 文件占用/删除语义下失败。
+- NeoForge 事务回滚在 Windows 文件替换语义下失败。
+
+因此当前 Windows 仍只把 19 项平台契约测试作为阻塞门禁；完整共享测试尚未达到全绿，不能宣称 Stage B 完成。CI 暂时恢复为平台契约测试以避免 main 长期红，但这是已知缺口，不是验收通过。
+
 ## 未完成
 
 1. Windows OAuth loopback 与 DPAPI/Credential Manager。
