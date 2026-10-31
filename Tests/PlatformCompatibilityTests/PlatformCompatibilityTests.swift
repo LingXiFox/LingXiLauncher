@@ -56,6 +56,23 @@ final class PlatformCompatibilityTests: XCTestCase {
         XCTAssertFalse(PlatformRuntime.process.isRunning(pid: -1))
     }
 
+
+    func testAtomicFileReplacementReplacesExistingAndNewTargets() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("lingxi-replace-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let destination = root.appendingPathComponent("state.json")
+        let first = root.appendingPathComponent("first.json")
+        let second = root.appendingPathComponent("second.json")
+        try Data("one".utf8).write(to: first)
+        try PlatformRuntime.replacer.replaceItem(at: destination, with: first)
+        XCTAssertEqual(try String(contentsOf: destination, encoding: .utf8), "one")
+        try Data("two".utf8).write(to: second)
+        try PlatformRuntime.replacer.replaceItem(at: destination, with: second)
+        XCTAssertEqual(try String(contentsOf: destination, encoding: .utf8), "two")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: second.path))
+    }
+
     func testFileLockIsExclusive() throws {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("lingxi-lock-\(UUID().uuidString)")
