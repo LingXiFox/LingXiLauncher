@@ -28,7 +28,7 @@ public struct WindowsArchiveHandler: ArchiveHandling {
             guard total <= limits.maxTotalSize else {
                 throw LauncherError(.ioFailure, "Archive exceeds total size limit")
             }
-            result.append(ArchiveEntry(name: entry.name, isDirectory: entry.isDirectory, isSymlink: entry.isSymlink))
+            result.append(ArchiveEntry(name: entry.name, isDirectory: entry.isDirectory, isSymlink: entry.isSymlink, data: Data()))
         }
         return result
     }
