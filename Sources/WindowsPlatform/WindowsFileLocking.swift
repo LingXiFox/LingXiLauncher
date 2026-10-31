@@ -33,8 +33,8 @@ private final class WindowsFileLockToken: FileLockToken, @unchecked Sendable {
         let handle = path.withCString(encodedAs: UTF16.self) { pointer in
             CreateFileW(
                 pointer,
-                DWORD(GENERIC_READ | GENERIC_WRITE),
-                DWORD(FILE_SHARE_READ | FILE_SHARE_WRITE),
+                DWORD(GENERIC_READ) | DWORD(GENERIC_WRITE),
+                DWORD(FILE_SHARE_READ) | DWORD(FILE_SHARE_WRITE),
                 nil,
                 DWORD(OPEN_ALWAYS),
                 DWORD(FILE_ATTRIBUTE_NORMAL),
