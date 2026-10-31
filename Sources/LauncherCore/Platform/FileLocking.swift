@@ -15,11 +15,37 @@ public protocol FileLocking: Sendable {
 public enum PlatformRuntime {
     private static let lock = NSLock()
     nonisolated(unsafe) private static var installedFileLock: (any FileLocking)?
+    nonisolated(unsafe) private static var installedHost: (any PlatformHostProviding)?
+    nonisolated(unsafe) private static var installedSystem: (any SystemProfiling)?
+    nonisolated(unsafe) private static var installedGraphics: (any GraphicsProbing)?
 
     public static func install(fileLock: any FileLocking) {
         lock.lock()
         installedFileLock = fileLock
         lock.unlock()
+    }
+
+    public static func install(host: any PlatformHostProviding, system: any SystemProfiling, graphics: any GraphicsProbing) {
+        lock.lock()
+        installedHost = host
+        installedSystem = system
+        installedGraphics = graphics
+        lock.unlock()
+    }
+
+    public static var host: any PlatformHostProviding {
+        lock.lock(); defer { lock.unlock() }
+        return installedHost ?? PortableHost()
+    }
+
+    public static var system: any SystemProfiling {
+        lock.lock(); defer { lock.unlock() }
+        return installedSystem ?? GenericSystemProfiler()
+    }
+
+    public static var graphics: any GraphicsProbing {
+        lock.lock(); defer { lock.unlock() }
+        return installedGraphics ?? GenericGraphicsProbe()
     }
 
     public static var fileLock: any FileLocking {

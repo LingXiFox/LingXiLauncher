@@ -1,7 +1,4 @@
 import Foundation
-#if canImport(Darwin)
-import Darwin
-#endif
 
 /// The platform facts that Mojang metadata rules are evaluated against.
 ///
@@ -72,23 +69,13 @@ public struct PlatformContext: Sendable, Hashable {
     ///
     /// Throws for operating systems LingXi Launcher does not support, rather than guessing rules.
     public static func current(features: [String: Bool] = [:]) throws -> PlatformContext {
-        let version = ProcessInfo.processInfo.operatingSystemVersion
-        let osVersion = "\(version.majorVersion).\(version.minorVersion).\(version.patchVersion)"
-        #if os(macOS)
-        let os = OperatingSystem.macOS
-        #elseif os(Linux)
-        let os = OperatingSystem.linux
-        #elseif os(Windows)
-        let os = OperatingSystem.windows
-        #else
-        throw LauncherError(.unsupportedVersion, "Unsupported host operating system", suggestion: "LingXi Launcher targets macOS 14+ on Apple Silicon only.")
-        #endif
+        let host = PlatformRuntime.host.context
         return PlatformContext(
-            os: os,
-            architecture: hostArchitecture(),
-            osVersion: osVersion,
+            os: host.os,
+            architecture: host.architecture,
+            osVersion: host.osVersion,
             features: features,
-            hostArchitecture: hardwareArchitecture()
+            hostArchitecture: host.hostArchitecture
         )
     }
 
@@ -112,35 +99,12 @@ public struct PlatformContext: Sendable, Hashable {
     /// Hardware architecture of the machine, even when this process runs translated by Rosetta.
     /// `hw.optional.arm64` reports the physical CPU; `uname` reports the *process* ABI.
     public static func hardwareArchitecture() -> CPUArch {
-        #if canImport(Darwin)
-        var value: Int32 = 0
-        var size = MemoryLayout<Int32>.size
-        if sysctlbyname("hw.optional.arm64", &value, &size, nil, 0) == 0, value == 1 {
-            return .arm64
-        }
-        #endif
-        return hostArchitecture()
+        PlatformRuntime.host.context.hostArchitecture
     }
 
-    /// Reads the CPU architecture of the *current process* (not the machine), so a Rosetta
-    /// translated launcher reports the architecture its JVM children would inherit.
+    /// Reads the CPU architecture the current process would hand to child JVMs.
     public static func hostArchitecture() -> CPUArch {
-        #if canImport(Darwin)
-        var uts = utsname()
-        guard uname(&uts) == 0 else { return .unknown }
-        let machine = withUnsafeBytes(of: &uts.machine) { raw -> String in
-            let pointer = raw.bindMemory(to: CChar.self)
-            guard let base = pointer.baseAddress else { return "" }
-            return String(cString: base)
-        }
-        switch machine {
-        case "arm64", "aarch64": return .arm64
-        case "x86_64", "amd64": return .x86_64
-        case "i386", "i686", "x86": return .x86
-        default: return .unknown
-        }
-        #else
-        return .unknown
-        #endif
+        PlatformRuntime.host.context.architecture
     }
+
 }

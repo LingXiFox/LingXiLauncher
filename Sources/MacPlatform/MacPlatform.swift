@@ -4,5 +4,10 @@ import LauncherCore
 public enum MacPlatform {
     public static func install() {
         PlatformRuntime.install(fileLock: MacFileLocking())
+        PlatformRuntime.install(
+            host: MacHost(),
+            system: MacSystemProfiler(),
+            graphics: MacGraphicsProbe()
+        )
     }
 }
