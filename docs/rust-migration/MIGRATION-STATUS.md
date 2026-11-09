@@ -11,7 +11,7 @@
 | P4 | CLI clap 重建（17 个顶层命令） | 完成 |
 | P5 | Swift 数据兼容 | 完成（见边界） |
 | P6 | 质量门禁、文档、CI | 完成（本机；CI 未远端执行） |
-| P7 | 三平台打包、真实游戏启动、Swift 移除 | 待完成/待验证 |
+| P7 | 三平台打包、真实游戏启动、Swift 移除 | 本机窗口与 Swift 移除完成；三平台安装包与真实启动待验证 |
 
 ## 已验证
 
@@ -27,7 +27,7 @@
 | `cd Apps/desktop && pnpm build` | 通过（78 modules，JS 284.60 kB / CSS 79.84 kB） |
 | `cargo build --release -p lingxi-desktop --features custom-protocol` | 通过，启动后窗口正常渲染 |
 | CLI `lingxi --help` | 17 个顶层命令正常输出 |
-| CLI 冒烟 | `version list/inspect --json`（1.7.10、1.20.1、1.21.11、26.3）、`doctor`、`launch --dry-run`、`mod search/install/enable/disable/remove`、`resourcepack/shader search`、`performance status`、`graphics status` 可运行；Sodium 模组真实下载并安装 |
+| CLI 冒烟 | `version list/inspect --json`（1.7.10、1.20.1、1.21.11、26.3）、`doctor`、`launch --dry-run`、`diagnose`、`performance status/benchmark/tune`、`graphics status`、`mod search/install/enable/disable/remove`、`mrpack inspect`、`resourcepack/shader search` 可运行；Sodium 模组真实下载并安装 |
 | Tauri 命令/前端契约 | 前端 61 个调用全部有注册命令，无缺失 |
 | 界面截图 | 19 张页面/弹窗截图，见 UI-PARITY.md |
 
@@ -59,5 +59,5 @@
 - [ ] Tauri Release 三平台产物
 - [ ] 真实游戏启动
 - [ ] GUI 自动化测试
-- [ ] 移除 Swift 源码与旧 CI
-- [ ] 最终 commit 与验收报告
+- [x] 移除 Swift 源码与旧 CI（Swift 源码保留在 git 历史与 `swift-implementation-before-removal` tag）
+- [ ] 最终 commit 与验收报告（待本阶段收尾）
