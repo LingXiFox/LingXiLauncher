@@ -1,0 +1,7 @@
+/Volumes/Development/Projects/projects/LingXiLauncher/target/debug/deps/utf_types-9d878036bb2cefde.d: /Volumes/Development/Projects/projects/LingXiLauncher/.cargo-home/registry/src/index.crates.io-1949cf8c6b5b557f/utf_types-1.0.0/src/lib.rs /Volumes/Development/Projects/projects/LingXiLauncher/.cargo-home/registry/src/index.crates.io-1949cf8c6b5b557f/utf_types-1.0.0/src/utf16.rs /Volumes/Development/Projects/projects/LingXiLauncher/.cargo-home/registry/src/index.crates.io-1949cf8c6b5b557f/utf_types-1.0.0/src/utf8.rs
+
+/Volumes/Development/Projects/projects/LingXiLauncher/target/debug/deps/libutf_types-9d878036bb2cefde.rmeta: /Volumes/Development/Projects/projects/LingXiLauncher/.cargo-home/registry/src/index.crates.io-1949cf8c6b5b557f/utf_types-1.0.0/src/lib.rs /Volumes/Development/Projects/projects/LingXiLauncher/.cargo-home/registry/src/index.crates.io-1949cf8c6b5b557f/utf_types-1.0.0/src/utf16.rs /Volumes/Development/Projects/projects/LingXiLauncher/.cargo-home/registry/src/index.crates.io-1949cf8c6b5b557f/utf_types-1.0.0/src/utf8.rs
+
+/Volumes/Development/Projects/projects/LingXiLauncher/.cargo-home/registry/src/index.crates.io-1949cf8c6b5b557f/utf_types-1.0.0/src/lib.rs:
+/Volumes/Development/Projects/projects/LingXiLauncher/.cargo-home/registry/src/index.crates.io-1949cf8c6b5b557f/utf_types-1.0.0/src/utf16.rs:
+/Volumes/Development/Projects/projects/LingXiLauncher/.cargo-home/registry/src/index.crates.io-1949cf8c6b5b557f/utf_types-1.0.0/src/utf8.rs:

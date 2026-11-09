@@ -16,3 +16,7 @@ runs/
 .dev-sandbox/
 
 dist/
+
+# Local Rust toolchain cache (kept inside the project on purpose)
+.cargo-home/
+.tmp/
