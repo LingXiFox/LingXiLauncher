@@ -9,7 +9,8 @@ use serde::{Deserialize, Serialize};
 use crate::error::{Error, Result};
 use crate::layout::GameDataLayout;
 use crate::models::version::{
-    ArgumentEntry, Artifact, AssetIndex, JavaVersion, Library, LoggingClient, VersionMetadata, VersionType,
+    ArgumentEntry, Artifact, AssetIndex, JavaVersion, Library, LoggingClient, VersionMetadata,
+    VersionType,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -52,7 +53,9 @@ pub struct ResolvedVersion {
 
 impl ResolvedVersion {
     pub fn requires_java(&self, major: u32) -> bool {
-        self.java_requirement.major_version.is_some_and(|required| required > major)
+        self.java_requirement
+            .major_version
+            .is_some_and(|required| required > major)
     }
 }
 
@@ -62,7 +65,9 @@ impl VersionResolver {
     pub fn resolve(&self, version_id: &str, game_root: &Path) -> Result<ResolvedVersion> {
         let layout = GameDataLayout::new(game_root, game_root);
         let chain = load_chain(version_id, &layout, &[])?;
-        let child = chain.last().ok_or_else(|| Error::InvalidMetadata(format!("empty version chain for {version_id}")))?;
+        let child = chain.last().ok_or_else(|| {
+            Error::InvalidMetadata(format!("empty version chain for {version_id}"))
+        })?;
         normalize(&chain, version_id, &layout, child)
     }
 
@@ -75,7 +80,11 @@ impl VersionResolver {
         version_directory: PathBuf,
         metadata_url: PathBuf,
     ) -> Result<ResolvedVersion> {
-        if let Some(parent) = metadata.inherits_from.as_ref().filter(|p| !p.trim().is_empty()) {
+        if let Some(parent) = metadata
+            .inherits_from
+            .as_ref()
+            .filter(|p| !p.trim().is_empty())
+        {
             return Err(Error::NotFound(format!(
                 "version {version_id} inherits from '{parent}' but no parent chain was supplied"
             )));
@@ -86,27 +95,49 @@ impl VersionResolver {
                 metadata.id
             )));
         }
-        normalize_with(&[metadata.clone()], version_id, version_directory, metadata_url, &metadata)
+        normalize_with(
+            std::slice::from_ref(&metadata),
+            version_id,
+            version_directory,
+            metadata_url,
+            &metadata,
+        )
     }
 }
 
-fn load_chain(version_id: &str, layout: &GameDataLayout, stack: &[String]) -> Result<Vec<VersionMetadata>> {
+fn load_chain(
+    version_id: &str,
+    layout: &GameDataLayout,
+    stack: &[String],
+) -> Result<Vec<VersionMetadata>> {
     if stack.len() >= 16 {
         return Err(Error::UnsupportedVersion(format!(
             "version inheritance chain is deeper than 16 entries at '{version_id}'"
         )));
     }
     if stack.iter().any(|entry| entry == version_id) {
-        let cycle = stack.iter().cloned().chain(std::iter::once(version_id.to_string())).collect::<Vec<_>>().join(" -> ");
-        return Err(Error::InvalidMetadata(format!("circular version inheritance: {cycle}")));
+        let cycle = stack
+            .iter()
+            .cloned()
+            .chain(std::iter::once(version_id.to_string()))
+            .collect::<Vec<_>>()
+            .join(" -> ");
+        return Err(Error::InvalidMetadata(format!(
+            "circular version inheritance: {cycle}"
+        )));
     }
     let path = layout.version_json(version_id)?;
     if !path.is_file() {
-        return Err(Error::NotFound(format!("version metadata not found: {}", path.display())));
+        return Err(Error::NotFound(format!(
+            "version metadata not found: {}",
+            path.display()
+        )));
     }
     let data = std::fs::read(&path)?;
     let metadata: VersionMetadata = serde_json::from_slice(&data).map_err(|e| {
-        Error::InvalidMetadata(format!("corrupted versions/{version_id}/{version_id}.json: {e}"))
+        Error::InvalidMetadata(format!(
+            "corrupted versions/{version_id}/{version_id}.json: {e}"
+        ))
     })?;
     if metadata.id != version_id {
         return Err(Error::InvalidMetadata(format!(
@@ -114,10 +145,19 @@ fn load_chain(version_id: &str, layout: &GameDataLayout, stack: &[String]) -> Re
             metadata.id
         )));
     }
-    match metadata.inherits_from.as_ref().map(|p| p.trim()).filter(|p| !p.is_empty()) {
+    match metadata
+        .inherits_from
+        .as_ref()
+        .map(|p| p.trim())
+        .filter(|p| !p.is_empty())
+    {
         Some(parent) => {
             let parent = parent.to_string();
-            let mut chain = load_chain(&parent, layout, &[stack, &[version_id.to_string()]].concat())?;
+            let mut chain = load_chain(
+                &parent,
+                layout,
+                &[stack, &[version_id.to_string()]].concat(),
+            )?;
             chain.push(metadata);
             Ok(chain)
         }
@@ -125,7 +165,12 @@ fn load_chain(version_id: &str, layout: &GameDataLayout, stack: &[String]) -> Re
     }
 }
 
-fn normalize(chain: &[VersionMetadata], requested_id: &str, layout: &GameDataLayout, child: &VersionMetadata) -> Result<ResolvedVersion> {
+fn normalize(
+    chain: &[VersionMetadata],
+    requested_id: &str,
+    layout: &GameDataLayout,
+    child: &VersionMetadata,
+) -> Result<ResolvedVersion> {
     normalize_with(
         chain,
         requested_id,
@@ -145,8 +190,17 @@ fn normalize_with(
     let main_class = chain
         .iter()
         .rev()
-        .find_map(|m| m.main_class.as_ref().filter(|v| !v.trim().is_empty()).cloned())
-        .ok_or_else(|| Error::InvalidMetadata(format!("version {requested_id} declares an empty mainClass")))?;
+        .find_map(|m| {
+            m.main_class
+                .as_ref()
+                .filter(|v| !v.trim().is_empty())
+                .cloned()
+        })
+        .ok_or_else(|| {
+            Error::InvalidMetadata(format!(
+                "version {requested_id} declares an empty mainClass"
+            ))
+        })?;
 
     let asset_index = chain.iter().rev().find_map(|m| m.asset_index.clone());
     let assets = chain.iter().rev().find_map(|m| m.assets.clone());
@@ -155,7 +209,11 @@ fn normalize_with(
         .map(|a| a.id.clone())
         .or(assets)
         .filter(|v| !v.is_empty())
-        .ok_or_else(|| Error::InvalidMetadata(format!("version {requested_id} has no assetIndex or assets id")))?;
+        .ok_or_else(|| {
+            Error::InvalidMetadata(format!(
+                "version {requested_id} has no assetIndex or assets id"
+            ))
+        })?;
 
     let java_requirement = merged_java_requirement(chain);
     let libraries = merged_libraries(chain);
@@ -166,11 +224,16 @@ fn normalize_with(
         )));
     }
 
-    let client_info = chain
-        .iter()
-        .rev()
-        .find_map(|m| m.downloads.as_ref().and_then(|d| d.client.clone()).map(|client| (m.id.clone(), client)));
-    let client_jar_version_id = client_info.as_ref().map(|(id, _)| id.clone()).unwrap_or_else(|| requested_id.to_string());
+    let client_info = chain.iter().rev().find_map(|m| {
+        m.downloads
+            .as_ref()
+            .and_then(|d| d.client.clone())
+            .map(|client| (m.id.clone(), client))
+    });
+    let client_jar_version_id = client_info
+        .as_ref()
+        .map(|(id, _)| id.clone())
+        .unwrap_or_else(|| requested_id.to_string());
 
     Ok(ResolvedVersion {
         id: requested_id.to_string(),
@@ -183,7 +246,11 @@ fn normalize_with(
         game_arguments: game,
         default_user_jvm_arguments: default_user,
         asset_index,
-        client_logging: chain.iter().rev().find_map(|m| m.logging.clone()).and_then(|l| l.client),
+        client_logging: chain
+            .iter()
+            .rev()
+            .find_map(|m| m.logging.clone())
+            .and_then(|l| l.client),
         client_jar: client_info.map(|(_, client)| client),
         client_jar_version_id: client_jar_version_id.clone(),
         natives_version_id: client_jar_version_id,
@@ -199,7 +266,9 @@ fn merged_java_requirement(chain: &[VersionMetadata]) -> JavaVersionRequirement 
     let mut component = None;
     let mut major: Option<u32> = None;
     for metadata in chain {
-        let Some(requirement) = metadata.java_version.as_ref() else { continue };
+        let Some(requirement) = metadata.java_version.as_ref() else {
+            continue;
+        };
         if major.is_none() || requirement.major_version >= major.unwrap_or(0) {
             major = Some(requirement.major_version);
             if !requirement.component.is_empty() {
@@ -207,7 +276,10 @@ fn merged_java_requirement(chain: &[VersionMetadata]) -> JavaVersionRequirement 
             }
         }
     }
-    JavaVersionRequirement { component, major_version: major }
+    JavaVersionRequirement {
+        component,
+        major_version: major,
+    }
 }
 
 fn library_key(library: &Library) -> String {
@@ -268,7 +340,14 @@ fn merged_libraries(chain: &[VersionMetadata]) -> Vec<Library> {
     result
 }
 
-fn merged_arguments(chain: &[VersionMetadata]) -> (Vec<ArgumentEntry>, Vec<ArgumentEntry>, Vec<ArgumentEntry>, VersionCompatibility) {
+fn merged_arguments(
+    chain: &[VersionMetadata],
+) -> (
+    Vec<ArgumentEntry>,
+    Vec<ArgumentEntry>,
+    Vec<ArgumentEntry>,
+    VersionCompatibility,
+) {
     let mut jvm = Vec::new();
     let mut game = Vec::new();
     let mut default_user = Vec::new();
@@ -354,7 +433,10 @@ pub fn legacy_jvm_arguments() -> Vec<ArgumentEntry> {
 /// Convenience so callers can build a requirement without naming the model.
 pub fn requirement_from(java: Option<&JavaVersion>) -> JavaVersionRequirement {
     match java {
-        Some(value) => JavaVersionRequirement { component: Some(value.component.clone()), major_version: Some(value.major_version) },
+        Some(value) => JavaVersionRequirement {
+            component: Some(value.component.clone()),
+            major_version: Some(value.major_version),
+        },
         None => JavaVersionRequirement::default(),
     }
 }

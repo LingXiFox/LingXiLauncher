@@ -1,3 +1,91 @@
-pub fn version() -> &'static str {
-    env!("CARGO_PKG_VERSION")
+mod commands;
+mod state;
+
+use state::AppState;
+
+pub fn run() {
+    let state = AppState::new().expect("failed to initialise launcher state");
+
+    tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        .manage(state)
+        .invoke_handler(tauri::generate_handler![
+            commands::app::bootstrap,
+            commands::accounts::list_accounts,
+            commands::accounts::create_local_account,
+            commands::accounts::delete_local_account,
+            commands::accounts::set_active_account,
+            commands::accounts::clear_active_account,
+            commands::accounts::sign_in_microsoft,
+            commands::accounts::validate_microsoft_account,
+            commands::accounts::sign_out_microsoft,
+            commands::accounts::player_appearance,
+            commands::instances::list_instances,
+            commands::instances::create_instance,
+            commands::instances::update_instance,
+            commands::instances::delete_instance,
+            commands::instances::copy_instance,
+            commands::instances::set_instance_version,
+            commands::launch::game_status,
+            commands::launch::preview_launch,
+            commands::launch::launch_instance,
+            commands::launch::stop_game,
+            commands::launch::read_game_log,
+            commands::settings::get_settings,
+            commands::settings::save_settings,
+            commands::settings::java_runtimes,
+            commands::settings::inspect_java,
+            commands::settings::install_java,
+            commands::settings::set_instance_java,
+            commands::settings::reveal_data_folder,
+            commands::settings::reveal_instance_folder,
+            commands::settings::open_external,
+            commands::versions::list_versions,
+            commands::versions::refresh_versions,
+            commands::versions::install_version,
+            commands::versions::list_loader_versions,
+            commands::versions::install_loader,
+            commands::accounts::list_local_accounts,
+            commands::accounts::list_microsoft_accounts,
+            commands::accounts::begin_microsoft_login,
+            commands::accounts::cancel_microsoft_login,
+            commands::settings::read_logs,
+            commands::settings::open_logs_folder,
+            commands::settings::reveal_path,
+            commands::settings::detect_java,
+            commands::settings::browse_java,
+            commands::graphics::read_instance_graphics,
+            commands::graphics::save_instance_graphics,
+            commands::content::list_mods,
+            commands::content::search_modrinth,
+            commands::content::install_mod,
+            commands::content::toggle_mod,
+            commands::content::delete_mod,
+            commands::content::check_mod_updates,
+            commands::content::update_mod,
+            commands::content::inspect_mrpack,
+            commands::content::import_mrpack,
+            commands::content::check_modpack_update,
+            commands::content::apply_modpack_update,
+            commands::content::list_worlds,
+            commands::content::backup_world,
+            commands::content::restore_world,
+            commands::content::delete_world,
+            commands::content::list_backups,
+            commands::content::list_resourcepacks,
+            commands::content::import_resourcepack,
+            commands::content::toggle_resourcepack,
+            commands::content::delete_resourcepack,
+            commands::content::list_shaders,
+            commands::content::import_shader,
+            commands::content::toggle_shader,
+            commands::content::delete_shader,
+            commands::performance::performance_report,
+            commands::performance::run_benchmark,
+            commands::performance::apply_performance,
+            commands::diagnostics::diagnose,
+            commands::diagnostics::latest_crash_report,
+        ])
+        .run(tauri::generate_context!())
+        .expect("error while running LingXi Launcher");
 }

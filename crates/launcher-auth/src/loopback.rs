@@ -20,9 +20,11 @@ pub async fn wait_for_callback(
     redirect_uri: &str,
     timeout: Duration,
 ) -> Result<OAuthCallback> {
-    let accepted = tokio::time::timeout(timeout, listener.accept()).await.map_err(|_| {
-        Error::Authentication("timed out waiting for the Microsoft sign-in callback".into())
-    })?;
+    let accepted = tokio::time::timeout(timeout, listener.accept())
+        .await
+        .map_err(|_| {
+            Error::Authentication("timed out waiting for the Microsoft sign-in callback".into())
+        })?;
     let (mut stream, _peer) = accepted?;
 
     let mut buffer = vec![0u8; 8192];
@@ -37,7 +39,9 @@ pub async fn wait_for_callback(
 
     if method != "GET" {
         respond(&mut stream, 405, "Method Not Allowed").await;
-        return Err(Error::Authentication("unexpected request on the sign-in callback port".into()));
+        return Err(Error::Authentication(
+            "unexpected request on the sign-in callback port".into(),
+        ));
     }
 
     let parsed = Url::parse(&format!("http://localhost{target}"))
@@ -58,20 +62,39 @@ pub async fn wait_for_callback(
 
     if let Some(error) = error {
         let description = error_description.unwrap_or(error);
-        respond(&mut stream, 200, "Sign-in was cancelled. You can close this window.").await;
-        return Err(Error::Authentication(format!("Microsoft sign-in failed: {description}")));
+        respond(
+            &mut stream,
+            200,
+            "Sign-in was cancelled. You can close this window.",
+        )
+        .await;
+        return Err(Error::Authentication(format!(
+            "Microsoft sign-in failed: {description}"
+        )));
     }
     let code = code.filter(|c| !c.is_empty()).ok_or_else(|| {
         Error::Authentication("Microsoft sign-in callback did not contain a code".into())
     })?;
-    let state = state.ok_or_else(|| Error::Authentication("sign-in callback did not contain state".into()))?;
+    let state = state
+        .ok_or_else(|| Error::Authentication("sign-in callback did not contain state".into()))?;
     if state != expected_state {
         respond(&mut stream, 400, "State mismatch. Sign-in aborted.").await;
-        return Err(Error::Authentication("sign-in callback state did not match the request".into()));
+        return Err(Error::Authentication(
+            "sign-in callback state did not match the request".into(),
+        ));
     }
 
-    respond(&mut stream, 200, "Sign-in complete. You can close this window and return to LingXi Launcher.").await;
-    Ok(OAuthCallback { code, state, redirect_uri: redirect_uri.to_string() })
+    respond(
+        &mut stream,
+        200,
+        "Sign-in complete. You can close this window and return to LingXi Launcher.",
+    )
+    .await;
+    Ok(OAuthCallback {
+        code,
+        state,
+        redirect_uri: redirect_uri.to_string(),
+    })
 }
 
 async fn respond(stream: &mut tokio::net::TcpStream, status: u16, message: &str) {
@@ -101,14 +124,14 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
         let redirect = format!("http://localhost:{port}");
-        let task = tokio::spawn(wait_for_callback(
-            listener,
-            "expected",
-            &redirect,
-            Duration::from_secs(5),
-        ));
+        let expected = redirect.clone();
+        let task = tokio::spawn(async move {
+            wait_for_callback(listener, "expected", &expected, Duration::from_secs(5)).await
+        });
         // The server is ready; send a browser-style request.
-        let mut client = tokio::net::TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+        let mut client = tokio::net::TcpStream::connect(("127.0.0.1", port))
+            .await
+            .unwrap();
         client
             .write_all(b"GET /?code=abc&state=expected HTTP/1.1\r\nHost: localhost\r\n\r\n")
             .await
@@ -122,13 +145,13 @@ mod tests {
     async fn rejects_state_mismatch() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
-        let task = tokio::spawn(wait_for_callback(
-            listener,
-            "expected",
-            &format!("http://localhost:{port}"),
-            Duration::from_secs(5),
-        ));
-        let mut client = tokio::net::TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+        let redirect = format!("http://localhost:{port}");
+        let task = tokio::spawn(async move {
+            wait_for_callback(listener, "expected", &redirect, Duration::from_secs(5)).await
+        });
+        let mut client = tokio::net::TcpStream::connect(("127.0.0.1", port))
+            .await
+            .unwrap();
         client
             .write_all(b"GET /?code=abc&state=other HTTP/1.1\r\nHost: localhost\r\n\r\n")
             .await

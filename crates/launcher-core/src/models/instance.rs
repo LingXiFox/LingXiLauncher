@@ -27,6 +27,7 @@ impl IdentityMode {
 
 /// Reproducible Java selection record persisted inside `instance.json`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct JavaRuntimeRecord {
     #[serde(default)]
     pub version: String,
@@ -40,8 +41,33 @@ pub struct JavaRuntimeRecord {
     pub vendor: Option<String>,
     #[serde(default)]
     pub checksum: Option<String>,
-    #[serde(default)]
-    pub source: Option<String>,
+    #[serde(
+        default = "default_java_source",
+        deserialize_with = "deserialize_java_source"
+    )]
+    pub source: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub component: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub artifact_sha1: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub artifact_sha256: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub executable_sha256: Option<String>,
+    #[serde(default = "Utc::now")]
+    pub recorded_at: DateTime<Utc>,
+}
+
+fn default_java_source() -> String {
+    "system".to_string()
+}
+
+fn deserialize_java_source<'de, D>(deserializer: D) -> std::result::Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Option::<String>::deserialize(deserializer)
+        .map(|value| value.unwrap_or_else(default_java_source))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -65,7 +91,11 @@ pub struct InstanceManifest {
 }
 
 impl InstanceManifest {
-    pub fn new(id: impl Into<String>, display_name: impl Into<String>, version_id: Option<String>) -> Self {
+    pub fn new(
+        id: impl Into<String>,
+        display_name: impl Into<String>,
+        version_id: Option<String>,
+    ) -> Self {
         Self {
             id: id.into(),
             display_name: display_name.into(),
@@ -105,7 +135,7 @@ impl Instance {
     }
 
     pub fn logs_directory(&self) -> std::path::PathBuf {
-        self.directory.join("logs")
+        self.game_directory.join("logs")
     }
 }
 
@@ -134,7 +164,11 @@ impl InstanceMemory {
 
 #[cfg(target_os = "macos")]
 fn physical_memory_mib() -> Option<u32> {
-    let output = std::process::Command::new("sysctl").arg("-n").arg("hw.memsize").output().ok()?;
+    let output = std::process::Command::new("sysctl")
+        .arg("-n")
+        .arg("hw.memsize")
+        .output()
+        .ok()?;
     let text = String::from_utf8(output.stdout).ok()?;
     let bytes: u64 = text.trim().parse().ok()?;
     Some((bytes / 1024 / 1024) as u32)
@@ -148,7 +182,13 @@ fn physical_memory_mib() -> Option<u32> {
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
 fn physical_memory_mib() -> Option<u32> {
     let text = std::fs::read_to_string("/proc/meminfo").ok()?;
-    let kb: u64 = text.lines().find(|l| l.starts_with("MemTotal:"))?.split_whitespace().nth(1)?.parse().ok()?;
+    let kb: u64 = text
+        .lines()
+        .find(|l| l.starts_with("MemTotal:"))?
+        .split_whitespace()
+        .nth(1)?
+        .parse()
+        .ok()?;
     Some((kb / 1024) as u32)
 }
 
@@ -162,16 +202,25 @@ impl InstanceRepository {
         Self { layout }
     }
 
-    pub fn create(&self, id: &str, display_name: &str, version_id: Option<&str>) -> Result<Instance> {
+    pub fn create(
+        &self,
+        id: &str,
+        display_name: &str,
+        version_id: Option<&str>,
+    ) -> Result<Instance> {
         let component = PathSafety::validate_component(id)?;
         let directory = self.layout.instance_directory(component)?;
         if directory.exists() {
-            return Err(Error::Other(format!("instance '{component}' already exists at {}", directory.display())));
+            return Err(Error::Other(format!(
+                "instance '{component}' already exists at {}",
+                directory.display()
+            )));
         }
         if let Some(version) = version_id {
             PathSafety::validate_component(version)?;
         }
-        let manifest = InstanceManifest::new(component, display_name, version_id.map(str::to_string));
+        let manifest =
+            InstanceManifest::new(component, display_name, version_id.map(str::to_string));
         let instance = Instance {
             manifest,
             directory,
@@ -187,10 +236,20 @@ impl InstanceRepository {
     pub fn create_with_generated_id(&self, display_name: &str) -> Result<Instance> {
         let base: String = display_name
             .chars()
-            .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                    c
+                } else {
+                    '-'
+                }
+            })
             .collect();
         let base = base.trim_matches('-');
-        let base = if base.is_empty() { "instance".to_string() } else { base.to_ascii_lowercase() };
+        let base = if base.is_empty() {
+            "instance".to_string()
+        } else {
+            base.to_ascii_lowercase()
+        };
         let id = if self.layout.instance_directory(&base)?.exists() {
             format!("{base}-{}", &uuid::Uuid::new_v4().simple().to_string()[..6])
         } else {
@@ -204,11 +263,18 @@ impl InstanceRepository {
         let directory = self.layout.instance_directory(component)?;
         let manifest_path = self.layout.instance_manifest(component)?;
         if !manifest_path.exists() {
-            return Err(Error::NotFound(format!("instance '{component}' at {}", directory.display())));
+            return Err(Error::NotFound(format!(
+                "instance '{component}' at {}",
+                directory.display()
+            )));
         }
         let data = std::fs::read(&manifest_path)?;
-        let manifest: InstanceManifest = serde_json::from_slice(&data)
-            .map_err(|e| Error::InvalidMetadata(format!("corrupted instance manifest {}: {e}", manifest_path.display())))?;
+        let manifest: InstanceManifest = serde_json::from_slice(&data).map_err(|e| {
+            Error::InvalidMetadata(format!(
+                "corrupted instance manifest {}: {e}",
+                manifest_path.display()
+            ))
+        })?;
         if manifest.id != component {
             return Err(Error::InvalidMetadata(format!(
                 "instance manifest id '{}' does not match directory '{component}'",
@@ -217,8 +283,12 @@ impl InstanceRepository {
         }
         let game_directory = self.layout.instance_game_directory(component)?;
         crate::layout::ensure_dir(&game_directory)?;
-        crate::layout::ensure_dir(&directory.join("logs"))?;
-        Ok(Instance { manifest, directory, game_directory })
+        crate::layout::ensure_dir(&game_directory.join("logs"))?;
+        Ok(Instance {
+            manifest,
+            directory,
+            game_directory,
+        })
     }
 
     pub fn list(&self) -> Result<Vec<Instance>> {
@@ -232,7 +302,10 @@ impl InstanceRepository {
             .filter_map(|e| e.file_name().to_str().map(str::to_string))
             .collect();
         names.sort();
-        Ok(names.iter().filter_map(|name| self.load(name).ok()).collect())
+        Ok(names
+            .iter()
+            .filter_map(|name| self.load(name).ok())
+            .collect())
     }
 
     pub fn save(&self, manifest: &InstanceManifest) -> Result<()> {
@@ -240,7 +313,11 @@ impl InstanceRepository {
         self.write_manifest(manifest, &directory)
     }
 
-    fn write_manifest(&self, manifest: &InstanceManifest, directory: &std::path::Path) -> Result<()> {
+    fn write_manifest(
+        &self,
+        manifest: &InstanceManifest,
+        directory: &std::path::Path,
+    ) -> Result<()> {
         crate::layout::ensure_dir(directory)?;
         let data = serde_json::to_vec_pretty(manifest)?;
         let target = directory.join("instance.json");
@@ -268,15 +345,23 @@ impl InstanceRepository {
     ) -> Result<Instance> {
         for argument in &jvm_arguments {
             if argument.contains('\n') || argument.contains('\0') {
-                return Err(Error::InvalidMetadata("JVM argument contains control characters".into()));
+                return Err(Error::InvalidMetadata(
+                    "JVM argument contains control characters".into(),
+                ));
             }
             if argument.starts_with("-Xmx") || argument.starts_with("-Xms") {
-                return Err(Error::InvalidMetadata("-Xmx/-Xms are managed by the memory setting".into()));
+                return Err(Error::InvalidMetadata(
+                    "-Xmx/-Xms are managed by the memory setting".into(),
+                ));
             }
         }
         let mut manifest = instance.manifest.clone();
         manifest.memory_mib = memory_mib.map(InstanceMemory::validate).transpose()?;
-        manifest.jvm_arguments = if jvm_arguments.is_empty() { None } else { Some(jvm_arguments) };
+        manifest.jvm_arguments = if jvm_arguments.is_empty() {
+            None
+        } else {
+            Some(jvm_arguments)
+        };
         self.save(&manifest)?;
         let mut next = instance.clone();
         next.manifest = manifest;

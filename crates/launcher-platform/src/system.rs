@@ -12,7 +12,9 @@ impl SystemServices for NativeSystemServices {
         #[cfg(target_os = "macos")]
         let status = quiet_command("open").arg(url).status()?;
         #[cfg(windows)]
-        let status = quiet_command("cmd").args(["/C", "start", "", url]).status()?;
+        let status = quiet_command("cmd")
+            .args(["/C", "start", "", url])
+            .status()?;
         #[cfg(all(unix, not(target_os = "macos")))]
         let status = quiet_command("xdg-open").arg(url).status()?;
         if status.success() {
@@ -26,7 +28,9 @@ impl SystemServices for NativeSystemServices {
         #[cfg(target_os = "macos")]
         let status = quiet_command("open").arg("-R").arg(path).status()?;
         #[cfg(windows)]
-        let status = quiet_command("explorer").arg(format!("/select,{}", path.display())).status()?;
+        let status = quiet_command("explorer")
+            .arg(format!("/select,{}", path.display()))
+            .status()?;
         #[cfg(all(unix, not(target_os = "macos")))]
         let status = quiet_command("xdg-open")
             .arg(path.parent().unwrap_or(path))
@@ -47,11 +51,11 @@ impl SystemServices for NativeSystemServices {
                 applescript_string(title)
             );
             let status = quiet_command("osascript").args(["-e", &script]).status()?;
-            return if status.success() {
+            if status.success() {
                 Ok(())
             } else {
                 Err(launcher_core::Error::Other("notification failed".into()))
-            };
+            }
         }
         #[cfg(windows)]
         {
@@ -60,12 +64,14 @@ impl SystemServices for NativeSystemServices {
                 title.replace('\'', "''"),
                 body.replace('\'', "''")
             );
-            let status = quiet_command("powershell").args(["-NoProfile", "-Command", &script]).status()?;
-            return if status.success() {
+            let status = quiet_command("powershell")
+                .args(["-NoProfile", "-Command", &script])
+                .status()?;
+            if status.success() {
                 Ok(())
             } else {
                 Err(launcher_core::Error::Other("notification failed".into()))
-            };
+            }
         }
         #[cfg(all(unix, not(target_os = "macos")))]
         {

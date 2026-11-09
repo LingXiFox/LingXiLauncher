@@ -12,10 +12,10 @@ pub mod service;
 pub mod xbox;
 
 pub use config::AuthConfig;
-pub use loopback::{OAuthCallback, wait_for_callback};
+pub use loopback::{wait_for_callback, OAuthCallback};
 pub use oauth::{MicrosoftOAuthClient, OAuthToken};
 pub use pkce::Pkce;
-pub use service::{MicrosoftAuthService, MicrosoftSession, refresh_token_key};
-pub use xbox::{MinecraftProfile, MicrosoftAuthenticator, XboxTokens, XstsResult};
+pub use service::{refresh_token_key, MicrosoftAuthService, MicrosoftSession};
+pub use xbox::{MicrosoftAuthenticator, MinecraftProfile, XboxTokens, XstsResult};
 
 pub use launcher_core::models::account::{MicrosoftAccount, PlayerAppearance};

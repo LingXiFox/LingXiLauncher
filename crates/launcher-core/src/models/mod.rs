@@ -4,8 +4,8 @@ pub mod launch;
 pub mod version;
 
 pub use account::{
-    LocalAccountStore, LocalOfflineAccount, LocalOfflineProfile, MicrosoftAccount,
-    MicrosoftAccountStore, PlayerAppearance, validate_player_name,
+    validate_player_name, LocalAccountStore, LocalOfflineAccount, LocalOfflineProfile,
+    MicrosoftAccount, MicrosoftAccountStore, PlayerAppearance,
 };
 pub use instance::{
     Instance, InstanceManifest, InstanceMemory, InstanceRepository, JavaRuntimeRecord,

@@ -49,7 +49,9 @@ impl LaunchIdentity {
         match self.mode {
             IdentityMode::Microsoft => format!("Microsoft ({})", self.player_name),
             IdentityMode::LicensedOffline => format!("Licensed offline ({})", self.player_name),
-            IdentityMode::LocalOffline => format!("Local offline / unverified ({})", self.player_name),
+            IdentityMode::LocalOffline => {
+                format!("Local offline / unverified ({})", self.player_name)
+            }
         }
     }
 
@@ -73,7 +75,13 @@ pub struct LaunchContext {
 }
 
 impl LaunchContext {
-    pub fn new(instance_directory: PathBuf, game_directory: PathBuf, java: PathBuf, platform: PlatformContext, identity: LaunchIdentity) -> Self {
+    pub fn new(
+        instance_directory: PathBuf,
+        game_directory: PathBuf,
+        java: PathBuf,
+        platform: PlatformContext,
+        identity: LaunchIdentity,
+    ) -> Self {
         Self {
             instance_directory,
             game_directory,

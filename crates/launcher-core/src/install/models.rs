@@ -40,20 +40,52 @@ pub struct DownloadTask {
 }
 
 impl DownloadTask {
-    pub fn new(destination: PathBuf, official_url: Option<String>, sha1: Option<String>, size: Option<u64>, kind: MissingDependencyKind) -> Self {
-        Self { destination, official_url, sha1: sha1.map(|s| s.to_lowercase()), size, kind }
+    pub fn new(
+        destination: PathBuf,
+        official_url: Option<String>,
+        sha1: Option<String>,
+        size: Option<u64>,
+        kind: MissingDependencyKind,
+    ) -> Self {
+        Self {
+            destination,
+            official_url,
+            sha1: sha1.map(|s| s.to_lowercase()),
+            size,
+            kind,
+        }
     }
 }
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum InstallProgressEvent {
-    Phase { phase: String, message: String },
-    Plan { total_files: usize, total_bytes: u64, cache_hits: usize },
-    FileStarted { path: String, size: u64 },
-    FileFinished { path: String, bytes: u64, source: String },
-    FileFailed { path: String, message: String },
-    Bytes { downloaded: u64, total: u64 },
+    Phase {
+        phase: String,
+        message: String,
+    },
+    Plan {
+        total_files: usize,
+        total_bytes: u64,
+        cache_hits: usize,
+    },
+    FileStarted {
+        path: String,
+        size: u64,
+    },
+    FileFinished {
+        path: String,
+        bytes: u64,
+        source: String,
+    },
+    FileFailed {
+        path: String,
+        message: String,
+    },
+    Bytes {
+        downloaded: u64,
+        total: u64,
+    },
 }
 
 pub trait ProgressSink: Send + Sync {
@@ -126,7 +158,11 @@ pub struct DownloadConfiguration {
 
 impl Default for DownloadConfiguration {
     fn default() -> Self {
-        Self { concurrency: 4, max_retries: 3, retry_delay_ms: 500 }
+        Self {
+            concurrency: 4,
+            max_retries: 3,
+            retry_delay_ms: 500,
+        }
     }
 }
 
@@ -214,14 +250,20 @@ impl TrustedMirrorConfiguration {
     pub fn validate(&self) -> crate::error::Result<()> {
         use crate::error::Error;
         if self.id.trim().is_empty() || self.display_name.trim().is_empty() {
-            return Err(Error::InvalidMetadata("mirror configuration needs id and displayName".into()));
+            return Err(Error::InvalidMetadata(
+                "mirror configuration needs id and displayName".into(),
+            ));
         }
         if self.rules.is_empty() {
-            return Err(Error::InvalidMetadata(format!("mirror '{}' declares no host rules", self.id)));
+            return Err(Error::InvalidMetadata(format!(
+                "mirror '{}' declares no host rules",
+                self.id
+            )));
         }
         for rule in &self.rules {
-            let url = url::Url::parse(&rule.mirror_base_url)
-                .map_err(|e| Error::InvalidMetadata(format!("invalid mirror URL {}: {e}", rule.mirror_base_url)))?;
+            let url = url::Url::parse(&rule.mirror_base_url).map_err(|e| {
+                Error::InvalidMetadata(format!("invalid mirror URL {}: {e}", rule.mirror_base_url))
+            })?;
             if url.scheme() != "https" || url.host().is_none() {
                 return Err(Error::InvalidMetadata(format!(
                     "mirror '{}' maps {} to a non-HTTPS URL",
@@ -236,7 +278,10 @@ impl TrustedMirrorConfiguration {
     pub fn rewrite(&self, official: &str) -> Option<String> {
         let parsed = url::Url::parse(official).ok()?;
         let host = parsed.host_str()?.to_ascii_lowercase();
-        let rule = self.rules.iter().find(|r| r.official_host.eq_ignore_ascii_case(&host))?;
+        let rule = self
+            .rules
+            .iter()
+            .find(|r| r.official_host.eq_ignore_ascii_case(&host))?;
         let mut base = rule.mirror_base_url.trim_end_matches('/').to_string();
         if let Some(prefix) = rule.path_prefix.as_ref().filter(|p| !p.is_empty()) {
             base.push('/');

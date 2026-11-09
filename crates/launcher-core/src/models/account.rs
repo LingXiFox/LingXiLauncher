@@ -31,17 +31,24 @@ impl LocalOfflineProfile {
 
 impl LocalOfflineAccount {
     pub fn profile(&self) -> LocalOfflineProfile {
-        LocalOfflineProfile { player_name: self.player_name.clone(), stable_offline_uuid: self.offline_uuid }
+        LocalOfflineProfile {
+            player_name: self.player_name.clone(),
+            stable_offline_uuid: self.offline_uuid,
+        }
     }
 }
 
 /// Validates a Minecraft-compatible player name: 3-16 chars of `A-Za-z0-9_`.
 pub fn validate_player_name(name: &str) -> Result<&str> {
     if name.len() < 3 || name.len() > 16 {
-        return Err(Error::InvalidMetadata(format!("invalid player name '{name}': 3-16 characters required")));
+        return Err(Error::InvalidMetadata(format!(
+            "invalid player name '{name}': 3-16 characters required"
+        )));
     }
     if !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
-        return Err(Error::InvalidMetadata(format!("invalid player name '{name}': only A-Z a-z 0-9 _")));
+        return Err(Error::InvalidMetadata(format!(
+            "invalid player name '{name}': only A-Z a-z 0-9 _"
+        )));
     }
     Ok(name)
 }
@@ -69,7 +76,25 @@ impl LocalAccountStore {
 
     fn account_path(&self, player_name: &str) -> Result<std::path::PathBuf> {
         let name = PathSafety::validate_component(player_name)?;
-        Ok(self.layout.local_accounts_directory().join(format!("{name}.json")))
+        Ok(self
+            .layout
+            .local_accounts_directory()
+            .join(format!("{name}.json")))
+    }
+
+    pub fn path_for(&self, player_name: &str) -> Result<std::path::PathBuf> {
+        let name = validate_player_name(player_name)?;
+        self.account_path(name)
+    }
+
+    pub fn delete(&self, player_name: &str) -> Result<()> {
+        let path = self.path_for(player_name)?;
+        if !path.is_file() {
+            return Err(Error::NotFound(format!(
+                "local offline account '{player_name}' does not exist"
+            )));
+        }
+        Ok(std::fs::remove_file(path)?)
     }
 
     pub fn create(&self, player_name: &str) -> Result<LocalOfflineAccount> {
@@ -95,13 +120,22 @@ impl LocalAccountStore {
         let name = validate_player_name(player_name)?;
         let path = self.account_path(name)?;
         if !path.exists() {
-            return Err(Error::NotFound(format!("local offline account '{name}' does not exist")));
+            return Err(Error::NotFound(format!(
+                "local offline account '{name}' does not exist"
+            )));
         }
         let data = std::fs::read(&path)?;
-        let account: LocalOfflineAccount = serde_json::from_slice(&data)
-            .map_err(|e| Error::InvalidMetadata(format!("corrupted local account file {}: {e}", path.display())))?;
+        let account: LocalOfflineAccount = serde_json::from_slice(&data).map_err(|e| {
+            Error::InvalidMetadata(format!(
+                "corrupted local account file {}: {e}",
+                path.display()
+            ))
+        })?;
         if account.identity_mode != super::instance::IdentityMode::LocalOffline {
-            return Err(Error::InvalidMetadata(format!("{} is not a local offline account", path.display())));
+            return Err(Error::InvalidMetadata(format!(
+                "{} is not a local offline account",
+                path.display()
+            )));
         }
         Ok(account)
     }
@@ -121,9 +155,15 @@ impl LocalAccountStore {
         for file in files {
             let data = std::fs::read(&file)?;
             match serde_json::from_slice::<LocalOfflineAccount>(&data) {
-                Ok(account) if account.identity_mode == super::instance::IdentityMode::LocalOffline => accounts.push(account),
+                Ok(account)
+                    if account.identity_mode == super::instance::IdentityMode::LocalOffline =>
+                {
+                    accounts.push(account)
+                }
                 Ok(_) => {}
-                Err(e) => tracing::warn!(path = %file.display(), error = %e, "skipping corrupted local account"),
+                Err(e) => {
+                    tracing::warn!(path = %file.display(), error = %e, "skipping corrupted local account")
+                }
             }
         }
         Ok(accounts)
@@ -134,7 +174,7 @@ impl LocalAccountStore {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PlayerAppearance {
     #[serde(default)]
@@ -171,7 +211,9 @@ impl MicrosoftAccountStore {
     }
 
     fn file(&self, id: Uuid) -> std::path::PathBuf {
-        self.layout.microsoft_accounts_directory().join(format!("{}.json", id.hyphenated()))
+        self.layout
+            .microsoft_accounts_directory()
+            .join(format!("{}.json", id.hyphenated()))
     }
 
     pub fn list(&self) -> Result<Vec<MicrosoftAccount>> {
@@ -190,7 +232,9 @@ impl MicrosoftAccountStore {
             let data = std::fs::read(&path)?;
             match serde_json::from_slice(&data) {
                 Ok(account) => accounts.push(account),
-                Err(e) => tracing::warn!(path = %path.display(), error = %e, "skipping corrupted account"),
+                Err(e) => {
+                    tracing::warn!(path = %path.display(), error = %e, "skipping corrupted account")
+                }
             }
         }
         Ok(accounts)
@@ -199,7 +243,9 @@ impl MicrosoftAccountStore {
     pub fn load(&self, id: Uuid) -> Result<MicrosoftAccount> {
         let path = self.file(id);
         if !path.exists() {
-            return Err(Error::NotFound(format!("Microsoft account {id} is not stored locally")));
+            return Err(Error::NotFound(format!(
+                "Microsoft account {id} is not stored locally"
+            )));
         }
         Ok(serde_json::from_slice(&std::fs::read(&path)?)?)
     }
@@ -244,6 +290,29 @@ mod tests {
 pub enum AccountKind {
     Microsoft,
     Local,
+}
+
+impl AccountKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Microsoft => "microsoft",
+            Self::Local => "local",
+        }
+    }
+}
+
+impl std::str::FromStr for AccountKind {
+    type Err = Error;
+
+    fn from_str(value: &str) -> Result<Self> {
+        match value {
+            "microsoft" => Ok(Self::Microsoft),
+            "local" | "offline" => Ok(Self::Local),
+            other => Err(Error::InvalidMetadata(format!(
+                "unknown account kind '{other}'"
+            ))),
+        }
+    }
 }
 
 /// Identity selection shared by CLI and GUI: references only, no credentials.

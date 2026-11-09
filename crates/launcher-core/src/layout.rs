@@ -13,7 +13,10 @@ pub struct GameDataLayout {
 
 impl GameDataLayout {
     pub fn new(game_root: impl Into<PathBuf>, data_root: impl Into<PathBuf>) -> Self {
-        Self { game_root: game_root.into(), data_root: data_root.into() }
+        Self {
+            game_root: game_root.into(),
+            data_root: data_root.into(),
+        }
     }
 
     pub fn default_data_root() -> PathBuf {
@@ -52,11 +55,15 @@ impl GameDataLayout {
     }
 
     pub fn version_json(&self, version_id: &str) -> Result<PathBuf> {
-        Ok(self.version_directory(version_id)?.join(format!("{version_id}.json")))
+        Ok(self
+            .version_directory(version_id)?
+            .join(format!("{version_id}.json")))
     }
 
     pub fn client_jar(&self, version_id: &str) -> Result<PathBuf> {
-        Ok(self.version_directory(version_id)?.join(format!("{version_id}.jar")))
+        Ok(self
+            .version_directory(version_id)?
+            .join(format!("{version_id}.jar")))
     }
 
     pub fn libraries_directory(&self) -> PathBuf {
@@ -76,7 +83,9 @@ impl GameDataLayout {
     }
 
     pub fn asset_index_path(&self, id: &str) -> Result<PathBuf> {
-        Ok(self.asset_indexes_directory().join(format!("{}.json", PathSafety::validate_component(id)?)))
+        Ok(self
+            .asset_indexes_directory()
+            .join(format!("{}.json", PathSafety::validate_component(id)?)))
     }
 
     pub fn asset_objects_directory(&self) -> PathBuf {
@@ -107,7 +116,9 @@ impl GameDataLayout {
     }
 
     pub fn instance_directory(&self, instance_id: &str) -> Result<PathBuf> {
-        Ok(self.instances_directory().join(PathSafety::validate_component(instance_id)?))
+        Ok(self
+            .instances_directory()
+            .join(PathSafety::validate_component(instance_id)?))
     }
 
     pub fn instance_manifest(&self, instance_id: &str) -> Result<PathBuf> {
@@ -124,7 +135,7 @@ impl GameDataLayout {
     }
 
     pub fn instance_logs_directory(&self, instance_id: &str) -> Result<PathBuf> {
-        Ok(self.instance_directory(instance_id)?.join("logs"))
+        Ok(self.instance_game_directory(instance_id)?.join("logs"))
     }
 
     pub fn accounts_directory(&self) -> PathBuf {
@@ -170,22 +181,31 @@ impl GameDataLayout {
 
 #[cfg(target_os = "macos")]
 fn home() -> PathBuf {
-    std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default()
+    std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_default()
 }
 
 #[cfg(target_os = "windows")]
 fn home() -> PathBuf {
-    std::env::var_os("USERPROFILE").map(PathBuf::from).unwrap_or_default()
+    std::env::var_os("USERPROFILE")
+        .map(PathBuf::from)
+        .unwrap_or_default()
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
 fn home() -> PathBuf {
-    std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default()
+    std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_default()
 }
 
 fn dirs_data_root() -> PathBuf {
     if cfg!(target_os = "macos") {
-        home().join("Library").join("Application Support").join("LingXiLauncher")
+        home()
+            .join("Library")
+            .join("Application Support")
+            .join("LingXiLauncher")
     } else if cfg!(target_os = "windows") {
         std::env::var_os("APPDATA")
             .map(PathBuf::from)
@@ -201,16 +221,27 @@ fn dirs_data_root() -> PathBuf {
 
 fn dirs_minecraft_root() -> PathBuf {
     if cfg!(target_os = "windows") {
-        std::env::var_os("APPDATA").map(PathBuf::from).unwrap_or_else(home).join(".minecraft")
+        std::env::var_os("APPDATA")
+            .map(PathBuf::from)
+            .unwrap_or_else(home)
+            .join(".minecraft")
     } else if cfg!(target_os = "macos") {
-        home().join("Library").join("Application Support").join("minecraft")
+        home()
+            .join("Library")
+            .join("Application Support")
+            .join("minecraft")
     } else {
         home().join(".minecraft")
     }
 }
 
 pub fn ensure_dir(path: &Path) -> Result<()> {
-    std::fs::create_dir_all(path).map_err(|e| Error::Io(std::io::Error::new(e.kind(), format!("create {}: {e}", path.display()))))
+    std::fs::create_dir_all(path).map_err(|e| {
+        Error::Io(std::io::Error::new(
+            e.kind(),
+            format!("create {}: {e}", path.display()),
+        ))
+    })
 }
 
 #[cfg(test)]
@@ -220,8 +251,14 @@ mod tests {
     #[test]
     fn paths_are_isolated() {
         let layout = GameDataLayout::new("/tmp/game", "/tmp/data");
-        assert_eq!(layout.instance_game_directory("abc").unwrap(), PathBuf::from("/tmp/data/.minecraft/versions/abc"));
-        assert_eq!(layout.asset_object_path("abcdef").unwrap(), PathBuf::from("/tmp/game/assets/objects/ab/abcdef"));
+        assert_eq!(
+            layout.instance_game_directory("abc").unwrap(),
+            PathBuf::from("/tmp/data/.minecraft/versions/abc")
+        );
+        assert_eq!(
+            layout.asset_object_path("abcdef").unwrap(),
+            PathBuf::from("/tmp/game/assets/objects/ab/abcdef")
+        );
         assert!(layout.instance_directory("../x").is_err());
     }
 }

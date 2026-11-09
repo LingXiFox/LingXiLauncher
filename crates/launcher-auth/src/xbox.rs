@@ -9,10 +9,12 @@ use uuid::Uuid;
 
 const XBOX_AUTH_URL: &str = "https://user.auth.xboxlive.com/user/authenticate";
 const XSTS_URL: &str = "https://xsts.auth.xboxlive.com/xsts/authorize";
-const MINECRAFT_LOGIN_URL: &str = "https://api.minecraftservices.com/authentication/login_with_xbox";
+const MINECRAFT_LOGIN_URL: &str =
+    "https://api.minecraftservices.com/authentication/login_with_xbox";
 const ENTITLEMENTS_URL: &str = "https://api.minecraftservices.com/entitlements/mcstore";
 const PROFILE_URL: &str = "https://api.minecraftservices.com/minecraft/profile";
-const XBOX_PROFILE_URL: &str = "https://profile.xboxlive.com/users/me/profile/settings?settings=Gamertag";
+const XBOX_PROFILE_URL: &str =
+    "https://profile.xboxlive.com/users/me/profile/settings?settings=Gamertag";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct XboxTokens {
@@ -85,13 +87,14 @@ impl MicrosoftAuthenticator {
         }
         let payload: XboxAuthenticationResponse = serde_json::from_str(&response.body)
             .map_err(|e| Error::Authentication(format!("invalid Xbox Live response: {e}")))?;
-        let claim = payload
-            .display_claims
-            .xui
-            .first()
-            .ok_or_else(|| Error::Authentication("Xbox Live response had no user hash".into()))?;
+        let claim =
+            payload.display_claims.xui.first().ok_or_else(|| {
+                Error::Authentication("Xbox Live response had no user hash".into())
+            })?;
         if claim.uhs.is_empty() || payload.token.is_empty() {
-            return Err(Error::Authentication("Xbox Live response had no token or user hash".into()));
+            return Err(Error::Authentication(
+                "Xbox Live response had no token or user hash".into(),
+            ));
         }
         let mut tokens = XboxTokens {
             token: payload.token,
@@ -105,10 +108,15 @@ impl MicrosoftAuthenticator {
     }
 
     pub async fn authorize_xsts(&self, xbox: &XboxTokens) -> Result<XstsResult> {
-        self.authorize_xsts_for(xbox, "rp://api.minecraftservices.com/").await
+        self.authorize_xsts_for(xbox, "rp://api.minecraftservices.com/")
+            .await
     }
 
-    pub async fn authorize_xsts_for(&self, xbox: &XboxTokens, relying_party: &str) -> Result<XstsResult> {
+    pub async fn authorize_xsts_for(
+        &self,
+        xbox: &XboxTokens,
+        relying_party: &str,
+    ) -> Result<XstsResult> {
         let body = json!({
             "Properties": {
                 "SandboxId": "RETAIL",
@@ -139,7 +147,9 @@ impl MicrosoftAuthenticator {
             .first()
             .ok_or_else(|| Error::Authentication("XSTS response had no user hash".into()))?;
         if payload.token.is_empty() || claim.uhs.is_empty() {
-            return Err(Error::Authentication("XSTS response had no token or user hash".into()));
+            return Err(Error::Authentication(
+                "XSTS response had no token or user hash".into(),
+            ));
         }
         Ok(XstsResult {
             token: payload.token,
@@ -151,14 +161,18 @@ impl MicrosoftAuthenticator {
     /// Resolves the XUID via an Xbox Live audience; returns `None` when unavailable.
     pub async fn resolve_xuid(&self, xbox: &XboxTokens) -> Result<Option<String>> {
         let profile_token = self.authorize_xsts_for(xbox, "http://xboxlive.com").await?;
-        self.fetch_xuid(&profile_token.token, &profile_token.user_hash).await
+        self.fetch_xuid(&profile_token.token, &profile_token.user_hash)
+            .await
     }
 
     pub async fn fetch_xuid(&self, xsts_token: &str, user_hash: &str) -> Result<Option<String>> {
         let response = self
             .http
             .get(XBOX_PROFILE_URL)
-            .header("Authorization", format!("XBL3.0 x={user_hash};{xsts_token}"))
+            .header(
+                "Authorization",
+                format!("XBL3.0 x={user_hash};{xsts_token}"),
+            )
             .header("Accept", "application/json")
             .header("x-xbl-contract-version", "3")
             .send()
@@ -171,7 +185,12 @@ impl MicrosoftAuthenticator {
             .json()
             .await
             .map_err(|e| Error::Authentication(format!("invalid Xbox profile response: {e}")))?;
-        Ok(payload.profile_users.into_iter().next().map(|u| u.id).filter(|id| !id.is_empty()))
+        Ok(payload
+            .profile_users
+            .into_iter()
+            .next()
+            .map(|u| u.id)
+            .filter(|id| !id.is_empty()))
     }
 
     pub async fn login_minecraft(&self, xsts: &XstsResult) -> Result<(String, DateTime<Utc>)> {
@@ -194,9 +213,12 @@ impl MicrosoftAuthenticator {
         let payload: MinecraftLoginResponse = serde_json::from_str(&response.body)
             .map_err(|e| Error::Authentication(format!("invalid Minecraft login response: {e}")))?;
         if payload.access_token.is_empty() {
-            return Err(Error::Authentication("Minecraft Services returned no access token".into()));
+            return Err(Error::Authentication(
+                "Minecraft Services returned no access token".into(),
+            ));
         }
-        let expires_at = Utc::now() + chrono::Duration::seconds(payload.expires_in.unwrap_or(86_400) as i64);
+        let expires_at =
+            Utc::now() + chrono::Duration::seconds(payload.expires_in.unwrap_or(86_400) as i64);
         Ok((payload.access_token, expires_at))
     }
 
@@ -228,7 +250,10 @@ impl MicrosoftAuthenticator {
     }
 
     /// Returns `None` for accounts without a Minecraft profile (HTTP 404).
-    pub async fn fetch_profile(&self, token: &str) -> Result<Option<(MinecraftProfile, Option<PlayerAppearance>)>> {
+    pub async fn fetch_profile(
+        &self,
+        token: &str,
+    ) -> Result<Option<(MinecraftProfile, Option<PlayerAppearance>)>> {
         let response = self
             .http
             .get(PROFILE_URL)
@@ -236,7 +261,9 @@ impl MicrosoftAuthenticator {
             .header("Accept", "application/json")
             .send()
             .await
-            .map_err(|e| Error::Unavailable(format!("Minecraft profile service unreachable: {e}")))?;
+            .map_err(|e| {
+                Error::Unavailable(format!("Minecraft profile service unreachable: {e}"))
+            })?;
         match response.status().as_u16() {
             404 => return Ok(None),
             401 => return Err(Error::Authentication("Minecraft access token was rejected; sign in again".into())),
@@ -250,35 +277,49 @@ impl MicrosoftAuthenticator {
             }
             _ => {}
         }
-        let payload: MinecraftProfileResponse = response
-            .json()
-            .await
-            .map_err(|e| Error::Authentication(format!("invalid Minecraft profile response: {e}")))?;
+        let payload: MinecraftProfileResponse = response.json().await.map_err(|e| {
+            Error::Authentication(format!("invalid Minecraft profile response: {e}"))
+        })?;
         let id = parse_minecraft_id(&payload.id)
             .ok_or_else(|| Error::Authentication("Minecraft profile had an invalid id".into()))?;
         if payload.name.is_empty() {
-            return Err(Error::Authentication("Minecraft profile had an empty name".into()));
+            return Err(Error::Authentication(
+                "Minecraft profile had an empty name".into(),
+            ));
         }
-        let skin = payload
-            .skins
-            .as_ref()
-            .and_then(|s| s.iter().find(|s| s.state.eq_ignore_ascii_case("ACTIVE")).or_else(|| s.first()));
-        let cape = payload
-            .capes
-            .as_ref()
-            .and_then(|c| c.iter().find(|c| c.state.eq_ignore_ascii_case("ACTIVE")).or_else(|| c.first()));
+        let skin = payload.skins.as_ref().and_then(|s| {
+            s.iter()
+                .find(|s| s.state.eq_ignore_ascii_case("ACTIVE"))
+                .or_else(|| s.first())
+        });
+        let cape = payload.capes.as_ref().and_then(|c| {
+            c.iter()
+                .find(|c| c.state.eq_ignore_ascii_case("ACTIVE"))
+                .or_else(|| c.first())
+        });
         let appearance = if skin.is_some() || cape.is_some() {
             Some(PlayerAppearance {
                 skin_texture_url: skin.and_then(|s| secure_texture(&s.url)),
                 cape_texture_url: cape.and_then(|c| secure_texture(&c.url)),
                 skin_model: skin.map(|s| {
-                    if s.variant.eq_ignore_ascii_case("SLIM") { "slim" } else { "classic" }.to_string()
+                    if s.variant.eq_ignore_ascii_case("SLIM") {
+                        "slim"
+                    } else {
+                        "classic"
+                    }
+                    .to_string()
                 }),
             })
         } else {
             None
         };
-        Ok(Some((MinecraftProfile { id, name: payload.name }, appearance)))
+        Ok(Some((
+            MinecraftProfile {
+                id,
+                name: payload.name,
+            },
+            appearance,
+        )))
     }
 
     /// Full ownership + profile verification for a fresh Minecraft token.
@@ -293,10 +334,14 @@ impl MicrosoftAuthenticator {
         // A Minecraft profile is only issued to Java owners, so either signal proves ownership.
         let owns_game = !entitlements.is_empty() || profile.is_some();
         let (profile, appearance) = profile.ok_or_else(|| {
-            Error::Authentication("this Microsoft account does not own Minecraft: Java Edition".into())
+            Error::Authentication(
+                "this Microsoft account does not own Minecraft: Java Edition".into(),
+            )
         })?;
         if !owns_game {
-            return Err(Error::Authentication("this Microsoft account does not own Minecraft: Java Edition".into()));
+            return Err(Error::Authentication(
+                "this Microsoft account does not own Minecraft: Java Edition".into(),
+            ));
         }
         Ok(VerifiedMinecraft {
             profile,
@@ -308,7 +353,12 @@ impl MicrosoftAuthenticator {
         })
     }
 
-    async fn post_json(&self, url: &str, body: &serde_json::Value, contract_version: bool) -> Result<RawResponse> {
+    async fn post_json(
+        &self,
+        url: &str,
+        body: &serde_json::Value,
+        contract_version: bool,
+    ) -> Result<RawResponse> {
         let mut request = self
             .http
             .post(url)
@@ -371,7 +421,9 @@ fn xsts_error(code: Option<i64>) -> Error {
     let message = match code {
         Some(2_148_916_227) => "this Xbox account is banned and cannot access Minecraft",
         Some(2_148_916_233) => "this Microsoft account has no Xbox profile",
-        Some(2_148_916_235) => "this account is a child account that needs an adult to join Xbox Live",
+        Some(2_148_916_235) => {
+            "this account is a child account that needs an adult to join Xbox Live"
+        }
         Some(2_148_916_236) => "this account is not available in its region for Xbox Live",
         Some(2_148_916_238) => "this account needs to finish Xbox Live setup at xbox.com",
         _ => "Xbox Live rejected this account (XSTS authorization failed)",
@@ -419,13 +471,18 @@ impl XuidValue {
 
 impl Xui {
     fn xuid(&self) -> Option<String> {
-        self.xid.as_ref().map(|v| v.as_string()).filter(|v| !v.is_empty())
+        self.xid
+            .as_ref()
+            .map(|v| v.as_string())
+            .filter(|v| !v.is_empty())
     }
 }
 
 // Serde cannot call `user_hash`/`xuid` automatically, so normalize on construction.
 impl<'de> Deserialize<'de> for Xui {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> std::result::Result<Self, D::Error> {
+    fn deserialize<D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> std::result::Result<Self, D::Error> {
         #[derive(Deserialize)]
         struct Raw {
             uhs: String,
@@ -437,7 +494,10 @@ impl<'de> Deserialize<'de> for Xui {
             xuid_upper: Option<XuidValue>,
         }
         let raw = Raw::deserialize(deserializer)?;
-        Ok(Xui { uhs: raw.uhs, xid: raw.xid.or(raw.xuid).or(raw.xuid_upper) })
+        Ok(Xui {
+            uhs: raw.uhs,
+            xid: raw.xid.or(raw.xuid).or(raw.xuid_upper),
+        })
     }
 }
 
@@ -507,8 +567,14 @@ mod tests {
     #[test]
     fn parses_dashed_and_plain_minecraft_ids() {
         let expected = Uuid::parse_str("069a79f4-44e9-4726-a5be-fca90e38aaf5").unwrap();
-        assert_eq!(parse_minecraft_id("069a79f444e94726a5befca90e38aaf5"), Some(expected));
-        assert_eq!(parse_minecraft_id("069a79f4-44e9-4726-a5be-fca90e38aaf5"), Some(expected));
+        assert_eq!(
+            parse_minecraft_id("069a79f444e94726a5befca90e38aaf5"),
+            Some(expected)
+        );
+        assert_eq!(
+            parse_minecraft_id("069a79f4-44e9-4726-a5be-fca90e38aaf5"),
+            Some(expected)
+        );
         assert_eq!(parse_minecraft_id("not-a-uuid"), None);
     }
 

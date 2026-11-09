@@ -16,7 +16,11 @@ impl Pkce {
     pub fn generate() -> Result<Self> {
         let verifier = random_url_safe(32);
         let challenge = Self::challenge_for(&verifier);
-        Ok(Self { verifier, challenge, state: random_url_safe(32) })
+        Ok(Self {
+            verifier,
+            challenge,
+            state: random_url_safe(32),
+        })
     }
 
     pub fn challenge_for(verifier: &str) -> String {
@@ -48,7 +52,10 @@ mod tests {
     fn generated_values_are_url_safe() {
         let pkce = Pkce::generate().unwrap();
         assert!(pkce.verifier.len() >= 43);
-        assert!(pkce.verifier.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'));
+        assert!(pkce
+            .verifier
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'));
         assert_eq!(pkce.state.len(), 43);
     }
 }

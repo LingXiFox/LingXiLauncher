@@ -27,10 +27,14 @@ impl PathSafety {
             return Err(Error::UnsafePath("empty relative path".into()));
         }
         if relative.starts_with('/') || relative.starts_with('\\') || relative.contains('\\') {
-            return Err(Error::UnsafePath(format!("absolute or backslash path {relative}")));
+            return Err(Error::UnsafePath(format!(
+                "absolute or backslash path {relative}"
+            )));
         }
         if relative.contains('\0') || relative.chars().any(|c| c.is_control()) {
-            return Err(Error::UnsafePath(format!("control characters in {relative}")));
+            return Err(Error::UnsafePath(format!(
+                "control characters in {relative}"
+            )));
         }
         let mut out = base.to_path_buf();
         for part in relative.split('/') {

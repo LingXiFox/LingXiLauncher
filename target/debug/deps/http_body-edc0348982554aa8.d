@@ -1,7 +1,0 @@
-/Volumes/Development/Projects/projects/LingXiLauncher/target/debug/deps/http_body-edc0348982554aa8.d: /Volumes/Development/Projects/projects/LingXiLauncher/.cargo-home/registry/src/index.crates.io-1949cf8c6b5b557f/http-body-1.1.0/src/lib.rs /Volumes/Development/Projects/projects/LingXiLauncher/.cargo-home/registry/src/index.crates.io-1949cf8c6b5b557f/http-body-1.1.0/src/frame.rs /Volumes/Development/Projects/projects/LingXiLauncher/.cargo-home/registry/src/index.crates.io-1949cf8c6b5b557f/http-body-1.1.0/src/size_hint.rs
-
-/Volumes/Development/Projects/projects/LingXiLauncher/target/debug/deps/libhttp_body-edc0348982554aa8.rmeta: /Volumes/Development/Projects/projects/LingXiLauncher/.cargo-home/registry/src/index.crates.io-1949cf8c6b5b557f/http-body-1.1.0/src/lib.rs /Volumes/Development/Projects/projects/LingXiLauncher/.cargo-home/registry/src/index.crates.io-1949cf8c6b5b557f/http-body-1.1.0/src/frame.rs /Volumes/Development/Projects/projects/LingXiLauncher/.cargo-home/registry/src/index.crates.io-1949cf8c6b5b557f/http-body-1.1.0/src/size_hint.rs
-
-/Volumes/Development/Projects/projects/LingXiLauncher/.cargo-home/registry/src/index.crates.io-1949cf8c6b5b557f/http-body-1.1.0/src/lib.rs:
-/Volumes/Development/Projects/projects/LingXiLauncher/.cargo-home/registry/src/index.crates.io-1949cf8c6b5b557f/http-body-1.1.0/src/frame.rs:
-/Volumes/Development/Projects/projects/LingXiLauncher/.cargo-home/registry/src/index.crates.io-1949cf8c6b5b557f/http-body-1.1.0/src/size_hint.rs:

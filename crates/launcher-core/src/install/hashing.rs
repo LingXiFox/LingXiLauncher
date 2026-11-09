@@ -42,7 +42,11 @@ pub fn sha1_bytes(bytes: &[u8]) -> String {
 }
 
 /// Verifies size first (cheap) and then SHA-1 when provided.
-pub fn verify_file(path: &Path, expected_sha1: Option<&str>, expected_size: Option<u64>) -> Result<bool> {
+pub fn verify_file(
+    path: &Path,
+    expected_sha1: Option<&str>,
+    expected_size: Option<u64>,
+) -> Result<bool> {
     let metadata = match std::fs::metadata(path) {
         Ok(metadata) if metadata.is_file() => metadata,
         _ => return Ok(false),
@@ -64,11 +68,19 @@ pub fn verify_file(path: &Path, expected_sha1: Option<&str>, expected_size: Opti
     Ok(true)
 }
 
-pub fn verify_or_error(path: &Path, expected_sha1: Option<&str>, expected_size: Option<u64>) -> Result<()> {
+pub fn verify_or_error(
+    path: &Path,
+    expected_sha1: Option<&str>,
+    expected_size: Option<u64>,
+) -> Result<()> {
     if verify_file(path, expected_sha1, expected_size)? {
         return Ok(());
     }
-    let actual = if path.is_file() { sha1_file(path).unwrap_or_else(|_| "unreadable".into()) } else { "missing".into() };
+    let actual = if path.is_file() {
+        sha1_file(path).unwrap_or_else(|_| "unreadable".into())
+    } else {
+        "missing".into()
+    };
     Err(Error::HashMismatch {
         path: path.to_path_buf(),
         expected: expected_sha1.unwrap_or("<size only>").to_string(),

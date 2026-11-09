@@ -57,7 +57,9 @@ impl AuthConfig {
 
     pub fn validate(&self) -> Result<()> {
         if self.client_id.trim().is_empty() {
-            return Err(Error::MissingInput("Microsoft Entra client id is empty".into()));
+            return Err(Error::MissingInput(
+                "Microsoft Entra client id is empty".into(),
+            ));
         }
         let tenant_ok = !self.tenant.is_empty()
             && self
@@ -65,33 +67,48 @@ impl AuthConfig {
                 .chars()
                 .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-');
         if !tenant_ok {
-            return Err(Error::InvalidMetadata(format!("invalid Entra tenant '{}'", self.tenant)));
+            return Err(Error::InvalidMetadata(format!(
+                "invalid Entra tenant '{}'",
+                self.tenant
+            )));
         }
-        let url = Url::parse(&self.redirect_uri)
-            .map_err(|_| Error::InvalidMetadata(format!("invalid redirect URI '{}'", self.redirect_uri)))?;
-        let loopback = url.scheme() == "http" && matches!(url.host_str(), Some("localhost") | Some("127.0.0.1"));
+        let url = Url::parse(&self.redirect_uri).map_err(|_| {
+            Error::InvalidMetadata(format!("invalid redirect URI '{}'", self.redirect_uri))
+        })?;
+        let loopback = url.scheme() == "http"
+            && matches!(url.host_str(), Some("localhost") | Some("127.0.0.1"));
         if !loopback {
             return Err(Error::InvalidMetadata(
-                "redirectURI must be a loopback HTTP URL (http://localhost or http://127.0.0.1)".into(),
+                "redirectURI must be a loopback HTTP URL (http://localhost or http://127.0.0.1)"
+                    .into(),
             ));
         }
         if !self.scopes.iter().any(|s| s == "offline_access") {
             return Err(Error::InvalidMetadata(
-                "OAuth scopes must include offline_access so the refresh token can be stored".into(),
+                "OAuth scopes must include offline_access so the refresh token can be stored"
+                    .into(),
             ));
         }
         if self.authorization_timeout.as_secs() == 0 || self.authorization_timeout.as_secs() > 900 {
-            return Err(Error::InvalidMetadata("authorization timeout must be between 1 and 900 seconds".into()));
+            return Err(Error::InvalidMetadata(
+                "authorization timeout must be between 1 and 900 seconds".into(),
+            ));
         }
         Ok(())
     }
 
     pub fn authorization_endpoint(&self) -> String {
-        format!("https://login.microsoftonline.com/{}/oauth2/v2.0/authorize", self.tenant)
+        format!(
+            "https://login.microsoftonline.com/{}/oauth2/v2.0/authorize",
+            self.tenant
+        )
     }
 
     pub fn token_endpoint(&self) -> String {
-        format!("https://login.microsoftonline.com/{}/oauth2/v2.0/token", self.tenant)
+        format!(
+            "https://login.microsoftonline.com/{}/oauth2/v2.0/token",
+            self.tenant
+        )
     }
 
     pub fn scope(&self) -> String {
@@ -100,7 +117,8 @@ impl AuthConfig {
 
     /// Full redirect URI for a concrete loopback port.
     pub fn redirect_uri_for_port(&self, port: u16) -> String {
-        let mut url = Url::parse(&self.redirect_uri).unwrap_or_else(|_| Url::parse("http://localhost").unwrap());
+        let mut url = Url::parse(&self.redirect_uri)
+            .unwrap_or_else(|_| Url::parse("http://localhost").unwrap());
         let _ = url.set_port(Some(port));
         url.to_string()
     }

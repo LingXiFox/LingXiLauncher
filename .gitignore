@@ -20,3 +20,9 @@ dist/
 # Local Rust toolchain cache (kept inside the project on purpose)
 .cargo-home/
 .tmp/
+
+# Rust and frontend build outputs are never committed.
+target/
+node_modules/
+*.tsbuildinfo
+Apps/desktop/src-tauri/gen/

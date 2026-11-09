@@ -14,7 +14,9 @@ pub use secrets::NativeSecretStore;
 pub use system::NativeSystemServices;
 
 /// Builds the runtime bundle used by the CLI and the Tauri shell.
-pub fn native_runtime(secret_fallback_dir: impl Into<PathBuf>) -> Result<(PlatformContext, Runtime)> {
+pub fn native_runtime(
+    secret_fallback_dir: impl Into<PathBuf>,
+) -> Result<(PlatformContext, Runtime)> {
     let context = PlatformContext::current();
     let secrets: std::sync::Arc<dyn SecretStore> =
         std::sync::Arc::new(NativeSecretStore::new(secret_fallback_dir));
@@ -24,6 +26,7 @@ pub fn native_runtime(secret_fallback_dir: impl Into<PathBuf>) -> Result<(Platfo
 
 /// Runs a command without a console window on Windows.
 pub(crate) fn quiet_command(program: impl AsRef<std::ffi::OsStr>) -> std::process::Command {
+    #[cfg_attr(not(windows), allow(unused_mut))]
     let mut command = std::process::Command::new(program);
     #[cfg(windows)]
     {
@@ -34,6 +37,7 @@ pub(crate) fn quiet_command(program: impl AsRef<std::ffi::OsStr>) -> std::proces
 }
 
 /// Ensures a directory exists and is only accessible by the current user.
+#[cfg_attr(target_os = "macos", allow(dead_code))]
 pub(crate) fn ensure_private_dir(path: &std::path::Path) -> Result<()> {
     std::fs::create_dir_all(path)?;
     #[cfg(unix)]

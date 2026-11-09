@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark light" />
+    <meta name="theme-color" content="#0D0F12" />
+    <title>灵犀启动器 · LingXi Launcher</title>
+    <script>
+      (function () {
+        try {
+          var saved = localStorage.getItem("lingxi.theme");
+          var theme = saved === "light" ? "light" : "dark";
+          document.documentElement.dataset.theme = theme;
+          document.documentElement.style.colorScheme = theme;
+        } catch (_) {
+          /* ignore */
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      (function () {
+        function showFatal(message) {
+          var existing = document.getElementById("boot-fatal");
+          if (!existing) {
+            existing = document.createElement("pre");
+            existing.id = "boot-fatal";
+            existing.style.cssText =
+              "margin:0;padding:24px;white-space:pre-wrap;font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;color:#ff7b72;background:#0d0f12;min-height:100vh;box-sizing:border-box";
+            document.body.appendChild(existing);
+          }
+          existing.textContent = message;
+        }
+        window.addEventListener(
+          "error",
+          function (event) {
+            var target = event.target;
+            if (target && target.tagName === "SCRIPT") {
+              showFatal("Failed to load script: " + (target.src || "(inline)"));
+              return;
+            }
+            showFatal(
+              "Frontend error: " +
+                (event.message || "unknown") +
+                (event.error && event.error.stack ? "\n\n" + event.error.stack : "")
+            );
+          },
+          true
+        );
+        window.addEventListener("unhandledrejection", function (event) {
+          var reason = event.reason;
+          showFatal(
+            "Unhandled rejection: " +
+              (reason && (reason.stack || reason.message) ? reason.stack || reason.message : String(reason))
+          );
+        });
+      })();
+    </script>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

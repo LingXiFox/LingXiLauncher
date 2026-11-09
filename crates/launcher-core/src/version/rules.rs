@@ -32,8 +32,9 @@ fn rule_matches(rule: &Rule, platform: &PlatformContext) -> Result<bool> {
             }
         }
         if let Some(pattern) = &os.version {
-            let regex = regex::Regex::new(pattern)
-                .map_err(|e| Error::InvalidMetadata(format!("invalid OS version regex '{pattern}': {e}")))?;
+            let regex = regex::Regex::new(pattern).map_err(|e| {
+                Error::InvalidMetadata(format!("invalid OS version regex '{pattern}': {e}"))
+            })?;
             if !regex.is_match(&platform.os_version) {
                 return Ok(false);
             }
@@ -84,8 +85,9 @@ fn split_version(value: &str) -> Result<Vec<u64>> {
     trimmed
         .split('.')
         .map(|part| {
-            part.parse::<u64>()
-                .map_err(|_| Error::InvalidMetadata(format!("non-numeric version component in '{value}'")))
+            part.parse::<u64>().map_err(|_| {
+                Error::InvalidMetadata(format!("non-numeric version component in '{value}'"))
+            })
         })
         .collect()
 }
@@ -114,8 +116,19 @@ mod tests {
     #[test]
     fn last_match_wins() {
         let rules = vec![
-            Rule { action: RuleAction::Allow, os: None, features: None },
-            Rule { action: RuleAction::Disallow, os: Some(RuleOs { name: Some("osx".into()), ..Default::default() }), features: None },
+            Rule {
+                action: RuleAction::Allow,
+                os: None,
+                features: None,
+            },
+            Rule {
+                action: RuleAction::Disallow,
+                os: Some(RuleOs {
+                    name: Some("osx".into()),
+                    ..Default::default()
+                }),
+                features: None,
+            },
         ];
         assert!(!is_allowed(&rules, &platform()).unwrap());
     }

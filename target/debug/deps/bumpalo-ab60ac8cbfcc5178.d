@@ -1,7 +1,0 @@
-/Volumes/Development/Projects/projects/LingXiLauncher/target/debug/deps/bumpalo-ab60ac8cbfcc5178.d: /Volumes/Development/Projects/projects/LingXiLauncher/.cargo-home/registry/src/index.crates.io-1949cf8c6b5b557f/bumpalo-3.20.3/src/lib.rs /Volumes/Development/Projects/projects/LingXiLauncher/.cargo-home/registry/src/index.crates.io-1949cf8c6b5b557f/bumpalo-3.20.3/src/alloc.rs /Volumes/Development/Projects/projects/LingXiLauncher/.cargo-home/registry/src/index.crates.io-1949cf8c6b5b557f/bumpalo-3.20.3/src/../README.md
-
-/Volumes/Development/Projects/projects/LingXiLauncher/target/debug/deps/libbumpalo-ab60ac8cbfcc5178.rmeta: /Volumes/Development/Projects/projects/LingXiLauncher/.cargo-home/registry/src/index.crates.io-1949cf8c6b5b557f/bumpalo-3.20.3/src/lib.rs /Volumes/Development/Projects/projects/LingXiLauncher/.cargo-home/registry/src/index.crates.io-1949cf8c6b5b557f/bumpalo-3.20.3/src/alloc.rs /Volumes/Development/Projects/projects/LingXiLauncher/.cargo-home/registry/src/index.crates.io-1949cf8c6b5b557f/bumpalo-3.20.3/src/../README.md
-
-/Volumes/Development/Projects/projects/LingXiLauncher/.cargo-home/registry/src/index.crates.io-1949cf8c6b5b557f/bumpalo-3.20.3/src/lib.rs:
-/Volumes/Development/Projects/projects/LingXiLauncher/.cargo-home/registry/src/index.crates.io-1949cf8c6b5b557f/bumpalo-3.20.3/src/alloc.rs:
-/Volumes/Development/Projects/projects/LingXiLauncher/.cargo-home/registry/src/index.crates.io-1949cf8c6b5b557f/bumpalo-3.20.3/src/../README.md:

@@ -79,7 +79,9 @@ impl Architecture {
             "arm64" | "aarch64" => Ok(Architecture::Arm64),
             "x86_64" | "amd64" | "x86-64" => Ok(Architecture::X86_64),
             "x86" | "i386" | "i686" => Ok(Architecture::X86),
-            other => Err(Error::InvalidMetadata(format!("unknown architecture {other}"))),
+            other => Err(Error::InvalidMetadata(format!(
+                "unknown architecture {other}"
+            ))),
         }
     }
 }
@@ -117,7 +119,9 @@ impl PlatformContext {
 
 #[cfg(target_os = "macos")]
 fn os_version_string() -> String {
-    let output = std::process::Command::new("sw_vers").arg("-productVersion").output();
+    let output = std::process::Command::new("sw_vers")
+        .arg("-productVersion")
+        .output();
     output
         .ok()
         .and_then(|o| String::from_utf8(o.stdout).ok())

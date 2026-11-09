@@ -155,11 +155,17 @@ pub struct Extract {
 #[derive(Debug, Clone)]
 pub enum ArgumentEntry {
     Plain(String),
-    Conditional { rules: Vec<Rule>, values: Vec<String> },
+    Conditional {
+        rules: Vec<Rule>,
+        values: Vec<String>,
+    },
 }
 
 impl Serialize for ArgumentEntry {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> {
+    fn serialize<S: serde::Serializer>(
+        &self,
+        serializer: S,
+    ) -> std::result::Result<S::Ok, S::Error> {
         use serde::ser::SerializeMap;
         match self {
             ArgumentEntry::Plain(value) => serializer.serialize_str(value),
@@ -236,6 +242,7 @@ pub struct LoggingClient {
 pub struct LoggingFile {
     pub id: String,
     pub url: String,
+    #[serde(default)]
     pub path: String,
     #[serde(default)]
     pub sha1: String,
@@ -295,10 +302,14 @@ impl MavenCoordinates {
     pub fn parse(name: &str) -> Result<Self> {
         let parts: Vec<&str> = name.split(':').collect();
         if parts.len() < 3 || parts.len() > 4 {
-            return Err(Error::InvalidMetadata(format!("invalid maven coordinate {name}")));
+            return Err(Error::InvalidMetadata(format!(
+                "invalid maven coordinate {name}"
+            )));
         }
         if parts.iter().any(|p| p.is_empty()) {
-            return Err(Error::InvalidMetadata(format!("invalid maven coordinate {name}")));
+            return Err(Error::InvalidMetadata(format!(
+                "invalid maven coordinate {name}"
+            )));
         }
         Ok(Self {
             group: parts[0].to_string(),
@@ -313,7 +324,13 @@ impl MavenCoordinates {
             Some(classifier) => format!("{}-{}-{}.jar", self.artifact, self.version, classifier),
             None => format!("{}-{}.jar", self.artifact, self.version),
         };
-        format!("{}/{}/{}/{}", self.group.replace('.', "/"), self.artifact, self.version, file)
+        format!(
+            "{}/{}/{}/{}",
+            self.group.replace('.', "/"),
+            self.artifact,
+            self.version,
+            file
+        )
     }
 }
 
@@ -350,8 +367,15 @@ impl Library {
             }));
         }
         let maven = self.maven()?;
-        let base = self.url.clone().unwrap_or_else(|| "https://libraries.minecraft.net/".to_string());
-        let base = if base.ends_with('/') { base } else { format!("{base}/") };
+        let base = self
+            .url
+            .clone()
+            .unwrap_or_else(|| "https://libraries.minecraft.net/".to_string());
+        let base = if base.ends_with('/') {
+            base
+        } else {
+            format!("{base}/")
+        };
         Ok(Some(EffectiveArtifact {
             url: format!("{base}{}", maven.relative_path()),
             relative_path: maven.relative_path(),
@@ -368,5 +392,29 @@ impl Library {
             _ => "linux",
         };
         natives.get(key).cloned()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn logging_file_deserializes_without_local_path() {
+        let json = r#"{
+            "argument": "-Dlog4j.configurationFile=${path}",
+            "file": {
+                "id": "client-1.21.2.xml",
+                "sha1": "39384bd14c0606d812afec88d8aff595b2587dd9",
+                "size": 2033,
+                "url": "https://piston-data.mojang.com/v1/objects/39384bd14c0606d812afec88d8aff595b2587dd9/client-1.21.2.xml"
+            },
+            "type": "log4j2-xml"
+        }"#;
+        let client: LoggingClient =
+            serde_json::from_str(json).expect("logging client should parse");
+        assert_eq!(client.file.id, "client-1.21.2.xml");
+        assert_eq!(client.file.path, "");
+        assert_eq!(client.log_type, "log4j2-xml");
     }
 }

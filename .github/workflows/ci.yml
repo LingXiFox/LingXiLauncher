@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, rewrite/rust]
     paths-ignore:
       - '**/*.md'
       - 'docs/**'
@@ -17,118 +17,131 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build-test-package:
-    name: Build, test and package (Apple Silicon)
-    runs-on: xcode-27
+  rust-quality:
+    name: Rust fmt, clippy and tests
+    runs-on: ubuntu-22.04
     timeout-minutes: 30
-    env:
-      SWIFT_DETERMINISTIC_HASHING: "1"
-      NSUnbufferedIO: "YES"
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           persist-credentials: false
-          fetch-depth: 1
 
-      - name: Show toolchain
-        run: |
-          set -euo pipefail
-          sw_vers
-          xcodebuild -version
-          swift --version
-          uname -m
-
-      - name: Debug build
-        run: swift build
-
-      - name: Unit tests
-        shell: bash
-        run: |
-          set -euo pipefail
-          swift test 2>&1 | tee "$RUNNER_TEMP/swift-test.log"
-          SUMMARY="$(grep -E 'Executed [0-9]+ tests?, with [0-9]+ failures?' "$RUNNER_TEMP/swift-test.log" | tail -n 1)"
-          test -n "$SUMMARY"
-          echo "$SUMMARY" >> "$GITHUB_STEP_SUMMARY"
-          if grep -qi 'skipped' "$RUNNER_TEMP/swift-test.log"; then
-            echo "XCTest reported skipped tests; inspect the full log." >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "XCTest skips: 0 (no skip marker in the full log)." >> "$GITHUB_STEP_SUMMARY"
-          fi
-
-      - name: Release CLI build
-        run: swift build -c release --product lingxi
-
-      - name: Release GUI build
-        run: swift build -c release --product LingXiMac
-
-      - name: Package app bundle (ad-hoc signed)
-        run: Scripts/build-app.sh --release
-
-      - name: Verify app bundle and ad-hoc signature
-        shell: bash
-        run: |
-          set -euo pipefail
-          APP="dist/LingXiMac.app"
-          test -d "$APP"
-          test -x "$APP/Contents/MacOS/LingXiMac"
-          test -f "$APP/Contents/Info.plist"
-          test -f "$APP/Contents/Resources/AppIcon.icns"
-          plutil -lint "$APP/Contents/Info.plist"
-          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Contents/Info.plist")" = "com.lingxifox.LingXiLauncher"
-          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP/Contents/Info.plist")" = "LingXiMac"
-          lipo -info "$APP/Contents/MacOS/LingXiMac" | tee "$RUNNER_TEMP/lipo.txt"
-          grep -q 'arm64' "$RUNNER_TEMP/lipo.txt"
-          codesign --verify --deep --strict --verbose=2 "$APP"
-          codesign -dv --verbose=4 "$APP" 2>&1 | tee "$RUNNER_TEMP/codesign.txt"
-          grep -q 'Signature=adhoc' "$RUNNER_TEMP/codesign.txt"
-          echo "CI artifact is ad-hoc signed for testing only; it is not notarized or a release build." >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Archive app bundle
-        run: |
-          set -euo pipefail
-          ditto -c -k --sequesterRsrc --keepParent "dist/LingXiMac.app" "dist/LingXiMac-${GITHUB_SHA}.zip"
-
-      - name: Upload CI-only app artifact
-        uses: actions/upload-artifact@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
         with:
-          name: LingXiMac-ci-${{ github.sha }}
-          path: dist/LingXiMac-${{ github.sha }}.zip
-          if-no-files-found: error
-          retention-days: 7
+          components: rustfmt, clippy
 
-  windows-core:
-    name: Core build and tests (Windows x86_64)
-    runs-on: windows-2022
-    timeout-minutes: 30
-    env:
-      SWIFT_DETERMINISTIC_HASHING: "1"
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: Apps/desktop/pnpm-lock.yaml
+
+      - name: Install frontend dependencies
+        working-directory: Apps/desktop
+        run: pnpm install --frozen-lockfile
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Tests
+        run: cargo test --workspace
+
+      - name: Frontend typecheck
+        working-directory: Apps/desktop
+        run: pnpm typecheck
+
+      - name: Frontend build
+        working-directory: Apps/desktop
+        run: pnpm build
+
+  desktop-build:
+    name: Desktop build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, windows-2022, ubuntu-22.04]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           persist-credentials: false
-          fetch-depth: 1
 
-      - name: Install Swift for Windows
-        uses: compnerd/gha-setup-swift@main
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libgtk-3-dev
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
         with:
-          swift-version: swift-6.2.1-release
-          swift-build: 6.2.1-RELEASE
+          version: 9
 
-      - name: Show toolchain
-        shell: pwsh
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: Apps/desktop/pnpm-lock.yaml
+
+      - name: Install frontend dependencies
+        working-directory: Apps/desktop
+        run: pnpm install --frozen-lockfile
+
+      - name: Build frontend
+        working-directory: Apps/desktop
+        run: pnpm build
+
+      - name: Build desktop binary
+        run: cargo build --release -p lingxi-desktop --features custom-protocol
+
+  cli-smoke:
+    name: CLI smoke test
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build CLI
+        run: cargo build -p launcher-cli
+
+      - name: Run offline CLI checks
         run: |
-          swift --version
-          [System.Environment]::OSVersion.VersionString
-
-      - name: Debug build Core and CLI
-        shell: pwsh
-        run: |
-          swift build --product LauncherCore
-          swift build --product lingxi
-
-      - name: Unit tests
-        shell: pwsh
-        run: swift test
+          set -euo pipefail
+          ROOT="$RUNNER_TEMP/lingxi-ci/minecraft"
+          DATA="$RUNNER_TEMP/lingxi-ci"
+          ./target/debug/lingxi --root "$ROOT" --data-root "$DATA" java list
+          ./target/debug/lingxi --root "$ROOT" --data-root "$DATA" account list
+          ./target/debug/lingxi --root "$ROOT" --data-root "$DATA" instance list
+          ./target/debug/lingxi --root "$ROOT" --data-root "$DATA" --json doctor > /dev/null

@@ -39,7 +39,12 @@ impl MicrosoftOAuthClient {
         Self { config, http }
     }
 
-    pub fn authorization_url(&self, state: &str, code_challenge: &str, redirect_uri: &str) -> Result<String> {
+    pub fn authorization_url(
+        &self,
+        state: &str,
+        code_challenge: &str,
+        redirect_uri: &str,
+    ) -> Result<String> {
         let mut url = Url::parse(&self.config.authorization_endpoint())
             .map_err(|e| Error::InvalidMetadata(format!("invalid authorization endpoint: {e}")))?;
         url.query_pairs_mut()
@@ -55,7 +60,12 @@ impl MicrosoftOAuthClient {
         Ok(url.into())
     }
 
-    pub async fn exchange_code(&self, code: &str, verifier: &str, redirect_uri: &str) -> Result<OAuthToken> {
+    pub async fn exchange_code(
+        &self,
+        code: &str,
+        verifier: &str,
+        redirect_uri: &str,
+    ) -> Result<OAuthToken> {
         let form = [
             ("client_id", self.config.client_id.as_str()),
             ("grant_type", "authorization_code"),
@@ -86,7 +96,9 @@ impl MicrosoftOAuthClient {
             .form(form)
             .send()
             .await
-            .map_err(|e| Error::Unavailable(format!("Microsoft token endpoint unreachable: {e}")))?;
+            .map_err(|e| {
+                Error::Unavailable(format!("Microsoft token endpoint unreachable: {e}"))
+            })?;
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
         if !status.is_success() {
@@ -107,12 +119,15 @@ impl MicrosoftOAuthClient {
         let payload: TokenResponsePayload = serde_json::from_str(&body)
             .map_err(|e| Error::Authentication(format!("invalid Microsoft token response: {e}")))?;
         if payload.access_token.is_empty() {
-            return Err(Error::Authentication("Microsoft OAuth response had no access token".into()));
+            return Err(Error::Authentication(
+                "Microsoft OAuth response had no access token".into(),
+            ));
         }
         Ok(OAuthToken {
             access_token: payload.access_token,
             refresh_token: payload.refresh_token.filter(|t| !t.is_empty()),
-            expires_at: Utc::now() + chrono::Duration::seconds(payload.expires_in.unwrap_or(3600) as i64),
+            expires_at: Utc::now()
+                + chrono::Duration::seconds(payload.expires_in.unwrap_or(3600) as i64),
             scope: payload.scope,
             token_type: payload.token_type.unwrap_or_else(|| "Bearer".to_string()),
         })
@@ -122,7 +137,11 @@ impl MicrosoftOAuthClient {
 impl Pkce {
     /// Convenience for callers that build an authorization URL from a fresh PKCE pair.
     pub fn authorization_url(&self, config: &AuthConfig, redirect_uri: &str) -> Result<String> {
-        MicrosoftOAuthClient::new(config.clone()).authorization_url(&self.state, &self.challenge, redirect_uri)
+        MicrosoftOAuthClient::new(config.clone()).authorization_url(
+            &self.state,
+            &self.challenge,
+            redirect_uri,
+        )
     }
 }
 

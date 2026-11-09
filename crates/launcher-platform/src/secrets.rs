@@ -3,24 +3,32 @@ use std::path::PathBuf;
 use launcher_core::platform::SecretStore;
 use launcher_core::{Error, Result};
 
-use crate::{ensure_private_dir, quiet_command};
+#[cfg(not(target_os = "macos"))]
+use crate::ensure_private_dir;
+use crate::quiet_command;
 
 /// Stores refresh tokens in the macOS Keychain. On Windows the DPAPI user store
 /// is used through PowerShell; on other systems a 0600 file is the fallback.
 pub struct NativeSecretStore {
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
     fallback_dir: PathBuf,
 }
 
 impl NativeSecretStore {
     pub fn new(fallback_dir: impl Into<PathBuf>) -> Self {
-        Self { fallback_dir: fallback_dir.into() }
+        Self {
+            fallback_dir: fallback_dir.into(),
+        }
     }
 
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
     fn fallback_path(&self, service: &str, account: &str) -> PathBuf {
-        self.fallback_dir.join(format!("{}-{}.secret", encode(service), encode(account)))
+        self.fallback_dir
+            .join(format!("{}-{}.secret", encode(service), encode(account)))
     }
 }
 
+#[cfg_attr(target_os = "macos", allow(dead_code))]
 fn encode(value: &str) -> String {
     let mut out = String::with_capacity(value.len() * 2);
     for byte in value.as_bytes() {
@@ -51,7 +59,16 @@ impl SecretStore for NativeSecretStore {
 
     fn set(&self, service: &str, account: &str, secret: &str) -> Result<()> {
         let status = quiet_command("/usr/bin/security")
-            .args(["add-generic-password", "-U", "-s", service, "-a", account, "-w", secret])
+            .args([
+                "add-generic-password",
+                "-U",
+                "-s",
+                service,
+                "-a",
+                account,
+                "-w",
+                secret,
+            ])
             .status()?;
         if status.success() {
             Ok(())
@@ -84,7 +101,11 @@ impl NativeSecretStore {
             .stderr(Stdio::piped())
             .spawn()?;
         if let Some(text) = input {
-            child.stdin.as_mut().expect("stdin").write_all(text.as_bytes())?;
+            child
+                .stdin
+                .as_mut()
+                .expect("stdin")
+                .write_all(text.as_bytes())?;
         }
         Ok(child.wait_with_output()?)
     }
@@ -183,10 +204,10 @@ impl SecretStore for MemorySecretStore {
     }
 
     fn set(&self, service: &str, account: &str, secret: &str) -> Result<()> {
-        self.values
-            .lock()
-            .expect("secret lock")
-            .insert((service.to_string(), account.to_string()), secret.to_string());
+        self.values.lock().expect("secret lock").insert(
+            (service.to_string(), account.to_string()),
+            secret.to_string(),
+        );
         Ok(())
     }
 

@@ -24,7 +24,9 @@ pub fn extract_zip(archive: &Path, destination: &Path, exclude: &[String]) -> Re
         {
             if let Some(mode) = entry.unix_mode() {
                 if mode & 0o170000 == 0o120000 {
-                    return Err(Error::UnsafePath(format!("symlink entry in archive: {name}")));
+                    return Err(Error::UnsafePath(format!(
+                        "symlink entry in archive: {name}"
+                    )));
                 }
             }
         }
@@ -49,7 +51,9 @@ pub fn read_entry(archive: &Path, name: &str, max_bytes: u64) -> Result<Vec<u8>>
     let mut zip = zip::ZipArchive::new(file)?;
     let mut entry = zip.by_name(name)?;
     if entry.size() > max_bytes {
-        return Err(Error::InvalidMetadata(format!("archive entry {name} exceeds {max_bytes} bytes")));
+        return Err(Error::InvalidMetadata(format!(
+            "archive entry {name} exceeds {max_bytes} bytes"
+        )));
     }
     let mut buffer = Vec::new();
     entry.read_to_end(&mut buffer)?;

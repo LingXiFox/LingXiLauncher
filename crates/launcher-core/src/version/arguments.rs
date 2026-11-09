@@ -44,14 +44,20 @@ pub fn substitute(
         out.push_str(&rest[..start]);
         let after = &rest[start + 2..];
         let Some(end) = after.find('}') else {
-            return Err(Error::InvalidMetadata(format!("unterminated placeholder in '{template}'")));
+            return Err(Error::InvalidMetadata(format!(
+                "unterminated placeholder in '{template}'"
+            )));
         };
         let name = &after[..end];
         if name.is_empty() {
-            return Err(Error::InvalidMetadata(format!("empty placeholder in '{template}'")));
+            return Err(Error::InvalidMetadata(format!(
+                "empty placeholder in '{template}'"
+            )));
         }
         let Some(value) = variables.get(name) else {
-            return Err(Error::InvalidMetadata(format!("unknown placeholder '${{{name}}}'")));
+            return Err(Error::InvalidMetadata(format!(
+                "unknown placeholder '${{{name}}}'"
+            )));
         };
         if sensitive_keys.contains(&name) {
             out.push_str(REDACTION_PLACEHOLDER);
@@ -84,7 +90,12 @@ mod tests {
         let mut vars = BTreeMap::new();
         vars.insert("version_name".to_string(), "1.21".to_string());
         vars.insert("auth_access_token".to_string(), "secret".to_string());
-        let out = substitute("--version ${version_name} ${auth_access_token}", &vars, &["auth_access_token"]).unwrap();
+        let out = substitute(
+            "--version ${version_name} ${auth_access_token}",
+            &vars,
+            &["auth_access_token"],
+        )
+        .unwrap();
         assert_eq!(out, "--version 1.21 <redacted>");
         assert!(substitute("${nope}", &vars, &[]).is_err());
         assert!(substitute("${broken", &vars, &[]).is_err());
@@ -92,7 +103,10 @@ mod tests {
 
     #[test]
     fn expansion_keeps_argument_boundaries() {
-        let entries = vec![ArgumentEntry::Plain("--x".into()), ArgumentEntry::Plain("${a} b".into())];
+        let entries = vec![
+            ArgumentEntry::Plain("--x".into()),
+            ArgumentEntry::Plain("${a} b".into()),
+        ];
         let mut vars = BTreeMap::new();
         vars.insert("a".into(), "1".into());
         let argv = expand(&entries, &platform(), &vars, &[]).unwrap();
