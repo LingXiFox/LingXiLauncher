@@ -94,11 +94,11 @@ Rust 版可以直接读取 Swift 版的实例、模组、世界备份和旧整�
 
 - `cargo fmt --all -- --check`
 - `cargo clippy --workspace --all-targets -- -D warnings`
-- `cargo test --workspace`（launcher-core 38 项、launcher-auth 6 项）
+- `cargo test --workspace`（launcher-core 39 项、launcher-auth 6 项）
 - `cargo check -p lingxi-desktop`
 - `pnpm typecheck` 与 `pnpm build`
 - `cargo build --release -p lingxi-desktop --features custom-protocol`，启动后窗口正常渲染
-- CLI `--help`、`version list/inspect --json`（1.7.10、1.20.1、1.21.11、26.3）、`doctor`、`launch --dry-run`、`diagnose`、`performance status/benchmark/tune`、`graphics status`、`mod search/install/enable/disable/remove`、`mrpack inspect`、`resourcepack/shader search` 冒烟
+- CLI `--help`、`version list/inspect --json`（1.7.10、1.20.1、1.21.11、26.3）、`doctor`、`launch --dry-run`、`diagnose`、`performance status/benchmark/tune`、`graphics status`、`mod search/install/enable/disable/remove`、`mrpack inspect`、`resourcepack/shader search`、`world list/backup/restore/delete` 冒烟
 
 界面截图见 [UI 一致性文档](docs/rust-migration/UI-PARITY.md#实际界面截图)。尚未验证：真实游戏启动、Microsoft 真机登录、Tauri Release 三平台安装包、GUI 自动化测试、Windows/Linux 实机运行。
 

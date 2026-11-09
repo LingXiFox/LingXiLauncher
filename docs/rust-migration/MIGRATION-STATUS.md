@@ -21,13 +21,13 @@
 | --- | --- |
 | `cargo fmt --all -- --check` | 通过 |
 | `cargo clippy --workspace --all-targets -- -D warnings` | 通过（0 warning） |
-| `cargo test --workspace` | 通过（launcher-core 38 项、launcher-auth 6 项） |
+| `cargo test --workspace` | 通过（launcher-core 39 项、launcher-auth 6 项） |
 | `cargo check -p lingxi-desktop` | 通过 |
 | `cd Apps/desktop && pnpm typecheck` | 通过（tsconfig + tsconfig.node） |
-| `cd Apps/desktop && pnpm build` | 通过（78 modules，JS 284.60 kB / CSS 79.84 kB） |
+| `cd Apps/desktop && pnpm build` | 通过（78 modules，JS 284.74 kB / CSS 79.84 kB） |
 | `cargo build --release -p lingxi-desktop --features custom-protocol` | 通过，启动后窗口正常渲染 |
 | CLI `lingxi --help` | 17 个顶层命令正常输出 |
-| CLI 冒烟 | `version list/inspect --json`（1.7.10、1.20.1、1.21.11、26.3）、`doctor`、`launch --dry-run`、`diagnose`、`performance status/benchmark/tune`、`graphics status`、`mod search/install/enable/disable/remove`、`mrpack inspect`、`resourcepack/shader search` 可运行；Sodium 模组真实下载并安装 |
+| CLI 冒烟 | `version list/inspect --json`（1.7.10、1.20.1、1.21.11、26.3）、`doctor`、`launch --dry-run`、`diagnose`、`performance status/benchmark/tune`、`graphics status`、`mod search/install/enable/disable/remove`、`mrpack inspect`、`resourcepack/shader search`、`world list/backup/restore/delete` 可运行；Sodium 模组真实下载并安装 |
 | Tauri 命令/前端契约 | 前端 61 个调用全部有注册命令，无缺失 |
 | 界面截图 | 19 张页面/弹窗截图，见 UI-PARITY.md |
 
@@ -60,4 +60,4 @@
 - [ ] 真实游戏启动
 - [ ] GUI 自动化测试
 - [x] 移除 Swift 源码与旧 CI（Swift 源码保留在 git 历史与 `swift-implementation-before-removal` tag）
-- [ ] 最终 commit 与验收报告（待本阶段收尾）
+- [x] 最终 commit 与验收报告（随本次收尾提交）
