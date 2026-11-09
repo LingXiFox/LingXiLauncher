@@ -7,6 +7,7 @@ import { EmptyState } from "../EmptyState";
 import { Icon } from "../Icons";
 import { TextInput } from "../Input";
 import { Modal } from "../Modal";
+import { minecraftVersion } from "../../lib/format";
 import { InstallProgressPanel, ModalError, errorMessage, formatBytes, pickFile } from "./shared";
 
 export function MrpackModal() {
@@ -46,7 +47,7 @@ export function MrpackModal() {
       await refreshInstances();
       resetInstallProgress();
       closeModal();
-      toast("success", "整合包已导入", `${instance.name} · ${instance.versionId || "未知版本"}`);
+      toast("success", "整合包已导入", `${instance.name} · ${minecraftVersion(instance)}`);
     } catch (cause) {
       setError(errorMessage(cause));
     } finally {

@@ -156,7 +156,9 @@ impl LoaderInstaller {
         std::fs::write(&temporary, data)?;
         std::fs::rename(&temporary, &target)?;
 
-        InstanceRepository::new(self.layout.clone()).assign_version(instance, &version_id)?;
+        let repository = InstanceRepository::new(self.layout.clone());
+        let updated = repository.assign_version(instance, &version_id)?;
+        repository.set_game_version(&updated, game_version)?;
         Ok(LoaderInstallResult {
             loader: LoaderKind::Fabric,
             game_version: game_version.to_string(),
@@ -300,7 +302,9 @@ impl LoaderInstaller {
         }
 
         let version_id = find_neoforge_version(&self.layout, loader_version)?;
-        InstanceRepository::new(self.layout.clone()).assign_version(instance, &version_id)?;
+        let repository = InstanceRepository::new(self.layout.clone());
+        let updated = repository.assign_version(instance, &version_id)?;
+        repository.set_game_version(&updated, game_version)?;
         Ok(LoaderInstallResult {
             loader: LoaderKind::NeoForge,
             game_version: game_version.to_string(),

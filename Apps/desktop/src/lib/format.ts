@@ -106,3 +106,19 @@ export function greeting(): string {
   if (hour < 18) return "下午好";
   return "晚上好";
 }
+
+export function minecraftVersion(instance: {
+  versionId: string;
+  gameVersion?: string | null;
+}): string {
+  if (instance.gameVersion) return instance.gameVersion;
+  const id = instance.versionId;
+  for (const prefix of ["fabric-loader-", "quilt-loader-"]) {
+    if (id.startsWith(prefix)) {
+      const rest = id.slice(prefix.length);
+      const separator = rest.indexOf("-");
+      if (separator >= 0) return rest.slice(separator + 1);
+    }
+  }
+  return id || "未设置版本";
+}

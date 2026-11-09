@@ -8,6 +8,7 @@ import { Icon } from "../Icons";
 import { SearchInput } from "../Input";
 import { Modal, ConfirmDialog } from "../Modal";
 import { Select } from "../Select";
+import { minecraftVersion } from "../../lib/format";
 import { InstallProgressPanel, ModalError, errorMessage, useInstance } from "./shared";
 
 interface ModsModalProps {
@@ -27,7 +28,9 @@ export function ModsModal({ instanceId }: ModsModalProps) {
   const [hits, setHits] = useState<ModSearchHit[]>([]);
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
-  const [gameVersion, setGameVersion] = useState(instance?.versionId ?? "");
+  const [gameVersion, setGameVersion] = useState(
+    instance ? minecraftVersion(instance) : "",
+  );
   const [loader, setLoader] = useState(instance?.loader ?? "fabric");
   const [busyId, setBusyId] = useState<string | null>(null);
   const [updating, setUpdating] = useState(false);
@@ -51,9 +54,10 @@ export function ModsModal({ instanceId }: ModsModalProps) {
   }, [instanceId]);
 
   useEffect(() => {
-    if (instance?.versionId) setGameVersion(instance.versionId);
+    const currentGameVersion = instance ? minecraftVersion(instance) : "";
+    if (currentGameVersion) setGameVersion(currentGameVersion);
     if (instance?.loader) setLoader(instance.loader);
-  }, [instance?.versionId, instance?.loader]);
+  }, [instance]);
 
   const enabledCount = useMemo(() => mods.filter((item) => item.enabled).length, [mods]);
 
@@ -258,9 +262,9 @@ export function ModsModal({ instanceId }: ModsModalProps) {
                 ariaLabel="游戏版本"
                 options={[
                   { value: "", label: "所有游戏版本" },
-                  ...(instance?.versionId ? [{ value: instance.versionId, label: instance.versionId }] : []),
+                  ...(instance ? [{ value: minecraftVersion(instance), label: minecraftVersion(instance) }] : []),
                   ...["1.21.4", "1.21.1", "1.20.6", "1.20.1", "1.19.2", "1.18.2", "1.16.5"]
-                    .filter((value) => value !== instance?.versionId)
+                    .filter((value) => value !== (instance ? minecraftVersion(instance) : ""))
                     .map((value) => ({ value, label: value })),
                 ]}
               />

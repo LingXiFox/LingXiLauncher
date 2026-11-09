@@ -77,6 +77,8 @@ pub struct InstanceManifest {
     pub display_name: String,
     #[serde(default)]
     pub version_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub game_version: Option<String>,
     pub created_at: DateTime<Utc>,
     #[serde(default)]
     pub last_launched_at: Option<DateTime<Utc>>,
@@ -100,6 +102,7 @@ impl InstanceManifest {
             id: id.into(),
             display_name: display_name.into(),
             version_id,
+            game_version: None,
             created_at: Utc::now(),
             last_launched_at: None,
             last_identity_mode: None,
@@ -337,6 +340,12 @@ impl InstanceRepository {
         Ok(next)
     }
 
+    pub fn set_game_version(&self, instance: &Instance, game_version: &str) -> Result<()> {
+        let mut manifest = instance.manifest.clone();
+        manifest.game_version = Some(game_version.to_string());
+        self.save(&manifest)
+    }
+
     pub fn set_performance(
         &self,
         instance: &Instance,
@@ -385,6 +394,18 @@ mod tests {
         assert!(text.contains("displayName"));
         let back: InstanceManifest = serde_json::from_str(&text).unwrap();
         assert_eq!(back.id, "a");
+        assert!(back.game_version.is_none());
+    }
+
+    #[test]
+    fn game_version_roundtrip_is_camel_case() {
+        let mut manifest =
+            InstanceManifest::new("a", "A", Some("fabric-loader-0.16.9-1.21.11".into()));
+        manifest.game_version = Some("1.21.11".into());
+        let text = serde_json::to_string(&manifest).unwrap();
+        assert!(text.contains("gameVersion"));
+        let back: InstanceManifest = serde_json::from_str(&text).unwrap();
+        assert_eq!(back.game_version.as_deref(), Some("1.21.11"));
     }
 
     #[test]

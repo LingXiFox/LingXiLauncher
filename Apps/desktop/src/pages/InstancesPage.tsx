@@ -14,6 +14,7 @@ import {
   formatMemory,
   formatRelative,
   loaderLabel,
+  minecraftVersion,
 } from "../lib/format";
 
 type SortKey = "recent" | "name" | "version";
@@ -47,12 +48,13 @@ export function InstancesPage() {
           (instance) =>
             instance.name.toLowerCase().includes(term) ||
             instance.versionId.toLowerCase().includes(term) ||
+            minecraftVersion(instance).toLowerCase().includes(term) ||
             (instance.loader ?? "").toLowerCase().includes(term),
         )
       : [...instances];
     return rows.sort((a, b) => {
       if (sort === "name") return a.name.localeCompare(b.name, "zh-CN");
-      if (sort === "version") return b.versionId.localeCompare(a.versionId, "zh-CN");
+      if (sort === "version") return minecraftVersion(b).localeCompare(minecraftVersion(a), "zh-CN", { numeric: true });
       const left = a.lastLaunchedAt ? Date.parse(a.lastLaunchedAt) : 0;
       const right = b.lastLaunchedAt ? Date.parse(b.lastLaunchedAt) : 0;
       return right - left;
@@ -203,7 +205,7 @@ export function InstancesPage() {
                       </span>
                       <span className="instance-card__name">{instance.name}</span>
                       <span className="instance-card__version">
-                        Minecraft {instance.versionId}
+                        Minecraft {minecraftVersion(instance)}
                         {instance.loaderVersion ? ` · ${instance.loaderVersion}` : ""}
                       </span>
                       <span className="instance-card__meta">
@@ -269,7 +271,7 @@ export function InstancesPage() {
                     </span>
                     <div>
                       <h3>{selected.name}</h3>
-                      <p className="caption">Minecraft {selected.versionId}</p>
+                      <p className="caption">Minecraft {minecraftVersion(selected)}</p>
                     </div>
                   </div>
 
@@ -333,7 +335,7 @@ export function InstancesPage() {
           onConfirm={() => void handleDelete()}
           onCancel={() => setDeleteTarget(null)}
         >
-          <p className="caption">{deleteTarget.versionId} · {formatMemory(deleteTarget.memoryMiB)}</p>
+          <p className="caption">{minecraftVersion(deleteTarget)} · {formatMemory(deleteTarget.memoryMiB)}</p>
         </ConfirmDialog>
       ) : null}
     </>

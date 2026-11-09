@@ -14,6 +14,7 @@ import {
   formatRelative,
   greeting,
   loaderLabel,
+  minecraftVersion,
 } from "../lib/format";
 
 export function HomePage() {
@@ -164,7 +165,7 @@ export function HomePage() {
                   <div className="quick-launch__instance">
                     <h3>{selected.name}</h3>
                     <p className="caption">
-                      Minecraft {selected.versionId}
+                      Minecraft {minecraftVersion(selected)}
                       {selected.loader ? ` · ${loaderLabel(selected.loader)} ${selected.loaderVersion ?? ""}` : " · 原版"}
                     </p>
                     <div className="chip-row quick-launch__chips">
@@ -327,7 +328,7 @@ export function HomePage() {
                     </div>
                     <h3 className="recent-card__name">{instance.name}</h3>
                     <p className="recent-card__version">
-                      {instance.versionId}
+                      {minecraftVersion(instance)}
                       <span>·</span>
                       {loaderLabel(instance.loader)}
                     </p>

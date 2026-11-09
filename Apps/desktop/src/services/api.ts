@@ -49,6 +49,7 @@ export interface GameInstance {
   id: string;
   name: string;
   versionId: string;
+  gameVersion?: string | null;
   loader?: string | null;
   loaderVersion?: string | null;
   memoryMiB?: number | null;

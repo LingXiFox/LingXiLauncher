@@ -13,6 +13,7 @@ import { EmptyState } from "../EmptyState";
 import { Icon } from "../Icons";
 import { TextArea, TextInput } from "../Input";
 import { Modal, ConfirmDialog } from "../Modal";
+import { minecraftVersion } from "../../lib/format";
 import {
   ModalError,
   errorMessage,
@@ -183,7 +184,7 @@ export function ToolsModal({ instanceId, initialTab = "manage" }: ToolsModalProp
       <Modal
         title="实例工具"
         eyebrow={instance?.name ?? "实例"}
-        subtitle={instance ? `${instance.versionId || "未设置版本"} · ${instance.loader ? `${instance.loader} ${instance.loaderVersion ?? ""}` : "原版"}` : undefined}
+        subtitle={instance ? `${minecraftVersion(instance)} · ${instance.loader ? `${instance.loader} ${instance.loaderVersion ?? ""}` : "原版"}` : undefined}
         onClose={closeModal}
         size="xl"
         bodyClassName="modal-panel--flush"

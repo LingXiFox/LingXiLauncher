@@ -15,7 +15,7 @@ import {
   type LogKind,
 } from "../services/api";
 import { useApp } from "../stores/app";
-import { formatBytes } from "../lib/format";
+import { formatBytes, minecraftVersion } from "../lib/format";
 
 const logTabs: Array<{ kind: LogKind; label: string; hint: string }> = [
   { kind: "launcher", label: "启动器", hint: "launcher.log" },
@@ -175,7 +175,7 @@ export function LogsPage() {
                   ? [{ value: "", label: "暂无实例" }]
                   : instances.map((instance) => ({
                       value: instance.id,
-                      label: `${instance.name} · ${instance.versionId}`,
+                      label: `${instance.name} · ${minecraftVersion(instance)}`,
                     }))
               }
             />

@@ -30,6 +30,7 @@ pub struct InstanceView {
     pub name: String,
     pub display_name: String,
     pub version_id: String,
+    pub game_version: Option<String>,
     pub loader: Option<String>,
     pub loader_version: Option<String>,
     pub created_at: chrono::DateTime<chrono::Utc>,
@@ -77,6 +78,7 @@ impl From<Instance> for InstanceView {
             id,
             display_name,
             version_id,
+            game_version,
             created_at,
             last_launched_at,
             memory_mib,
@@ -85,12 +87,14 @@ impl From<Instance> for InstanceView {
             ..
         } = instance.manifest;
         let version_id = version_id.unwrap_or_default();
+        let game_version = game_version.or_else(|| infer_game_version(&version_id));
         let (loader, loader_version) = loader_from_version(&version_id);
         Self {
             id,
             name: display_name.clone(),
             display_name,
             version_id,
+            game_version,
             loader,
             loader_version,
             created_at,
@@ -134,6 +138,15 @@ fn loader_from_version(version_id: &str) -> (Option<String>, Option<String>) {
         return (Some("forge".into()), Some(rest.to_string()));
     }
     (None, None)
+}
+
+fn infer_game_version(version_id: &str) -> Option<String> {
+    for prefix in ["fabric-loader-", "quilt-loader-"] {
+        if let Some(rest) = version_id.strip_prefix(prefix) {
+            return rest.rsplit_once('-').map(|(_, game)| game.to_string());
+        }
+    }
+    None
 }
 
 fn count_entries(directory: &std::path::Path, extension: &str) -> u32 {
