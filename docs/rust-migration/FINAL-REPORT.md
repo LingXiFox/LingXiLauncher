@@ -4,6 +4,7 @@
 - 基线提交：`13c467c`（Rust/Tauri 完整实现，Swift 已移除）
 - 实现提交：`ae9b1a9` `fix: download loader dependencies and validate real launches`
 - 文档与 GUI 冒烟：`4195ca9` `test: add GUI smoke and finalize release verification`
+- 安装包修复：`605a307` `fix: declare bundle icons for Linux and Windows installers`
 - Swift 历史备份：tag `swift-implementation-before-removal` → `6aae3fd`
 - 验收环境：macOS Apple Silicon，Java 27/26/21/17/8，Node 26，pnpm，Rust stable
 - 状态日期：2026-11-10
