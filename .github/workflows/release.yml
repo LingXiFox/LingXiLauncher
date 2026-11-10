@@ -73,7 +73,13 @@ jobs:
         working-directory: Apps/desktop
         run: pnpm exec tauri --version
 
-      - name: Build and package
+      - name: Build and package (validation)
+        if: ${{ inputs.validation_only }}
+        working-directory: Apps/desktop
+        run: pnpm tauri build --ci
+
+      - name: Build and package (release)
+        if: ${{ !inputs.validation_only }}
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -86,6 +92,7 @@ jobs:
           releaseDraft: true
           prerelease: false
           args: --ci
+
 
       - name: Upload packaged artifacts
         uses: actions/upload-artifact@v4
