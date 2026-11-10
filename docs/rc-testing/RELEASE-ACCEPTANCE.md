@@ -12,6 +12,7 @@
 | macOS 产物 | 通过：`.app` 11.30 MiB、`.dmg` 6.51 MiB，ad-hoc 签名且资源已封闭，`hdiutil verify` VALID |
 | Windows / Linux 产物 | 由 CI 构建，本机不做实机验证（见第 6 节） |
 | 发布形态 | GitHub pre-release，7 个安装包 + SHA256 校验文件 |
+| 发布结果 | 已发布：<https://github.com/LingXiFox/LingXiLauncher/releases/tag/v0.10.0-rc.1>；`release.yml` run `42845799097` 全部 job 全绿（quality-gate、Windows、macOS、Linux、publish） |
 
 结论：满足 RC 发布条件。签名状态已在 Release Notes 与 `KNOWN-ISSUES.md` 明示，未冒称 Apple 公证或 Windows 代码签名。
 
@@ -82,9 +83,10 @@ CLI 支持 `--concurrency` 与 `--mirror-config`，GUI 在设置页可填镜像�
 1. `quality-gate`：版本一致性 → fmt → clippy → test → 前端 typecheck/build。
 2. `build`：macOS（macos-15）、Windows（windows-2022）、Linux（ubuntu-22.04）并行打包，`if-no-files-found: error`。
 3. `publish`：仅 tag push 且前两个 job 全绿时执行；下载全部产物 → 归一化文件名 → 逐个校验非空与含版本号 → 生成并校验 SHA256 → 拒绝覆盖已存在的 Release → `gh release create --prerelease --verify-tag`。
+4. 实际执行：run `42843407797`（首次）因 rpm 打包器拒绝预发布后缀失败，Release 未产生；补 `rpm-config` 覆盖层后重打 tag，run `42845799097` 全绿并发布。
 
 ## 8. 回滚与重发
 
 - 发布前失败：无 Release 产生，修完重新打 tag 即可。
-- 发布后发现严重问题：`gh release delete v0.10.0-rc.1 --yes` 并删除远端 tag，修复后重新打 tag；不要把同一个 tag 指向新的提交。
+- 发布后发现严重问题：`gh release delete v0.10.0-rc.1 --yes` 并删除远端 tag，修复后重新打 tag；Release 建立后不要把同一个 tag 指向新的提交（本轮只在 Release 尚未产生时移动过一次 tag）。
 - 本地数据：RC 不修改用户 `minecraft` 目录结构，卸载启动器不会删除世界与存档。
