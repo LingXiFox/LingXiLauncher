@@ -5,7 +5,7 @@ members = [
     "crates/launcher-auth",
     "crates/launcher-platform",
     "crates/launcher-cli",
-    "apps/desktop/src-tauri",
+    "Apps/desktop/src-tauri",
 ]
 
 [workspace.package]
