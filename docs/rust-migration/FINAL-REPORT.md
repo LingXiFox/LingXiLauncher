@@ -23,7 +23,7 @@
 | 前端检查 | typecheck、build、GUI 冒烟通过 |
 | 真实启动 | Vanilla / Fabric / NeoForge 均到渲染线程 |
 | macOS 产物 | `.app` 可启动；`.dmg` 已生成并通过 `hdiutil verify` |
-| Windows/Linux | CI 可执行文件构建通过；安装包未生成 |
+| Windows/Linux | CI 已产出 NSIS/MSI、AppImage/deb/rpm；未在真机安装运行 |
 | Swift 运行时代码 | 已移除，仅保留 git tag 与 `docs/archive/swift` 文档 |
 
 ## 2. 模块清单
@@ -52,7 +52,7 @@
 
 | # | 验收项 | 状态 | 证据与说明 |
 | --- | --- | --- | --- |
-| 1 | CI 路径大小写修复并跑绿 | 部分 | 根 `Cargo.toml` member 已改为 `Apps/desktop/src-tauri`（`1208718`）。run 42759274223 与 42761500589 的 Rust/CLI/Ubuntu/Windows 均通过；macOS job 启动即 cancelled，整轮被标记 cancelled |
+| 1 | CI 路径大小写修复并跑绿 | 通过 | 根 `Cargo.toml` member 已改为 `Apps/desktop/src-tauri`（`1208718`）。run `42762969758` 与 `42763836261` 的 Rust、CLI、macOS 15、Ubuntu、Windows 五个 job 全部 success |
 | 2 | Linux 凭据安全、Windows DPAPI、macOS Keychain 旧凭据兼容 | 部分 | 代码路径全部实现并复核（见 §5）；本机只验证 macOS 构建，未在 Windows/Linux 真机读写凭据，未触碰真实账户 |
 | 3 | Swift 设置/性能历史迁移 | 部分 | 设置只在 `settings.json` 缺失时读 `defaults` 域；旧性能报告只读展示。代码复核完成，未用真实用户偏好域做端到端测试 |
 | 4 | GUI 离线启动与 Swift 安全策略一致 | 通过 | GUI 仅允许 Microsoft 启动；本地账户 disabled 并提示 CLI。与 Swift 策略一致 |
@@ -61,7 +61,7 @@
 | 7 | 隔离目录真实安装启动 Vanilla/Fabric/NeoForge | 通过（到渲染线程） | 三种版本均安装成功并启动到 `Created atlas`；未进入世界/联机 |
 | 8 | Microsoft 正版登录与刷新令牌 | 未验证 | 需要真实账号与浏览器授权，本轮未执行 |
 | 9 | 新旧截图视觉对比 + GUI 自动化 | 部分 | 首页新旧并排见 `VISUAL-COMPARISON.md`；19 张新 UI 截图；`pnpm test:gui` 通过。旧版只能截首页；自动化是 Chrome CDP，不是 WebView 进程内 |
-| 10 | macOS .app/.dmg 与 CI Windows/Linux 安装包 | 部分 | macOS .app 可启动，.dmg 已生成且 `hdiutil verify` 通过；Windows/Linux 只有 CI 可执行文件构建，无安装包 |
+| 10 | macOS .app/.dmg 与 CI Windows/Linux 安装包 | 通过（测试构建） | macOS 本地 `.dmg` ad-hoc 签名并通过 `hdiutil verify`；CI run `42763846132` 三平台打包全部 success，产出 `.dmg`、MSI/NSIS、AppImage/deb/rpm，均未正式签名 |
 | 11 | 更新验收报告，列真实通过/失败/未验证 | 通过 | 本报告与 `MIGRATION-STATUS.md` |
 
 ## 4. 构建、测试与质量门禁
@@ -83,7 +83,8 @@ cd Apps/desktop && pnpm typecheck && pnpm build && pnpm test:gui
 - build：通过；Vite 78 modules，JS 284 kB / gzip 86 kB，CSS 80 kB / gzip 14 kB。
 - GUI 冒烟：通过；覆盖启动 shell、导航、实例详情、模组/图形/安装弹窗、设置校验、账户页、日志页。
 - Release：`cargo build --release -p lingxi-desktop --features custom-protocol` 通过；未启用 custom-protocol 会白屏，这是 Tauri 2 的 devUrl 行为。
-- 打包：`pnpm exec tauri build --bundles app,dmg`；`.app` 成功，`.dmg` 由 `hdiutil` 手动生成并通过 `hdiutil verify`。
+- 打包：`pnpm exec tauri build --bundles app`；`.app` 成功，`.dmg` 由 `diskutil image create` 生成并通过 `hdiutil verify`。
+- 三平台安装包：release validation run `42763846132` 的 macOS ARM64、Windows x64、Linux x64 全部 success；产物已汇总到 `target/release/bundle/ci/`。
 
 ## 5. 平台与凭证实现
 
@@ -104,7 +105,7 @@ cd Apps/desktop && pnpm typecheck && pnpm build && pnpm test:gui
 ### 安全边界
 - 未读取、导出或提交任何真实 refresh token、账户数据库或用户世界。
 - 验收使用隔离目录与本地测试账户；真实账户未参与。
-- macOS 安装包为 ad-hoc 签名，不可作为公开发行包；Developer ID 与公证未执行。
+- macOS 本地安装包为 ad-hoc 签名；CI 的 macOS/Windows 安装包未签名。均不可作为公开发行包，Developer ID 与公证未执行。
 
 ## 6. 真实安装与启动记录
 
@@ -159,10 +160,10 @@ cd Apps/desktop && pnpm typecheck && pnpm build && pnpm test:gui
 
 1. Microsoft 真实登录、刷新令牌轮换、退出登录未执行。
 2. 游戏未进入世界、未联机、未做长时间稳定性与性能对比。
-3. Windows/Linux 无真机运行、无安装包、无 WebView 验证。
+3. Windows/Linux 未在真机安装运行，也未做 WebView 验证；CI 只证明安装包可生成。
 4. macOS 产物未做 Developer ID 签名与公证，不能作为公开发行包。
 5. GUI 自动化是 Chrome CDP 的前端冒烟，不覆盖真实 Tauri IPC、文件对话框、钥匙串。
-6. macOS CI job 启动即 cancelled，原因未定位；本机 macOS 构建通过。
+6. macOS CI 的 `macos-14` job 启动即 cancelled；切到 `macos-15` 后已全部通过。
 7. 旧 Swift 版只能截首页，视觉对比不覆盖全部页面。
 8. 资源包/光影的 Modrinth 真实下载未在受限网络下做完整性验证。
 9. 旧版 Swift 设置迁移未用真实 `defaults` 域做端到端测试。
@@ -191,6 +192,15 @@ cargo run -q -p launcher-cli -- --help
 - `target/release/lingxi-desktop`
 - `target/release/bundle/macos/LingXi Launcher.app`
 - `target/release/bundle/dmg/LingXi Launcher_0.10.0_aarch64.dmg`
+  SHA-256 `f3459759511d6c5b88125cc3d7186c7d98adea72f48770004f98cadcc49f4844`
+- `LingXi Launcher.app/Contents/MacOS/lingxi-desktop`
+  SHA-256 `c8bfe2833f21e1f7df08cb5e4f9f19c0c015927fd11311e3f0f8a4ffa196be14`
+- 三平台 CI 安装包（`target/release/bundle/ci/`）：
+  - `windows/LingXi Launcher_0.10.0_x64-setup.exe`：`8080b712ad1ad2cc695f8f1366dfb0a58c40c557cc637ac40c8a267de5ba3eca`
+  - `windows/LingXi Launcher_0.10.0_x64_en-US.msi`：`36baa08dd78ca8ea85f85ae69950081e070c83bd5fb7898cb28af92f577b5bfd`
+  - `linux/LingXi Launcher_0.10.0_amd64.AppImage`：`6be4d1fce9ade3e4ca1a2caabab5d3323e542425345110efc97c3918f3c6ed89`
+  - `linux/LingXi Launcher_0.10.0_amd64.deb`：`7af9ccaf130629662433d69a2644dc3947426f59798c7a8367a145b7ed4083ce`
+  - `linux/LingXi Launcher-0.10.0-1.x86_64.rpm`：`71bd728318f7ccfc5ea0642f31c8014c91b1cdfb54aaff54200f410daae21f3c`
 
 文档：
 - `docs/rust-migration/BASELINE.md`

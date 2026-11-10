@@ -19,7 +19,7 @@
 | 真实 Fabric 启动 | 通过（到渲染线程） | Fabric 0.20.1 + 1.21.11，日志出现 `Created atlas` |
 | 真实 NeoForge 启动 | 通过（到渲染线程） | NeoForge 21.11.48 + 1.21.11，日志出现 `Created atlas` |
 | macOS 安装包 | 通过 | `.app` 已 ad-hoc 签名并启动；`.dmg` 已生成并通过 `hdiutil verify` |
-| Windows/Linux 构建 | 通过（CI 可执行文件） | CI ubuntu/windows `cargo build` 通过；未生成安装包 |
+| Windows/Linux 安装包 | 通过（CI 测试构建） | CI run 42763846132 产出 NSIS/MSI、AppImage/deb/rpm；未在 Windows/Linux 真机安装运行 |
 | Microsoft 真机登录 | 未验证 | 需要真实账号与浏览器授权，本轮未执行 |
 | 进入世界/联机/长时间稳定性 | 未验证 | 只验证到主菜单渲染线程 |
 | Tauri WebView 进程内自动化 | 未验证 | 已完成 Chrome CDP 的前端冒烟，不是 WebView 内驱动 |
@@ -86,19 +86,22 @@ cd Apps/desktop && pnpm typecheck && pnpm build && pnpm test:gui
 | 产物 | 路径 | 状态 |
 | --- | --- | --- |
 | macOS `.app` | `target/release/bundle/macos/LingXi Launcher.app` | ad-hoc 签名，`codesign --verify --deep --strict` 通过，启动截图正常 |
-| macOS `.dmg` | `target/release/bundle/dmg/LingXi Launcher_0.10.0_aarch64.dmg` | `hdiutil create` 成功，5.3 MB，UDZO；`hdiutil verify` 校验 VALID |
-| Windows 安装包 | 无 | CI 只构建可执行文件，未运行 `tauri build` |
-| Linux 安装包 | 无 | CI 只构建可执行文件，未运行 `tauri build` |
+| macOS `.dmg` | `target/release/bundle/dmg/LingXi Launcher_0.10.0_aarch64.dmg` | `diskutil image create` 成功，5.6 MB，UDZO；`hdiutil verify` 校验 VALID |
+| Windows NSIS | `target/release/bundle/ci/windows/LingXi Launcher_0.10.0_x64-setup.exe` | 4.2 MB；CI 生成，未签名 |
+| Windows MSI | `target/release/bundle/ci/windows/LingXi Launcher_0.10.0_x64_en-US.msi` | 6.0 MB；CI 生成，未签名 |
+| Linux AppImage | `target/release/bundle/ci/linux/LingXi Launcher_0.10.0_amd64.AppImage` | 80 MB；CI 生成 |
+| Linux deb | `target/release/bundle/ci/linux/LingXi Launcher_0.10.0_amd64.deb` | 5.4 MB；CI 生成 |
+| Linux rpm | `target/release/bundle/ci/linux/LingXi Launcher-0.10.0-1.x86_64.rpm` | 5.4 MB；CI 生成 |
 
 macOS 产物未使用 Developer ID 签名，也未公证；不能作为公开发行包。
 
 ## 5. CI
 
 - CI 已从 Swift 切换为 Rust/Tauri：fmt、clippy、test、前端 typecheck/build、macOS/Windows/Ubuntu desktop build、CLI 冒烟。
-- run `42759274223`：Rust quality、CLI smoke、Ubuntu desktop、Windows desktop 通过；macOS job 启动即 `cancelled`，没有 step 日志。
-- run `42761500589`：Rust quality、CLI smoke、Ubuntu desktop、Windows desktop 通过；macOS 仍 `cancelled`，整轮因该 job 被标记 `cancelled`。
-- 结论：**Linux/Windows 可执行文件构建通过；macOS CI runner 未完成**。本机 macOS Release 构建与打包已通过。
-- `release.yml` 已改为 Tauri 三平台打包，但尚未在 CI 实际产出安装包。
+- run `42762969758`（commit `4ee6b60`）：Rust quality、CLI smoke、macOS 15、Ubuntu、Windows 五个 job 全部 `success`。macOS 之前使用 `macos-14` 时启动即 cancelled，改用 `macos-15` 后恢复。
+- run `42763836261`（commit `605a307`）：五个 job 全部 `success`。
+- run `42763846132`（commit `605a307`，Release validation）：macOS ARM64、Windows x64、Linux x64 三个打包 job 全部 `success`，产出 `.app`/`.dmg`、MSI/NSIS、AppImage/deb/rpm。
+- `release.yml` 的 validation 路径不创建 GitHub Release；tag 触发的正式 Release 流程尚未实际执行。
 
 ## 6. 视觉与交互
 
@@ -120,11 +123,11 @@ macOS 产物未使用 Developer ID 签名，也未公证；不能作为公开发
 
 1. Microsoft 真实账号登录、刷新令牌轮换、退出登录未在真机执行。
 2. 游戏只到主菜单渲染线程，未进入世界、未联机、未做长时间稳定性与性能对比。
-3. Windows/Linux 只在 CI 构建可执行文件，没有真机运行、安装包或 WebView 验证。
+3. Windows/Linux 安装包已由 CI 生成，但没有真机安装运行或 WebView 验证。
 4. macOS 产物未做 Developer ID 签名与公证，不能作为公开发行包。
 5. GUI 自动化是 Chrome CDP 的前端冒烟，不是 Tauri WebView 进程内自动化；未覆盖真实 IPC、文件对话框、系统钥匙串。
 6. 旧 Swift 版只能截首页，视觉对比不覆盖全部页面。
-7. macOS CI job 启动即 cancelled，原因未定位；本机构建不受影响。
+7. macOS CI 的 `macos-14` job 启动即 cancelled；切到 `macos-15` 后五个 job 全部通过。
 8. 资源包/光影的真实 Modrinth 下载未在受限网络下做完整性验证。
 9. 旧版 Swift 设置迁移只做了代码路径复核，未用真实 `defaults` 域做端到端测试。
 

@@ -41,5 +41,5 @@ Tauri 注册 75 个命令；前端 `api.ts` 实际调用 61 个。未直接调�
 - 进入世界、多人联机与长时间稳定性。
 - Microsoft 真实账号登录与令牌刷新。
 - 资源包/光影的 Modrinth 真实下载在受限网络下的完整性。
-- Tauri Release 安装包在 Windows/Linux 的产物验证（CI 只构建可执行文件）。
+- Tauri Release 安装包在 Windows/Linux 的真实安装运行（CI 已生成产物）。
 - Tauri WebView 进程内 GUI 自动化；已完成前端构建产物的 Chrome CDP 冒烟（`pnpm test:gui`）。

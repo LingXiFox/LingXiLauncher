@@ -4,7 +4,7 @@
 
 LingXi Launcher 是一个面向 **Minecraft: Java Edition** 的桌面启动器，当前实现为 **Rust + Tauri 2 + React + TypeScript**：core 不依赖 GUI，桌面端与 CLI 共用同一套安装、启动、账户、模组、整合包、世界备份、诊断与性能逻辑。
 
-> Swift 实现已从工作树移除，旧源码保留在 git 历史与 `docs/archive/swift/`。已完成的代码与验证范围见 [docs/rust-migration/MIGRATION-STATUS.md](docs/rust-migration/MIGRATION-STATUS.md)。Vanilla/Fabric/NeoForge 已真实启动到渲染线程；进入世界/联机、Microsoft 真机登录、Windows/Linux 安装包尚未验证，文档不会把未执行项标成通过。
+> Swift 实现已从工作树移除，旧源码保留在 git 历史与 `docs/archive/swift/`。已完成的代码与验证范围见 [docs/rust-migration/MIGRATION-STATUS.md](docs/rust-migration/MIGRATION-STATUS.md)。Vanilla/Fabric/NeoForge 已真实启动到渲染线程；Windows/Linux 安装包已由 CI 生成；进入世界/联机、Microsoft 真机登录、Windows/Linux 真机安装运行尚未验证，文档不会把未执行项标成通过。
 
 ## 功能
 
@@ -99,7 +99,7 @@ Rust 版可以直接读取 Swift 版的实例、模组、世界备份和旧整�
 - `pnpm typecheck` 与 `pnpm build`
 - `cargo build --release -p lingxi-desktop --features custom-protocol`，启动后窗口正常渲染
 - CLI `--help`、`version list/inspect --json`（1.7.10、1.20.1、1.21.11、26.3）、`doctor`、`launch --dry-run`、`diagnose`、`performance status/benchmark/tune`、`graphics status`、`mod search/install/enable/disable/remove`、`mrpack inspect`、`resourcepack/shader search`、`world list/backup/restore/delete` 冒烟
-界面截图见 [UI 一致性文档](docs/rust-migration/UI-PARITY.md#实际界面截图)。Vanilla/Fabric/NeoForge 已真实启动到渲染线程；macOS `.app`/`.dmg` 已生成并验证。尚未验证：进入世界/联机、Microsoft 真机登录、Windows/Linux 安装包与实机运行、Tauri WebView 进程内自动化。
+界面截图见 [UI 一致性文档](docs/rust-migration/UI-PARITY.md#实际界面截图)。Vanilla/Fabric/NeoForge 已真实启动到渲染线程；macOS `.app`/`.dmg` 已生成并验证，CI 已生成 Windows/Linux 安装包。尚未验证：进入世界/联机、Microsoft 真机登录、Windows/Linux 真机安装运行、Tauri WebView 进程内自动化。
 
 
 ## 文档
