@@ -179,7 +179,56 @@ fn physical_memory_mib() -> Option<u32> {
 
 #[cfg(target_os = "windows")]
 fn physical_memory_mib() -> Option<u32> {
-    None
+    fn parse_bytes(text: &str) -> Option<u64> {
+        text.lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .find_map(|line| {
+                let value = line.rsplit('=').next().unwrap_or(line).trim();
+                value.parse::<u64>().ok()
+            })
+    }
+
+    fn run(program: &str, args: &[&str]) -> Option<u64> {
+        let output = std::process::Command::new(program)
+            .args(args)
+            .output()
+            .ok()?;
+        if !output.status.success() {
+            return None;
+        }
+        parse_bytes(&String::from_utf8_lossy(&output.stdout))
+    }
+
+    let bytes = run(
+        "powershell",
+        &[
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "(Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory",
+        ],
+    )
+    .or_else(|| {
+        run(
+            "wmic",
+            &["computersystem", "get", "TotalPhysicalMemory", "/value"],
+        )
+    })
+    .or_else(|| {
+        run(
+            "powershell",
+            &[
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "(Get-CimInstance Win32_OperatingSystem).TotalVisibleMemorySize",
+            ],
+        )
+        .map(|kib| kib.saturating_mul(1024))
+    })?;
+    let mib = bytes / 1024 / 1024;
+    (mib > 0).then_some(mib.min(u32::MAX as u64) as u32)
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]

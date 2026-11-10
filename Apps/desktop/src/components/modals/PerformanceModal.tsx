@@ -6,7 +6,7 @@ import { Button } from "../Button";
 import { EmptyState } from "../EmptyState";
 import { Icon } from "../Icons";
 import { Modal } from "../Modal";
-import { ModalError, errorMessage, formatBytes, useInstance } from "./shared";
+import { ModalError, errorMessage, formatBytes, formatDateTime, useInstance } from "./shared";
 
 interface PerformanceModalProps {
   instanceId: string;
@@ -152,6 +152,31 @@ export function PerformanceModal({ instanceId }: PerformanceModalProps) {
               <EmptyState icon="zap" title="暂无优化建议" description="运行基准或应用推荐后，这里会展示针对该实例的调整项。" compact />
             )}
           </div>
+
+          {report?.legacyReports && report.legacyReports.length > 0 ? (
+            <div className="performance-legacy">
+              <div className="performance-recommendations__head">
+                <h4>旧版基准记录</h4>
+                <Badge tone="neutral">{report.legacyReports.length} 次 · 只读保留</Badge>
+              </div>
+              <p className="caption">来自 Swift 版本的历史记录，文件未修改，也不参与当前相对评分。</p>
+              <div className="performance-legacy__list">
+                {report.legacyReports.slice(0, 6).map((item) => (
+                  <div className="performance-legacy__row" key={item.id}>
+                    <div>
+                      <strong>{formatDateTime(item.createdAt)}</strong>
+                      <span>{item.minecraftVersion} · {item.loader || "原版"}</span>
+                    </div>
+                    <div className="performance-legacy__metrics">
+                      <span>{item.samples} 次采样</span>
+                      {item.startupAverageMs != null ? <span>启动均值 {Math.round(item.startupAverageMs)} ms</span> : null}
+                      {item.residentPeakBytes ? <span>峰值内存 {formatBytes(item.residentPeakBytes)}</span> : null}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
 
           {benchmark ? (
             <div className="benchmark-card">

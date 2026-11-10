@@ -94,23 +94,110 @@ impl AppState {
     }
 
     pub fn save_settings(&self, settings: &Settings) -> launcher_core::Result<()> {
-        let data = serde_json::to_vec_pretty(settings)
-            .map_err(|e| launcher_core::Error::Other(e.to_string()))?;
-        let path = self.layout.settings_file();
-        if let Some(parent) = path.parent() {
-            launcher_core::layout::ensure_dir(parent)?;
-        }
-        let temporary = path.with_extension("json.part");
-        std::fs::write(&temporary, data)?;
-        std::fs::rename(&temporary, &path)?;
+        write_settings_file(&self.layout, settings)?;
         *self.settings.lock().expect("settings lock") = settings.clone();
         Ok(())
     }
 }
 
+fn settings_file_contents(settings: &Settings) -> launcher_core::Result<Vec<u8>> {
+    serde_json::to_vec_pretty(settings).map_err(|e| launcher_core::Error::Other(e.to_string()))
+}
+
+fn write_settings_file(layout: &GameDataLayout, settings: &Settings) -> launcher_core::Result<()> {
+    let data = settings_file_contents(settings)?;
+    let path = layout.settings_file();
+    if let Some(parent) = path.parent() {
+        launcher_core::layout::ensure_dir(parent)?;
+    }
+    let temporary = path.with_extension("json.part");
+    std::fs::write(&temporary, data)?;
+    std::fs::rename(&temporary, &path)?;
+    Ok(())
+}
+
 fn load_settings(layout: &GameDataLayout) -> Settings {
-    std::fs::read(layout.settings_file())
-        .ok()
-        .and_then(|data| serde_json::from_slice(&data).ok())
-        .unwrap_or_default()
+    let path = layout.settings_file();
+    if let Ok(data) = std::fs::read(&path) {
+        if let Ok(settings) = serde_json::from_slice(&data) {
+            return settings;
+        }
+        // A malformed settings file belongs to the user. Keep it untouched and
+        // fall back to defaults instead of rewriting or migrating over it.
+        return Settings::default();
+    }
+
+    #[cfg(target_os = "macos")]
+    if let Some(settings) = legacy_macos_settings() {
+        // Best effort: the in-memory settings are still usable if persistence
+        // fails (for example when the data directory is read-only).
+        let _ = write_settings_file(layout, &settings);
+        return settings;
+    }
+
+    Settings::default()
+}
+
+/// Reads the subset of settings that the Swift launcher stored in
+/// UserDefaults under the shared bundle identifier. Only called when no
+/// Rust settings file exists, so a user who already configured the Rust build
+/// never gets their choices overwritten.
+#[cfg(target_os = "macos")]
+fn legacy_macos_settings() -> Option<Settings> {
+    const DOMAIN: &str = "com.lingxifox.LingXiLauncher";
+
+    fn read(key: &str) -> Option<String> {
+        let output = std::process::Command::new("/usr/bin/defaults")
+            .args(["read", DOMAIN, key])
+            .output()
+            .ok()?;
+        if !output.status.success() {
+            return None;
+        }
+        let value = String::from_utf8(output.stdout).ok()?;
+        let value = value.trim();
+        if value.is_empty() {
+            None
+        } else {
+            Some(value.to_string())
+        }
+    }
+
+    let java_path = read("lingxi.javaPath");
+    let source = read("lingxi.source");
+    let mirror_config_path = read("lingxi.mirrorConfigPath");
+    let memory = read("lingxi.defaultMemoryMiB").and_then(|value| value.parse::<u32>().ok());
+    let appearance = read("lingxi.appearance");
+
+    if java_path.is_none()
+        && source.is_none()
+        && mirror_config_path.is_none()
+        && memory.is_none()
+        && appearance.is_none()
+    {
+        return None;
+    }
+
+    let mut settings = Settings {
+        java_path: java_path.filter(|value| !value.is_empty()),
+        mirror_config_path: mirror_config_path.filter(|value| !value.is_empty()),
+        ..Settings::default()
+    };
+    if let Some(source) = source {
+        if matches!(
+            source.as_str(),
+            "official" | "mirror" | "auto" | "local-cache-only"
+        ) {
+            settings.source = source;
+        }
+    }
+    if let Some(memory) = memory.filter(|value| *value > 0) {
+        settings.default_memory_mib = memory;
+    }
+    if let Some(appearance) = appearance {
+        if matches!(appearance.as_str(), "dark" | "light" | "system") {
+            settings.appearance = appearance;
+        }
+    }
+    Some(settings)
 }

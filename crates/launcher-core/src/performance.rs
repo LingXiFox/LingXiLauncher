@@ -85,6 +85,53 @@ pub struct PerformanceRecommendation {
     pub notes: Vec<String>,
 }
 
+/// Read-only summary of a benchmark written by the Swift launcher.
+///
+/// The Swift report schema stores process timings rather than the synthetic
+/// operations/sec score used by the Rust runner. It is intentionally kept as a
+/// separate type so legacy data can be displayed and preserved without
+/// inventing a score that was never measured.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LegacyBenchmarkSummary {
+    pub id: String,
+    pub created_at: String,
+    pub instance_id: String,
+    pub minecraft_version: String,
+    pub loader: String,
+    pub samples: u64,
+    pub startup_average_ms: Option<f64>,
+    pub cpu_average: Option<f64>,
+    pub resident_peak_bytes: Option<u64>,
+    pub notes: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SwiftBenchmarkReport {
+    id: String,
+    created_at: String,
+    instance_id: String,
+    minecraft_version: String,
+    loader: String,
+    aggregate: SwiftBenchmarkAggregate,
+    #[serde(default)]
+    notes: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SwiftBenchmarkAggregate {
+    #[serde(default)]
+    samples: u64,
+    #[serde(default)]
+    startup_average: Option<f64>,
+    #[serde(default)]
+    cpu_average: Option<f64>,
+    #[serde(default)]
+    resident_peak_bytes: Option<u64>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BenchmarkReport {
@@ -370,6 +417,54 @@ impl PerformanceService {
     pub fn list_reports_for(&self, instance: &Instance) -> Result<Vec<BenchmarkReport>> {
         let mut reports = self.list_reports()?;
         reports.retain(|report| report.instance_id == instance.id());
+        Ok(reports)
+    }
+
+    /// Lists Swift-era benchmark reports without modifying them. Rust reports
+    /// are intentionally excluded; callers can combine both lists.
+    pub fn list_legacy_reports_for(
+        &self,
+        instance: &Instance,
+    ) -> Result<Vec<LegacyBenchmarkSummary>> {
+        let directory = self.reports_directory();
+        if !directory.is_dir() {
+            return Ok(Vec::new());
+        }
+        let mut reports = Vec::new();
+        for entry in std::fs::read_dir(&directory)? {
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(_) => continue,
+            };
+            let path = entry.path();
+            if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+                continue;
+            }
+            let text = match std::fs::read_to_string(&path) {
+                Ok(text) => text,
+                Err(_) => continue,
+            };
+            let report = match serde_json::from_str::<SwiftBenchmarkReport>(&text) {
+                Ok(report) => report,
+                Err(_) => continue,
+            };
+            if report.instance_id != instance.id() {
+                continue;
+            }
+            reports.push(LegacyBenchmarkSummary {
+                id: report.id,
+                created_at: report.created_at,
+                instance_id: report.instance_id,
+                minecraft_version: report.minecraft_version,
+                loader: report.loader,
+                samples: report.aggregate.samples,
+                startup_average_ms: report.aggregate.startup_average,
+                cpu_average: report.aggregate.cpu_average,
+                resident_peak_bytes: report.aggregate.resident_peak_bytes,
+                notes: report.notes,
+            });
+        }
+        reports.sort_by(|left, right| right.created_at.cmp(&left.created_at));
         Ok(reports)
     }
 

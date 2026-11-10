@@ -1,5 +1,6 @@
 use launcher_core::performance::{
-    BenchmarkReport, PerformanceRecommendation, PerformanceService, SystemProfile,
+    BenchmarkReport, LegacyBenchmarkSummary, PerformanceRecommendation, PerformanceService,
+    SystemProfile,
 };
 use serde::Serialize;
 use tauri::State;
@@ -26,6 +27,7 @@ pub struct PerformanceReportView {
     pub score: Option<u32>,
     pub benchmark_score: Option<u32>,
     pub recommendation: PerformanceRecommendation,
+    pub legacy_reports: Vec<LegacyBenchmarkSummary>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -86,6 +88,9 @@ pub fn performance_report(
     let profile = service.system_profile();
     let recommendation = service.recommend_for(&instance);
     let score = latest_score(&service, &instance);
+    let legacy_reports = service
+        .list_legacy_reports_for(&instance)
+        .map_err(command_error)?;
     let summary = format!(
         "{} · {} 核心 · 可用磁盘 {} MiB",
         profile.cpu_brand, profile.cpu_cores, profile.disk_free_mib
@@ -98,6 +103,7 @@ pub fn performance_report(
         score,
         benchmark_score: score,
         recommendation,
+        legacy_reports,
     })
 }
 

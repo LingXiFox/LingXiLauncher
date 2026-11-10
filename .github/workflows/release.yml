@@ -52,8 +52,6 @@ jobs:
       - name: Cache Rust
         uses: Swatinem/rust-cache@v2
 
-      - name: Install Tauri CLI
-        run: cargo install tauri-cli --version "^2" --locked
 
       - name: Install pnpm
         uses: pnpm/action-setup@v4
@@ -71,13 +69,17 @@ jobs:
         working-directory: Apps/desktop
         run: pnpm install --frozen-lockfile
 
+      - name: Verify project-local Tauri CLI
+        working-directory: Apps/desktop
+        run: pnpm exec tauri --version
+
       - name: Build and package
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           projectPath: Apps/desktop
-          tauriScript: cargo tauri
+          tauriScript: pnpm tauri
           tagName: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
           releaseName: 'LingXi Launcher ${{ github.ref_name }}'
           releaseBody: 'Rust + Tauri 2 release. See docs/rust-migration/MIGRATION-STATUS.md for verified scope.'

@@ -1,8 +1,5 @@
 use launcher_core::launch::{latest_game_log, read_tail, LaunchPlanBuilder, LaunchService};
-use launcher_core::models::account::{
-    offline_uuid, validate_player_name, AccountKind, ActiveAccountStore, LocalAccountStore,
-    MicrosoftAccountStore,
-};
+use launcher_core::models::account::{AccountKind, ActiveAccountStore, MicrosoftAccountStore};
 use launcher_core::models::instance::Instance;
 use launcher_core::models::launch::{
     ExitReason, GameProcessEvent, LaunchContext, LaunchIdentity, LaunchPreview,
@@ -56,7 +53,7 @@ pub async fn preview_launch(
     let version = VersionResolver
         .resolve(&version_id, &state.layout.game_root)
         .map_err(command_error)?;
-    let context = launch_context(&state, &instance, &version, None, None).await?;
+    let context = launch_context(&state, &instance, &version).await?;
     LaunchPlanBuilder::preview(&instance, &version, &state.layout, &context).map_err(command_error)
 }
 
@@ -65,8 +62,6 @@ pub async fn launch_instance(
     app: AppHandle,
     state: State<'_, AppState>,
     instance_id: String,
-    identity_mode: Option<String>,
-    player_name: Option<String>,
 ) -> CommandResult<GameStatus> {
     {
         let running = state.running.lock().expect("running lock");
@@ -83,7 +78,7 @@ pub async fn launch_instance(
     let version = VersionResolver
         .resolve(&version_id, &state.layout.game_root)
         .map_err(command_error)?;
-    let context = launch_context(&state, &instance, &version, identity_mode, player_name).await?;
+    let context = launch_context(&state, &instance, &version).await?;
     let plan = LaunchPlanBuilder::build(&instance, &version, &state.layout, &context)
         .map_err(command_error)?;
     let log_path = instance.logs_directory().join("latest.log");
@@ -203,11 +198,9 @@ async fn launch_context(
     state: &AppState,
     instance: &Instance,
     version: &launcher_core::version::ResolvedVersion,
-    identity_mode: Option<String>,
-    player_name: Option<String>,
 ) -> CommandResult<LaunchContext> {
     let java = java_executable(state, instance, version)?;
-    let identity = identity_for(state, instance, identity_mode, player_name).await?;
+    let identity = identity_for(state).await?;
     let mut context = LaunchContext::new(
         instance.directory.clone(),
         instance.game_directory.clone(),
@@ -250,45 +243,14 @@ fn java_executable(
     ))
 }
 
-async fn identity_for(
-    state: &AppState,
-    instance: &Instance,
-    identity_mode: Option<String>,
-    player_name: Option<String>,
-) -> CommandResult<LaunchIdentity> {
-    if let Some(name) = player_name
-        .as_deref()
-        .map(str::trim)
-        .filter(|name| !name.is_empty())
-    {
-        let name = validate_player_name(name).map_err(command_error)?;
-        let mode = match identity_mode.as_deref() {
-            Some("licensed-offline") => {
-                launcher_core::models::instance::IdentityMode::LicensedOffline
-            }
-            _ => launcher_core::models::instance::IdentityMode::LocalOffline,
-        };
-        let profile = launcher_core::models::account::LocalOfflineProfile {
-            player_name: name.to_string(),
-            stable_offline_uuid: offline_uuid(name),
-        };
-        let mut identity = LaunchIdentity::local_offline(&profile);
-        identity.mode = mode;
-        return Ok(identity);
-    }
-    if identity_mode.as_deref() == Some("local-offline") {
-        return Err("离线启动需要提供玩家名".into());
-    }
+async fn identity_for(state: &AppState) -> CommandResult<LaunchIdentity> {
     let active = ActiveAccountStore::new(state.layout.clone()).load();
-    let reference = active.ok_or_else(|| "请先在账户页选择或创建一个账户".to_string())?;
+    let reference = active.ok_or_else(|| "请先在账户管理登录 Microsoft 账户".to_string())?;
     match reference.kind {
-        AccountKind::Local => {
-            let store = LocalAccountStore::new(state.layout.clone());
-            let profile = store
-                .profile(&reference.identifier)
-                .map_err(command_error)?;
-            Ok(LaunchIdentity::local_offline(&profile))
-        }
+        AccountKind::Local => Err(
+            "桌面端仅支持 Microsoft 正版账户启动；离线账户请使用 CLI: lingxi launch --identity local:<name>"
+                .to_string(),
+        ),
         AccountKind::Microsoft => {
             let id = uuid::Uuid::parse_str(&reference.identifier)
                 .map_err(|_| "无效的 Microsoft 账户 ID".to_string())?;
@@ -298,7 +260,6 @@ async fn identity_for(
                 .map_err(command_error)?;
             let mut identity = LaunchIdentity::microsoft(&account, session.access_token);
             identity.xuid = Some(session.xuid);
-            let _ = instance;
             Ok(identity)
         }
     }

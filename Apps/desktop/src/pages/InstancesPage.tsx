@@ -24,6 +24,7 @@ export function InstancesPage() {
   const {
     instances,
     activeProfile,
+    javaRuntimes,
     isGameRunning,
     deleteInstance,
     copyInstance,
@@ -62,6 +63,14 @@ export function InstancesPage() {
   }, [instances, query, sort]);
 
   const selected = instances.find((instance) => instance.id === selectedId) ?? null;
+
+  function launchBlocker(instance: GameInstance): string | null {
+    if (isGameRunning) return null;
+    if (activeProfile?.kind !== "microsoft") return "先在账户管理登录 Microsoft 账户";
+    if (javaRuntimes.length === 0) return "先在设置中选择 Java 运行时";
+    if (!instance.versionId) return "该实例还没有绑定 Minecraft 版本";
+    return null;
+  }
 
   async function handleLaunch(instance: GameInstance) {
     if (isGameRunning) {
@@ -313,10 +322,14 @@ export function InstancesPage() {
                       ) : null}
                     </div>
                   </div>
-                  {!activeProfile ? (
-                    <button type="button" className="text-link instance-detail__account" onClick={() => setSection("accounts")}>
+                  {!isGameRunning && launchBlocker(selected) ? (
+                    <button
+                      type="button"
+                      className="text-link instance-detail__account"
+                      onClick={() => setSection(activeProfile?.kind === "microsoft" ? "settings" : "accounts")}
+                    >
                       <Icon name="alert" size={12} />
-                      未登录账户，启动前请先选择身份
+                      {launchBlocker(selected)}
                     </button>
                   ) : null}
                 </Card>

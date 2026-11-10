@@ -86,6 +86,16 @@ export function HomePage() {
   const selected = sortedInstances.find((item) => item.id === selectedId) ?? sortedInstances[0] ?? null;
   const installedVersions = versions.filter((version) => version.installed).length;
   const accountCount = accounts.microsoft.length + accounts.local.length;
+  const launchHint = isGameRunning
+    ? null
+    : activeProfile?.kind !== "microsoft"
+      ? "先在账户管理登录 Microsoft 账户"
+      : javaRuntimes.length === 0
+        ? "先在设置中选择 Java 运行时"
+        : !selected?.versionId
+          ? "该实例还没有绑定 Minecraft 版本"
+          : null;
+  const canLaunch = isGameRunning || launchHint === null;
 
   async function handleLaunch() {
     if (!selected) return;
@@ -177,8 +187,12 @@ export function HomePage() {
                 </div>
                 <div className="quick-launch__footer">
                   <div className="quick-launch__last">
-                    <span className="quick-launch__last-label">上次启动</span>
-                    <span>{formatRelative(selected.lastLaunchedAt)}</span>
+                    <span className="quick-launch__last-label">
+                      {launchHint ? "启动条件" : "上次启动"}
+                    </span>
+                    <span className={launchHint ? "quick-launch__hint" : undefined}>
+                      {launchHint ?? formatRelative(selected.lastLaunchedAt)}
+                    </span>
                   </div>
                   <div className="quick-launch__buttons">
                     <Button variant="ghost" size="sm" icon="wrench" onClick={() => handleOpenInstance(selected.id)}>
@@ -189,6 +203,8 @@ export function HomePage() {
                       size="lg"
                       icon={isGameRunning ? "stop" : "play"}
                       loading={launching}
+                      disabled={!canLaunch}
+                      title={launchHint ?? undefined}
                       onClick={() => void handleLaunch()}
                     >
                       {isGameRunning ? "停止游戏" : "启动"}

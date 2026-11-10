@@ -656,13 +656,20 @@
 .performance-score__summary { margin: 5px 0 0; color: var(--text-secondary); font: var(--font-caption); }
 .performance-system { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .performance-system__item { padding: 10px 12px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface-raised); }
-.performance-system__item dt { margin: 0; color: var(--text-tertiary); font: var(--font-overline); letter-spacing: 0.08em; text-transform: uppercase; }
-.performance-system__item dd { margin: 4px 0 0; font: 600 11.5px/1.4 var(--font-sans); overflow-wrap: anywhere; }
+.performance-system__item span { display: block; margin: 0; color: var(--text-tertiary); font: var(--font-overline); letter-spacing: 0.08em; text-transform: uppercase; }
+.performance-system__item strong { display: block; margin: 4px 0 0; font: 600 11.5px/1.4 var(--font-sans); overflow-wrap: anywhere; }
 .performance-recommendations { padding: 14px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-raised); }
 .performance-recommendations__head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
 .performance-recommendations__mark { color: var(--accent); }
 .performance-recommendations ul { margin: 0; padding-left: 18px; color: var(--text-secondary); font: var(--font-caption); }
 .performance-timestamp { margin: 0; color: var(--text-tertiary); font: var(--font-caption); }
+.performance-legacy { padding: 14px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-raised); }
+.performance-legacy > .caption { margin: 0 0 10px; }
+.performance-legacy__list { display: flex; flex-direction: column; gap: 6px; }
+.performance-legacy__row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+.performance-legacy__row strong { display: block; font: 600 11.5px/1.4 var(--font-sans); }
+.performance-legacy__row span { color: var(--text-tertiary); font: var(--font-caption); }
+.performance-legacy__metrics { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px 10px; text-align: right; }
 
 .benchmark-card {
   display: flex;

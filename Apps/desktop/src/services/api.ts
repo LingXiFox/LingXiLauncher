@@ -236,6 +236,19 @@ export interface PerformanceSystemProfile {
   os?: string | null;
 }
 
+export interface LegacyPerformanceReport {
+  id: string;
+  createdAt: string;
+  instanceId: string;
+  minecraftVersion: string;
+  loader: string;
+  samples: number;
+  startupAverageMs?: number | null;
+  cpuAverage?: number | null;
+  residentPeakBytes?: number | null;
+  notes?: string[];
+}
+
 export interface PerformanceReport {
   profile?: string | null;
   summary?: string | null;
@@ -243,6 +256,7 @@ export interface PerformanceReport {
   system?: PerformanceSystemProfile | null;
   score?: number | null;
   benchmarkScore?: number | null;
+  legacyReports?: LegacyPerformanceReport[];
 }
 
 export interface BenchmarkResult {

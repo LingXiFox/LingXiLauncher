@@ -140,6 +140,8 @@
   color: var(--text-tertiary);
 }
 
+.quick-launch__hint { color: var(--warning); }
+
 .quick-launch__buttons { display: flex; align-items: center; gap: 8px; }
 
 .account-snapshot {
