@@ -58,6 +58,7 @@ export function ToolsModal({ instanceId, initialTab = "manage" }: ToolsModalProp
   const [diagnostics, setDiagnostics] = useState<DiagnosticsReport | null>(null);
   const [diagnosing, setDiagnosing] = useState(false);
   const [diagnosticsError, setDiagnosticsError] = useState<string | null>(null);
+  const [copyingBundle, setCopyingBundle] = useState(false);
   const [crash, setCrash] = useState<CrashReport | null>(null);
 
   useEffect(() => {
@@ -171,6 +172,19 @@ export function ToolsModal({ instanceId, initialTab = "manage" }: ToolsModalProp
       setDiagnosticsError(errorMessage(cause));
     } finally {
       setDiagnosing(false);
+    }
+  }
+
+  async function copyDiagnostics() {
+    setCopyingBundle(true);
+    try {
+      const text = await api.diagnosticBundle(instanceId);
+      await navigator.clipboard.writeText(text);
+      toast("success", "诊断信息已复制", "已脱敏，可直接粘贴到 GitHub Issue");
+    } catch (cause) {
+      toast("error", "复制诊断信息失败", errorMessage(cause));
+    } finally {
+      setCopyingBundle(false);
     }
   }
 
@@ -338,9 +352,14 @@ export function ToolsModal({ instanceId, initialTab = "manage" }: ToolsModalProp
                   <h4>健康检查</h4>
                   <p>检查 Java、游戏文件、内存、磁盘、账户与最近日志。</p>
                 </div>
-                <Button size="sm" variant="secondary" icon="activity" loading={diagnosing} onClick={() => void diagnose()}>
-                  重新诊断
-                </Button>
+                <div className="row">
+                  <Button size="sm" variant="ghost" icon="copy" loading={copyingBundle} onClick={() => void copyDiagnostics()}>
+                    复制诊断信息
+                  </Button>
+                  <Button size="sm" variant="secondary" icon="activity" loading={diagnosing} onClick={() => void diagnose()}>
+                    重新诊断
+                  </Button>
+                </div>
               </div>
               {diagnosing && !diagnostics ? (
                 <div className="modal-loading"><span className="spinner" aria-hidden="true" />正在检查实例</div>

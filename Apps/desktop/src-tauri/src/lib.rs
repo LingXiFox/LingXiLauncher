@@ -85,6 +85,7 @@ pub fn run() {
             commands::performance::apply_performance,
             commands::diagnostics::diagnose,
             commands::diagnostics::latest_crash_report,
+            commands::diagnostics::diagnostic_bundle,
         ])
         .run(tauri::generate_context!())
         .expect("error while running LingXi Launcher");

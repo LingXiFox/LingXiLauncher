@@ -487,6 +487,68 @@ pub fn verify_managed_runtime(root: &Path) -> Result<()> {
             root.display()
         )));
     }
+    // Reading the binary proves the runtime is still usable after a partial download.
     let _ = sha1_file(&executable)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn version_strings_map_to_major_versions() {
+        assert_eq!(parse_major("1.8.0_382"), Some(8));
+        assert_eq!(parse_major("1.8.0_202-b08"), Some(8));
+        assert_eq!(parse_major("17.0.9+9"), Some(17));
+        assert_eq!(parse_major("21"), Some(21));
+        assert_eq!(parse_major("21.0.1"), Some(21));
+    }
+
+    #[test]
+    fn malformed_version_strings_are_rejected() {
+        assert_eq!(parse_major(""), None);
+        assert_eq!(parse_major("1"), None);
+        assert_eq!(parse_major("1.x"), None);
+        assert_eq!(parse_major("java"), None);
+        assert_eq!(parse_major(" 1.8"), None);
+    }
+
+    #[test]
+    fn runtime_components_follow_the_mojang_table() {
+        assert_eq!(component_for_major(8), "jre-legacy");
+        assert_eq!(component_for_major(9), "java-runtime-alpha");
+        assert_eq!(component_for_major(16), "java-runtime-alpha");
+        assert_eq!(component_for_major(17), "java-runtime-gamma");
+        assert_eq!(component_for_major(20), "java-runtime-gamma");
+        assert_eq!(component_for_major(21), "java-runtime-delta");
+        assert_eq!(component_for_major(25), "java-runtime-delta");
+    }
+
+    #[test]
+    fn runtime_platform_matches_the_host() {
+        let platform = runtime_platform();
+        if cfg!(target_os = "macos") {
+            let expected = if cfg!(target_arch = "aarch64") {
+                "mac-os-arm64"
+            } else {
+                "mac-os"
+            };
+            assert_eq!(platform, expected);
+        } else if cfg!(target_os = "windows") {
+            let expected = if cfg!(target_arch = "x86_64") {
+                "windows-x64"
+            } else {
+                "windows-x86"
+            };
+            assert_eq!(platform, expected);
+        } else if cfg!(target_os = "linux") {
+            let expected = if cfg!(target_arch = "x86_64") {
+                "linux"
+            } else {
+                "linux-i386"
+            };
+            assert_eq!(platform, expected);
+        }
+    }
 }

@@ -672,3 +672,80 @@ pub fn read_tail(path: &Path, max_lines: usize) -> Result<String> {
     let start = lines.len().saturating_sub(max_lines);
     Ok(lines[start..].join("\n"))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::instance::InstanceManifest;
+    use std::time::Duration;
+
+    fn scratch_dir(label: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "lingxi-launch-{label}-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn instance_at(root: &Path) -> Instance {
+        Instance {
+            manifest: InstanceManifest {
+                id: "test".into(),
+                display_name: "Test".into(),
+                version_id: Some("1.21.11".into()),
+                game_version: Some("1.21.11".into()),
+                created_at: Utc::now(),
+                last_launched_at: None,
+                last_identity_mode: None,
+                memory_mib: None,
+                java_runtime: None,
+                jvm_arguments: None,
+            },
+            directory: root.join("instance"),
+            game_directory: root.join("instance").join("minecraft"),
+        }
+    }
+
+    #[test]
+    fn read_tail_returns_the_last_lines() {
+        let root = scratch_dir("tail");
+        let log = root.join("game.log");
+        std::fs::write(&log, "one\ntwo\nthree\nfour\nfive\n").unwrap();
+        assert_eq!(read_tail(&log, 2).unwrap(), "four\nfive");
+        assert_eq!(read_tail(&log, 50).unwrap(), "one\ntwo\nthree\nfour\nfive");
+        assert_eq!(read_tail(&log, 0).unwrap(), "");
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn read_tail_reports_unreadable_files() {
+        let root = scratch_dir("missing");
+        assert!(read_tail(&root.join("nope.log"), 10).is_err());
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn classpath_separator_matches_the_platform() {
+        let expected = if cfg!(windows) { ";" } else { ":" };
+        assert_eq!(classpath_separator(), expected);
+    }
+
+    #[test]
+    fn latest_game_log_picks_the_newest_log_file() {
+        let root = scratch_dir("logs");
+        let instance = instance_at(&root);
+        assert!(latest_game_log(&instance).is_none());
+        let logs = instance.logs_directory();
+        std::fs::create_dir_all(&logs).unwrap();
+        std::fs::write(logs.join("2026-01-01-1.log"), "old").unwrap();
+        std::thread::sleep(Duration::from_millis(20));
+        std::fs::write(logs.join("2026-01-01-2.log"), "new").unwrap();
+        std::fs::write(logs.join("notes.txt"), "ignore me").unwrap();
+        assert_eq!(
+            latest_game_log(&instance).unwrap().file_name().unwrap(),
+            "2026-01-01-2.log"
+        );
+        std::fs::remove_dir_all(&root).ok();
+    }
+}

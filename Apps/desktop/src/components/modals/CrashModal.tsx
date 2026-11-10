@@ -60,6 +60,16 @@ export function CrashModal({ instanceId }: CrashModalProps) {
     }
   }
 
+  async function copyDiagnostics() {
+    try {
+      const text = await api.diagnosticBundle(instanceId);
+      await navigator.clipboard.writeText(text);
+      toast("success", "诊断信息已复制", "已脱敏，可直接粘贴到 GitHub Issue");
+    } catch (cause) {
+      toast("error", "复制诊断信息失败", errorMessage(cause));
+    }
+  }
+
   const problems = diagnostics?.checks.filter((check) => check.status !== "pass") ?? [];
 
   return (
@@ -73,6 +83,9 @@ export function CrashModal({ instanceId }: CrashModalProps) {
         <div className="modal-footer__row">
           <p className="modal-footer__note">报告仅包含本实例的日志与诊断信息。</p>
           <div className="modal-footer__actions">
+            <Button variant="ghost" icon="activity" onClick={() => void copyDiagnostics()}>
+              复制诊断信息
+            </Button>
             <Button variant="ghost" icon="logs" onClick={() => void api.openLogsFolder()}>
               打开日志目录
             </Button>

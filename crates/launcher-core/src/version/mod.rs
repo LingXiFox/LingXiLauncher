@@ -440,3 +440,6 @@ pub fn requirement_from(java: Option<&JavaVersion>) -> JavaVersionRequirement {
         None => JavaVersionRequirement::default(),
     }
 }
+
+#[cfg(test)]
+mod tests;

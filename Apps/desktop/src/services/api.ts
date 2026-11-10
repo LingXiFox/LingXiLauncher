@@ -534,6 +534,8 @@ export const api = {
   diagnose: (instanceId: string) => call<DiagnosticsReport>("diagnose", { instanceId }),
   latestCrashReport: (instanceId: string) =>
     call<CrashReport | null>("latest_crash_report", { instanceId }),
+  diagnosticBundle: (instanceId: string) =>
+    call<string>("diagnostic_bundle", { instanceId }),
 };
 
 /* ------------------------------------------------------------------ */

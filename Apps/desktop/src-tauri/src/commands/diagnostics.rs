@@ -1,5 +1,6 @@
 use launcher_core::diagnostics::{
     latest_crash_summary, CrashDiagnosticSeverity, CrashDiagnosticsService, CrashReportSummary,
+    DiagnosticRedactor,
 };
 use launcher_core::models::account::ActiveAccountStore;
 use launcher_core::performance::SystemProfile;
@@ -328,4 +329,141 @@ pub fn latest_crash_report(
     Ok(latest_crash_summary(&instance)
         .map_err(command_error)?
         .map(CrashReportView::from))
+}
+
+fn last_lines(text: &str, max: usize) -> String {
+    let lines: Vec<&str> = text.lines().collect();
+    let start = lines.len().saturating_sub(max);
+    lines[start..].join("\n")
+}
+
+/// Builds a redacted, issue-ready text block describing the launcher, the
+/// machine, the instance and the most recent failure. Tokens, cookies and
+/// home-directory names are stripped before the text leaves the launcher.
+#[tauri::command]
+pub fn diagnostic_bundle(state: State<'_, AppState>, instance_id: String) -> CommandResult<String> {
+    let instance = state.instances.load(&instance_id).map_err(command_error)?;
+    let profile = SystemProfile::detect(&state.layout.data_root);
+    let settings = state.settings_snapshot();
+    let (loader, loader_version) =
+        super::loader_from_version(instance.manifest.version_id.as_deref().unwrap_or_default());
+    let memory = instance
+        .manifest
+        .memory_mib
+        .unwrap_or(settings.default_memory_mib);
+    let checks = vec![
+        check_java(&state, &instance),
+        check_game_files(&state, &instance),
+        check_memory(&state, &instance),
+        check_disk(&state),
+        check_account(&state),
+        check_logs(&state, &instance),
+    ];
+    let java_detail = check_java(&state, &instance)
+        .detail
+        .unwrap_or_else(|| "未检测到可用 Java".into());
+
+    let mut out: Vec<String> = Vec::new();
+    out.push("## 灵曦启动器诊断信息".into());
+    out.push(String::new());
+    out.push(format!(
+        "- 启动器版本：{} ({})",
+        env!("CARGO_PKG_VERSION"),
+        if cfg!(debug_assertions) {
+            "debug"
+        } else {
+            "release"
+        }
+    ));
+    out.push(format!(
+        "- 操作系统：{} {} · {} 核",
+        profile.os, profile.arch, profile.cpu_cores
+    ));
+    out.push(format!("- CPU：{}", profile.cpu_brand));
+    out.push(format!(
+        "- 内存：物理 {} MiB，数据目录所在磁盘剩余 {} MiB",
+        profile.physical_memory_mib, profile.disk_free_mib
+    ));
+    out.push(String::new());
+    out.push("### 实例".into());
+    out.push(format!(
+        "- 名称：{} ({})",
+        instance.manifest.display_name,
+        instance.id()
+    ));
+    out.push(format!(
+        "- Minecraft：{}",
+        instance
+            .manifest
+            .game_version
+            .as_deref()
+            .or(instance.manifest.version_id.as_deref())
+            .unwrap_or("未设置")
+    ));
+    out.push(match (&loader, &loader_version) {
+        (Some(loader), Some(version)) => format!("- 加载器：{loader} {version}"),
+        _ => "- 加载器：原版".to_string(),
+    });
+    out.push(format!("- 内存分配：{memory} MiB"));
+    out.push(format!("- Java：{java_detail}"));
+
+    out.push(String::new());
+    out.push("### 健康检查".into());
+    for check in &checks {
+        let status = match check.status.as_str() {
+            "pass" => "通过",
+            "warn" => "注意",
+            _ => "失败",
+        };
+        out.push(format!(
+            "- [{status}] {}：{}",
+            check.label,
+            check.detail.clone().unwrap_or_default()
+        ));
+    }
+
+    out.push(String::new());
+    out.push("### 最近崩溃".into());
+    match latest_crash_summary(&instance).ok().flatten() {
+        Some(crash) => {
+            if let Some(time) = crash.occurred_at {
+                out.push(format!("- 时间：{time}"));
+            }
+            out.push(format!("- 原因：{}", crash.reason));
+            if !crash.description.trim().is_empty() && crash.description != crash.reason {
+                out.push(format!("- 描述：{}", crash.description));
+            }
+            if let Some(path) = crash.file_path.as_deref() {
+                out.push(format!("- 报告：{path}"));
+            }
+            if let Some(stack) = crash.stack_trace.as_deref() {
+                out.push("- 堆栈（尾部）：".into());
+                out.push(String::new());
+                for line in last_lines(stack, 30).lines() {
+                    out.push(format!("    {line}"));
+                }
+            }
+        }
+        None => out.push("- 没有找到崩溃报告".into()),
+    }
+
+    if let Some(log) = launcher_core::launch::latest_game_log(&instance) {
+        if let Ok(text) = launcher_core::launch::read_tail(&log, 40) {
+            out.push(String::new());
+            out.push("### 最近日志（尾部 40 行）".into());
+            out.push(String::new());
+            for line in text.lines() {
+                out.push(format!("    {line}"));
+            }
+        }
+    }
+
+    out.push(String::new());
+    out.push("### 提交反馈".into());
+    out.push(
+        "把以上内容粘贴到 https://github.com/LingXiFox/LingXiLauncher/issues/new ，并说明当时在做什么、问题能否复现。"
+            .into(),
+    );
+
+    Ok(DiagnosticRedactor::redact(&out.join("\n")))
 }

@@ -180,7 +180,7 @@ pub struct Extract {
     pub exclude: Vec<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ArgumentEntry {
     Plain(String),
     Conditional {
@@ -285,7 +285,7 @@ pub enum RuleAction {
     Disallow,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Rule {
     pub action: RuleAction,
@@ -295,7 +295,7 @@ pub struct Rule {
     pub features: Option<BTreeMap<String, bool>>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct RuleOs {
     #[serde(default)]
@@ -308,7 +308,7 @@ pub struct RuleOs {
     pub version_range: Option<VersionRange>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct VersionRange {
     #[serde(default)]
