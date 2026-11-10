@@ -20,6 +20,7 @@
 - `node scripts/release/version.mjs check v0.10.0-rc.1` 输出 `version: 0.10.0-rc.1`，三处清单一致。
 - tag 命名 `v` + 版本号；`release.yml` 的 quality-gate 与 publish 都做该断言，tag 与清单不一致会直接失败。
 - Windows 安装包的版本资源由 `scripts/release/version.mjs wix-config` 生成 `0.10.0.0`（Windows 版本资源只接受纯数字），文件名仍带 `0.10.0-rc.1`。
+- rpm 打包器拒绝预发布后缀，Linux 先出 AppImage/deb（0.10.0-rc.1），再用 `scripts/release/version.mjs rpm-config` 生成的 `{"version":"0.10.0"}` 覆盖层单独构建 rpm；rpm 元数据是 0.10.0，文件名仍带 `0.10.0-rc.1`。
 
 ## 3. 质量门禁（本机实测）
 

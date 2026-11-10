@@ -159,6 +159,12 @@ jobs:
         if: runner.os == 'Windows'
         run: node scripts/release/version.mjs wix-config "${{ runner.temp }}/wix.json"
 
+      # The rpm bundler rejects prerelease suffixes, so rpm is built from an
+      # overlay config with the numeric version; deb and AppImage keep rc.1.
+      - name: Derive numeric rpm version
+        if: runner.os == 'Linux'
+        run: node scripts/release/version.mjs rpm-config "${{ runner.temp }}/rpm.json"
+
       - name: Build installers (Windows)
         if: runner.os == 'Windows'
         working-directory: Apps/desktop
@@ -172,7 +178,13 @@ jobs:
           # bundler ad-hoc sign the .app so resources are sealed; without it the
           # artifact keeps only the linker signature and fails Gatekeeper.
           APPLE_SIGNING_IDENTITY: ${{ runner.os == 'macOS' && '-' || '' }}
-        run: pnpm tauri build --ci
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            pnpm tauri build --ci --bundles appimage,deb
+            pnpm tauri build --ci --bundles rpm --config "$RUNNER_TEMP/rpm.json"
+          else
+            pnpm tauri build --ci
+          fi
 
       - name: Verify bundled macOS version
         if: runner.os == 'macOS'

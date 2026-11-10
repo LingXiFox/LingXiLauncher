@@ -8,6 +8,7 @@
 // Usage:
 //   node scripts/release/version.mjs check [vX.Y.Z-pre]
 //   node scripts/release/version.mjs wix-config <output.json>
+//   node scripts/release/version.mjs rpm-config <output.json>
 //   node scripts/release/version.mjs numeric
 
 import { readFile, writeFile, mkdir } from "node:fs/promises";
@@ -88,6 +89,16 @@ async function wixConfig(output) {
   console.log(`wix version: ${numeric}.0 -> ${output}`);
 }
 
+async function rpmConfig(output) {
+  const numeric = numericVersion(await readWorkspaceVersion());
+  // The rpm bundler rejects prerelease suffixes in the package version. The rpm
+  // metadata carries the numeric version while the file name keeps the rc tag.
+  const config = { version: numeric };
+  await mkdir(path.dirname(path.resolve(output)), { recursive: true });
+  await writeFile(output, JSON.stringify(config, null, 2) + "\n");
+  console.log(`rpm version: ${numeric} -> ${output}`);
+}
+
 const [command = "check", argument] = process.argv.slice(2);
 switch (command) {
   case "check":
@@ -99,6 +110,13 @@ switch (command) {
       process.exit(1);
     }
     await wixConfig(argument);
+    break;
+  case "rpm-config":
+    if (!argument) {
+      console.error("rpm-config requires an output path");
+      process.exit(1);
+    }
+    await rpmConfig(argument);
     break;
   case "numeric":
     console.log(numericVersion(await readWorkspaceVersion()));
