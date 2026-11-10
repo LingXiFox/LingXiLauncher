@@ -31,6 +31,14 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
     "category": "Game",
     "shortDescription": "A native Minecraft launcher",
     "longDescription": "LingXi Launcher: instances, Microsoft sign-in, Fabric and NeoForge, mods and performance tuning."
