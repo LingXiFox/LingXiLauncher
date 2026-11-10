@@ -2,8 +2,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use launcher_core::install::{
-    CancelFlag, DownloadSourcePolicy, InstallProgressEvent, ProgressSink, SharedProgress,
-    TrustedMirrorConfiguration, VanillaInstaller,
+    CancelFlag, DownloadConfiguration, DownloadSourcePolicy, InstallProgressEvent, LoaderInstaller,
+    ProgressSink, SharedProgress, TrustedMirrorConfiguration, VanillaInstaller,
 };
 use launcher_core::{Error, GameDataLayout, PlatformContext, Result, Runtime};
 use launcher_platform::native_runtime;
@@ -63,6 +63,15 @@ impl Context {
             self.source,
             self.mirror.clone(),
         )
+    }
+
+    pub fn loader_installer(&self) -> Result<LoaderInstaller> {
+        Ok(LoaderInstaller::new(self.layout.clone())?.with_downloads(
+            self.platform.clone(),
+            self.source,
+            self.mirror.clone(),
+            DownloadConfiguration::default(),
+        ))
     }
 
     pub fn progress(&self) -> SharedProgress {

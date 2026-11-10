@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use launcher_core::install::{
-    DownloadConfiguration, InstallReport, LoaderInstallResult, LoaderInstaller, VanillaInstaller,
+    DownloadConfiguration, InstallReport, LoaderInstallResult, VanillaInstaller,
 };
 use launcher_core::java::JavaManager;
 use launcher_core::models::instance::{Instance, InstanceRepository};
@@ -47,7 +47,7 @@ pub async fn install(context: &Context, action: InstallAction) -> Result<()> {
             let instance =
                 prepare_instance(&repository, &instance, &version, name.as_deref(), update)?;
             ensure_vanilla(context, &version).await?;
-            let installer = LoaderInstaller::new(context.layout.clone())?;
+            let installer = context.loader_installer()?;
             let result = installer
                 .install_fabric(
                     &instance,
@@ -83,7 +83,7 @@ pub async fn install(context: &Context, action: InstallAction) -> Result<()> {
                         .map(|runtime| runtime.executable)
                 })
                 .unwrap_or_else(|| PathBuf::from(if cfg!(windows) { "java.exe" } else { "java" }));
-            let installer = LoaderInstaller::new(context.layout.clone())?;
+            let installer = context.loader_installer()?;
             let result = installer
                 .install_neoforge(
                     &instance,

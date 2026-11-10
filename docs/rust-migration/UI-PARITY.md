@@ -69,5 +69,7 @@ React 端使用 Tauri 命令与 `AppStore`，没有 mock 数据。所有页面�
 | 实例工具 · 世界与备份 | ![世界与备份](screenshots/tools-worlds.png) |
 | 实例工具 · 崩溃诊断 | ![崩溃诊断](screenshots/tools-diagnostics.png) |
 | 崩溃报告 | ![崩溃报告](screenshots/crash.png) |
+| 打包后的应用 | ![打包应用](screenshots/packaged-app.png) |
 
+新旧界面并排对比见 [VISUAL-COMPARISON.md](VISUAL-COMPARISON.md)。
 截图验证了版本清单加载（922 个版本）、实例卡片布局、真实 Modrinth 更新查询、真实 options.txt 编辑界面，以及基于真实崩溃日志的 OOM 诊断。mods-search.png 搜索框为空，因为 WebView 自动化注入没有让 React 受控输入生效，搜索请求由代码路径保证但未通过截图验证。

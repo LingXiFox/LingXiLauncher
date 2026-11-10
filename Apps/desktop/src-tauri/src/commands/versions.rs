@@ -2,7 +2,6 @@ use launcher_core::install::models::{
     CancelFlag, DownloadSourcePolicy, InstallReport, SharedProgress,
 };
 use launcher_core::install::vanilla::VanillaInstaller;
-use launcher_core::install::LoaderInstaller;
 use launcher_core::java::JavaManager;
 use launcher_core::models::version::VersionType;
 use launcher_core::paths::PathSafety;
@@ -118,7 +117,7 @@ pub async fn list_loader_versions(
     loader: String,
     game_version: String,
 ) -> CommandResult<Vec<LoaderVersionView>> {
-    let installer = LoaderInstaller::new(state.layout.clone()).map_err(command_error)?;
+    let installer = crate::commands::loader_installer(&state)?;
     let versions = match loader.as_str() {
         "fabric" => installer.fabric_versions(&game_version).await,
         "neoforge" => installer.neoforge_versions(&game_version).await,
@@ -145,7 +144,7 @@ pub async fn install_loader(
     loader_version: Option<String>,
 ) -> CommandResult<launcher_core::install::LoaderInstallResult> {
     let instance = state.instances.load(&instance_id).map_err(command_error)?;
-    let installer = LoaderInstaller::new(state.layout.clone()).map_err(command_error)?;
+    let installer = crate::commands::loader_installer(&state)?;
     let progress: SharedProgress = TauriProgress::shared(app);
     match loader.as_str() {
         "fabric" => installer

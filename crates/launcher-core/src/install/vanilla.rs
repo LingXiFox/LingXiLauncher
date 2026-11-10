@@ -10,6 +10,7 @@ use serde::Deserialize;
 use crate::error::{Error, Result};
 use crate::launch::native_artifact;
 use crate::layout::{ensure_dir, GameDataLayout};
+use crate::manifest::ManifestService;
 use crate::models::launch::LaunchDiagnostic;
 use crate::models::version::Artifact;
 use crate::platform::PlatformContext;
@@ -66,8 +67,13 @@ impl VanillaInstaller {
         self
     }
 
-    /// Builds the complete download plan. Version metadata must already be cached.
+    /// Builds the complete download plan, fetching version metadata when needed.
     pub async fn plan(&self, version_id: &str) -> Result<VanillaInstallPlan> {
+        if !self.layout.version_json(version_id)?.is_file() {
+            ManifestService::new(self.layout.clone())?
+                .metadata_by_id(version_id)
+                .await?;
+        }
         let version = VersionResolver.resolve(version_id, &self.layout.game_root)?;
         let mut tasks = Vec::new();
         self.add_client_jar(&version, &mut tasks)?;

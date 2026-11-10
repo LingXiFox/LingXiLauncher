@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDateTime, Utc};
 use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::error::{Error, Result};
@@ -12,6 +12,26 @@ pub enum VersionType {
     Snapshot,
     OldBeta,
     OldAlpha,
+}
+
+fn deserialize_optional_datetime<'de, D>(
+    deserializer: D,
+) -> std::result::Result<Option<DateTime<Utc>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = Option::<String>::deserialize(deserializer)?;
+    let Some(text) = value else {
+        return Ok(None);
+    };
+    let parsed = DateTime::parse_from_rfc3339(&text)
+        .map(|datetime| datetime.with_timezone(&Utc))
+        .or_else(|_| {
+            NaiveDateTime::parse_from_str(&text, "%Y-%m-%dT%H:%M:%S%.f")
+                .map(|datetime| datetime.and_utc())
+        })
+        .map_err(serde::de::Error::custom)?;
+    Ok(Some(parsed))
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -34,9 +54,13 @@ pub struct VersionSummary {
     pub url: String,
     #[serde(default)]
     pub sha1: String,
-    #[serde(default, rename = "releaseTime")]
+    #[serde(
+        default,
+        rename = "releaseTime",
+        deserialize_with = "deserialize_optional_datetime"
+    )]
     pub release_time: Option<DateTime<Utc>>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_optional_datetime")]
     pub time: Option<DateTime<Utc>>,
     #[serde(default, rename = "complianceLevel")]
     pub compliance_level: Option<u32>,
@@ -71,7 +95,11 @@ pub struct VersionMetadata {
     pub default_user_jvm: Option<Vec<ArgumentEntry>>,
     #[serde(default, rename = "minimumLauncherVersion")]
     pub minimum_launcher_version: Option<u32>,
-    #[serde(default, rename = "releaseTime")]
+    #[serde(
+        default,
+        rename = "releaseTime",
+        deserialize_with = "deserialize_optional_datetime"
+    )]
     pub release_time: Option<DateTime<Utc>>,
     #[serde(default, rename = "complianceLevel")]
     pub compliance_level: Option<u32>,
@@ -416,5 +444,14 @@ mod tests {
         assert_eq!(client.file.id, "client-1.21.2.xml");
         assert_eq!(client.file.path, "");
         assert_eq!(client.log_type, "log4j2-xml");
+    }
+
+    #[test]
+    fn neoforge_timestamp_without_offset_deserializes() {
+        let metadata: VersionMetadata = serde_json::from_str(
+            r#"{"id":"neoforge-21.11.48","releaseTime":"2026-10-15T01:40:32.034268352"}"#,
+        )
+        .expect("naive loader timestamp should parse as UTC");
+        assert!(metadata.release_time.is_some());
     }
 }

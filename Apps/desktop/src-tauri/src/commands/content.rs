@@ -3,7 +3,6 @@ use std::path::Path;
 
 use launcher_core::install::models::{CancelFlag, SharedProgress};
 use launcher_core::install::vanilla::VanillaInstaller;
-use launcher_core::install::LoaderInstaller;
 use launcher_core::java::JavaManager;
 use launcher_core::modpack;
 use launcher_core::modrinth::{ModrinthClient, SearchQuery};
@@ -329,7 +328,7 @@ pub async fn import_mrpack(
             .map_err(command_error)?;
     }
     if let Some(loader) = manifest.loader.as_ref() {
-        let installer = LoaderInstaller::new(state.layout.clone()).map_err(command_error)?;
+        let installer = crate::commands::loader_installer(&state)?;
         match loader.kind.modrinth_loader() {
             "fabric" => {
                 installer

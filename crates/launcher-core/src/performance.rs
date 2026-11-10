@@ -642,6 +642,7 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
     Ok(())
 }
 
+#[cfg_attr(not(any(target_os = "macos", target_os = "windows")), allow(dead_code))]
 fn command_stdout(program: &str, args: &[&str]) -> Option<String> {
     let output = Command::new(program).args(args).output().ok()?;
     if !output.status.success() {
@@ -655,6 +656,7 @@ fn command_stdout(program: &str, args: &[&str]) -> Option<String> {
     }
 }
 
+#[cfg_attr(not(any(target_os = "macos", target_os = "windows")), allow(dead_code))]
 fn clean_brand(text: &str) -> Option<String> {
     text.lines()
         .map(|line| line.trim().trim_matches('\0').trim())

@@ -7,9 +7,14 @@ use std::process::Stdio;
 use serde::Deserialize;
 
 use crate::error::{Error, Result};
-use crate::install::models::{CancelFlag, InstallProgressEvent, SharedProgress};
+use crate::install::models::{
+    CancelFlag, DownloadConfiguration, DownloadSourcePolicy, InstallProgressEvent, SharedProgress,
+    TrustedMirrorConfiguration,
+};
+use crate::install::VanillaInstaller;
 use crate::layout::{ensure_dir, GameDataLayout};
 use crate::models::instance::{Instance, InstanceRepository};
+use crate::platform::PlatformContext;
 
 pub const FABRIC_META: &str = "https://meta.fabricmc.net/v2";
 pub const NEOFORGE_MAVEN: &str = "https://maven.neoforged.net/releases";
@@ -42,6 +47,11 @@ pub struct LoaderInstallResult {
 
 #[derive(Debug, Deserialize)]
 struct FabricLoaderEntry {
+    loader: FabricLoaderInfo,
+}
+
+#[derive(Debug, Deserialize)]
+struct FabricLoaderInfo {
     version: String,
     stable: bool,
 }
@@ -49,6 +59,10 @@ struct FabricLoaderEntry {
 pub struct LoaderInstaller {
     layout: GameDataLayout,
     client: reqwest::Client,
+    platform: PlatformContext,
+    policy: DownloadSourcePolicy,
+    mirror: Option<TrustedMirrorConfiguration>,
+    configuration: DownloadConfiguration,
 }
 
 impl LoaderInstaller {
@@ -58,7 +72,31 @@ impl LoaderInstaller {
             .timeout(std::time::Duration::from_secs(60))
             .build()
             .map_err(|e| Error::Http(e.to_string()))?;
-        Ok(Self { layout, client })
+        Ok(Self {
+            layout,
+            client,
+            platform: PlatformContext::current(),
+            policy: DownloadSourcePolicy::Auto,
+            mirror: None,
+            configuration: DownloadConfiguration::default(),
+        })
+    }
+
+    /// Overrides the platform, source policy and download tuning used for
+    /// loader libraries. Fabric profiles reference Maven artifacts that are
+    /// not part of the vanilla installation.
+    pub fn with_downloads(
+        mut self,
+        platform: PlatformContext,
+        policy: DownloadSourcePolicy,
+        mirror: Option<TrustedMirrorConfiguration>,
+        configuration: DownloadConfiguration,
+    ) -> Self {
+        self.platform = platform;
+        self.policy = policy;
+        self.mirror = mirror;
+        self.configuration = configuration;
+        self
     }
 
     pub async fn fabric_versions(&self, game_version: &str) -> Result<Vec<LoaderVersion>> {
@@ -82,9 +120,9 @@ impl LoaderInstaller {
         Ok(entries
             .into_iter()
             .map(|entry| LoaderVersion {
-                version: entry.version,
+                version: entry.loader.version,
                 game_version: game_version.to_string(),
-                stable: entry.stable,
+                stable: entry.loader.stable,
             })
             .collect())
     }
@@ -155,6 +193,18 @@ impl LoaderInstaller {
         let temporary = target.with_extension("json.part");
         std::fs::write(&temporary, data)?;
         std::fs::rename(&temporary, &target)?;
+
+        // The Fabric profile adds loader libraries on top of vanilla. Download
+        // the merged dependency set before assigning the instance version.
+        VanillaInstaller::new(
+            self.layout.clone(),
+            self.platform.clone(),
+            self.policy,
+            self.mirror.clone(),
+        )
+        .with_configuration(self.configuration.clone())
+        .install(&version_id, progress, cancel)
+        .await?;
 
         let repository = InstanceRepository::new(self.layout.clone());
         let updated = repository.assign_version(instance, &version_id)?;
@@ -266,6 +316,12 @@ impl LoaderInstaller {
             phase: "loader".into(),
             message: "Running NeoForge installer".into(),
         });
+        // The NeoForge installer refuses to run without a launcher profile
+        // file, which vanilla installations only create on first launch.
+        let profiles = self.layout.game_root.join("launcher_profiles.json");
+        if !profiles.is_file() {
+            std::fs::write(&profiles, br#"{"profiles":{},"settings":{},"version":3}"#)?;
+        }
         let mut command = tokio::process::Command::new(java);
         command
             .arg("-jar")
@@ -285,11 +341,13 @@ impl LoaderInstaller {
             .await
             .map_err(|e| Error::JavaUnusable(e.to_string()))?;
         if !output.status.success() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
             let stderr = String::from_utf8_lossy(&output.stderr);
-            let tail: String = stderr
+            let combined = format!("{stdout}\n{stderr}");
+            let tail: String = combined
                 .lines()
                 .rev()
-                .take(8)
+                .take(12)
                 .collect::<Vec<_>>()
                 .into_iter()
                 .rev()

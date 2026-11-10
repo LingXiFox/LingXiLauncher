@@ -87,7 +87,7 @@ async fn install_loader(
     game_version: &str,
     loader: &modpack::ModpackLoader,
 ) -> Result<()> {
-    let installer = launcher_core::install::LoaderInstaller::new(context.layout.clone())?;
+    let installer = context.loader_installer()?;
     match loader.kind {
         ModpackLoaderKind::Fabric => {
             installer

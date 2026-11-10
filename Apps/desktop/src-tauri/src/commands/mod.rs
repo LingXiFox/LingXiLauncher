@@ -11,16 +11,35 @@ pub mod versions;
 
 use std::sync::Arc;
 
-use launcher_core::install::models::{InstallProgressEvent, ProgressSink};
+use launcher_core::install::models::{DownloadConfiguration, InstallProgressEvent, ProgressSink};
+use launcher_core::install::LoaderInstaller;
 use launcher_core::models::account::LocalOfflineAccount;
 use launcher_core::models::instance::{Instance, InstanceManifest};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 
+use crate::state::AppState;
 pub type CommandResult<T> = Result<T, String>;
 
 pub fn command_error(error: impl std::fmt::Display) -> String {
     error.to_string()
+}
+
+/// Builds a loader installer that also downloads the loader Maven artifacts
+/// merged into the generated version profile.
+pub fn loader_installer(state: &AppState) -> CommandResult<LoaderInstaller> {
+    let settings = state
+        .settings
+        .lock()
+        .map_err(|_| "设置状态不可用".to_string())?;
+    Ok(LoaderInstaller::new(state.layout.clone())
+        .map_err(command_error)?
+        .with_downloads(
+            state.platform.clone(),
+            settings.policy(),
+            settings.mirror(),
+            DownloadConfiguration::default(),
+        ))
 }
 
 #[derive(Debug, Clone, Serialize)]
