@@ -7,6 +7,7 @@
 - 安装包修复：`605a307` `fix: declare bundle icons for Linux and Windows installers`
 - Swift 历史备份：tag `swift-implementation-before-removal` → `6aae3fd`
 - 验收环境：macOS Apple Silicon，Java 27/26/21/17/8，Node 26，pnpm，Rust stable
+- Tauri CLI：`2.12.4`（`package.json` 精确锁定；运行时 `tauri 2.12.5`）
 - 状态日期：2026-11-10
 
 本报告只记录实际执行过的验证。没有执行的项目明确标为“未验证”，不以构建成功代替功能通过。
@@ -60,7 +61,7 @@
 | 5 | Windows 物理内存与平台功能 | 部分 | 三级 PowerShell/wmic/CIM 读取已实现；CI 交叉编译通过；无 Windows 真机运行 |
 | 6 | 统一 Rust/Tauri/前端/安装包版本 | 通过 | Cargo workspace、Tauri bundle、CLI 均为 0.10.0 |
 | 7 | 隔离目录真实安装启动 Vanilla/Fabric/NeoForge | 通过（到渲染线程） | 三种版本均安装成功并启动到 `Created atlas`；未进入世界/联机 |
-| 8 | Microsoft 正版登录与刷新令牌 | 未验证 | 需要真实账号与浏览器授权，本轮未执行 |
+| 8 | Microsoft 正版登录与刷新令牌 | 部分 | 2026-11-10 用 PKCE 请求 `consumers` 授权端点，返回 302 到 `login.live.com`，client_id、redirect_uri、scope 被接受；真实账号登录与令牌交换未执行 |
 | 9 | 新旧截图视觉对比 + GUI 自动化 | 部分 | 首页新旧并排见 `VISUAL-COMPARISON.md`；19 张新 UI 截图；`pnpm test:gui` 通过。旧版只能截首页；自动化是 Chrome CDP，不是 WebView 进程内 |
 | 10 | macOS .app/.dmg 与 CI Windows/Linux 安装包 | 通过（测试构建） | macOS 本地 `.dmg` ad-hoc 签名并通过 `hdiutil verify`；CI run `42763846132` 三平台打包全部 success，产出 `.dmg`、MSI/NSIS、AppImage/deb/rpm，均未正式签名 |
 | 11 | 更新验收报告，列真实通过/失败/未验证 | 通过 | 本报告与 `MIGRATION-STATUS.md` |

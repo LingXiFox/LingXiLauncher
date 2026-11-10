@@ -20,7 +20,7 @@
 | 真实 NeoForge 启动 | 通过（到渲染线程） | NeoForge 21.11.48 + 1.21.11，日志出现 `Created atlas` |
 | macOS 安装包 | 通过 | `.app` 已 ad-hoc 签名并启动；`.dmg` 已生成并通过 `hdiutil verify` |
 | Windows/Linux 安装包 | 通过（CI 测试构建） | CI run 42763846132 产出 NSIS/MSI、AppImage/deb/rpm；未在 Windows/Linux 真机安装运行 |
-| Microsoft 真机登录 | 未验证 | 需要真实账号与浏览器授权，本轮未执行 |
+| Microsoft 真机登录 | 部分 | 授权端点已接受注册与 PKCE 参数；真实账号登录/刷新未执行 |
 | 进入世界/联机/长时间稳定性 | 未验证 | 只验证到主菜单渲染线程 |
 | Tauri WebView 进程内自动化 | 未验证 | 已完成 Chrome CDP 的前端冒烟，不是 WebView 内驱动 |
 
@@ -63,7 +63,8 @@ cd Apps/desktop && pnpm typecheck && pnpm build && pnpm test:gui
 - `session_for` 优先使用内存缓存，其次读取刷新令牌；刷新后保留新 refresh token。
 - `sign_out` 删除钥匙串令牌、账户记录与内存缓存。
 - GUI 启动只允许 Microsoft 账户；本地离线账户在桌面端提示改用 CLI：`lingxi launch --identity local:<name>`。
-- **未验证**：真实 Microsoft 账号登录、令牌刷新、过期/撤销场景。
+- 2026-11-10 授权端点探测：PKCE `S256` 请求返回 302 到 `login.live.com`，client_id、redirect_uri、`XboxLive.signin offline_access` 被接受。
+- **未验证**：真实 Microsoft 账号登录、令牌交换/刷新、过期/撤销场景。
 
 ## 3. 真实游戏安装与启动
 
