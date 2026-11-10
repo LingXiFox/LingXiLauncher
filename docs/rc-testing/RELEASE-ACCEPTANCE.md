@@ -48,10 +48,22 @@
 构建要点：未配置 Developer ID 时会产出只有链接器签名的坏包（`spctl` 报 `code has no resources but signature indicates they must be present`），
 因此 `release.yml` 在 macOS 构建步骤设置 `APPLE_SIGNING_IDENTITY: "-"` 让打包器做 ad-hoc 签名，并在打包后校验 `Sealed Resources`。
 
-## 5. macOS 完整启动验证
+## 5. 性能实测（macOS 本机，Apple Silicon）
 
-（待补录）
+| 指标 | 数值 | 测量方式 |
+| --- | --- | --- |
+| 冷启动到主窗口 | 0.78 s（首次）/ 0.27 s（随后两次） | `open -a` 到 System Events 报出首个窗口的时间差；首次含 LaunchServices 缓存构建 |
+| 主进程常驻内存 | 89.3–89.6 MB | 窗口就绪 20 s 后 `ps -o rss` |
+| 含 WebContent 总内存 | 146.7–150.2 MB | 主进程 + 本次启动新出现的 WebKit WebContent 进程 RSS 之和 |
+| 空闲 CPU | 0.0 / 0.0 / 0.1 % | 空闲 20 s 后每 5 s 采样一次，三次 |
+| 主进程线程数 | 16 | `ps -M` |
+| 前端资源 | JS 286.77 kB（gzip 87.17 kB）、CSS 80.62 kB（gzip 13.64 kB） | Vite 生产构建输出 |
+| `.app` / `.dmg` | 11.30 MiB / 6.51 MiB | 打包输出 |
 
+测量条件是本机、无其他负载；未与旧 Swift 版做同机对比，因此这些数字只作为 RC 基线，不用于跨版本结论。
+
+启动游戏时的下载吞吐另作记录：官方源在本机约 100 KB/s（24 并发），1.21.11 的 501 MB 资源需要较长时间，属于网络条件而非启动器缺陷；
+CLI 支持 `--concurrency` 与 `--mirror-config`，GUI 在设置页可填镜像配置路径。
 ## 6. 未验证项与风险
 
 | 项 | 状态 | 说明 |
@@ -61,6 +73,8 @@
 | Apple Developer ID 签名与公证 | 未配置 | 仓库无证书，产物为 ad-hoc 签名 |
 | Windows Authenticode 签名 | 未配置 | 产物未签名，SmartScreen 会拦截 |
 | Microsoft 真实账号登录 | 需真实凭据 | 授权链路代码完整，本轮未用真实账号跑通全流程 |
+| macOS 完整进入世界 | 本轮跳过 | 官方源下载 1.21.11 约 501 MB、本机约 100 KB/s，按主人要求停止等待；此前验证已到渲染线程初始化（`Created atlas`） |
+| macOS 启动器本体 GUI | 已验证 | 打好的 `.app` 直接启动到主界面；`pnpm test:gui` 覆盖导航、实例详情、模组/光影/安装弹窗、设置校验、账户、日志 |
 
 ## 7. 发布流程（`release.yml`）
 
