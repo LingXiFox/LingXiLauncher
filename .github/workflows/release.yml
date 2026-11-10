@@ -1,5 +1,7 @@
 name: Release
 
+# Tag pushes build, verify and publish a GitHub pre-release.
+# Manual runs default to a validation build: artifacts only, never a release.
 on:
   push:
     tags:
@@ -18,9 +20,78 @@ concurrency:
   group: release-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 
+env:
+  CARGO_TERM_COLOR: always
+
 jobs:
+  quality-gate:
+    name: Quality gate
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libgtk-3-dev
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: Apps/desktop/pnpm-lock.yaml
+
+      - name: Install frontend dependencies
+        working-directory: Apps/desktop
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify version consistency
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            node scripts/release/version.mjs check "${GITHUB_REF_NAME}"
+          else
+            node scripts/release/version.mjs check
+          fi
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Tests
+        run: cargo test --workspace
+
+      - name: Frontend typecheck
+        working-directory: Apps/desktop
+        run: pnpm typecheck
+
+      - name: Frontend build
+        working-directory: Apps/desktop
+        run: pnpm build
+
   build:
     name: Package ${{ matrix.label }}
+    needs: quality-gate
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     strategy:
@@ -29,10 +100,13 @@ jobs:
         include:
           - os: macos-15
             label: macOS ARM64
+            platform: macos
           - os: windows-2022
             label: Windows x64
+            platform: windows
           - os: ubuntu-22.04
             label: Linux x64
+            platform: linux
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -52,11 +126,10 @@ jobs:
       - name: Cache Rust
         uses: Swatinem/rust-cache@v2
 
-
       - name: Install pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 9
+          version: 9.15.9
 
       - name: Install Node.js
         uses: actions/setup-node@v4
@@ -73,33 +146,169 @@ jobs:
         working-directory: Apps/desktop
         run: pnpm exec tauri --version
 
-      - name: Build and package (validation)
-        if: ${{ inputs.validation_only }}
+      - name: GUI smoke test
+        if: runner.os == 'macOS'
         working-directory: Apps/desktop
+        run: |
+          pnpm build
+          pnpm test:gui
+
+      # Windows Installer needs a numeric product version; the prerelease
+      # suffix stays in the package file name and the release metadata.
+      - name: Derive numeric WiX version
+        if: runner.os == 'Windows'
+        run: node scripts/release/version.mjs wix-config "${{ runner.temp }}/wix.json"
+
+      - name: Build installers (Windows)
+        if: runner.os == 'Windows'
+        working-directory: Apps/desktop
+        run: pnpm tauri build --ci --config "${{ runner.temp }}/wix.json"
+
+      - name: Build installers
+        if: runner.os != 'Windows'
+        working-directory: Apps/desktop
+        env:
+          # No Developer ID certificate is provisioned. Setting "-" makes the
+          # bundler ad-hoc sign the .app so resources are sealed; without it the
+          # artifact keeps only the linker signature and fails Gatekeeper.
+          APPLE_SIGNING_IDENTITY: ${{ runner.os == 'macOS' && '-' || '' }}
         run: pnpm tauri build --ci
 
-      - name: Build and package (release)
-        if: ${{ !inputs.validation_only }}
-        uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          projectPath: Apps/desktop
-          tauriScript: pnpm tauri
-          tagName: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
-          releaseName: 'LingXi Launcher ${{ github.ref_name }}'
-          releaseBody: 'Rust + Tauri 2 release. See docs/rust-migration/MIGRATION-STATUS.md for verified scope.'
-          releaseDraft: true
-          prerelease: false
-          args: --ci
+      - name: Verify bundled macOS version
+        if: runner.os == 'macOS'
+        run: |
+          PLIST="target/release/bundle/macos/LingXi Launcher.app/Contents/Info.plist"
+          test -f "$PLIST"
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$PLIST"
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$PLIST"
+          APP="target/release/bundle/macos/LingXi Launcher.app"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          codesign -dv --verbose=2 "$APP" 2>&1 | grep -q 'Sealed Resources'
 
+      - name: Archive macOS app bundle
+        if: runner.os == 'macOS'
+        run: |
+          cd target/release/bundle/macos
+          ditto -c -k --sequesterRsrc --keepParent "LingXi Launcher.app" "LingXi Launcher.app.zip"
 
       - name: Upload packaged artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: lingxi-launcher-${{ matrix.os }}
-          path: |
-            target/release/bundle/**/*
-            Apps/desktop/src-tauri/target/release/bundle/**/*
-          if-no-files-found: ignore
+          name: bundle-${{ matrix.platform }}
+          path: target/release/bundle/**
+          if-no-files-found: error
           retention-days: 7
+
+  publish:
+    name: Publish GitHub pre-release
+    needs: [quality-gate, build]
+    # Only a tag whose three platform builds all succeeded becomes a release.
+    if: ${{ startsWith(github.ref, 'refs/tags/v') && (github.event_name == 'push' || inputs.validation_only == false) }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Download packaged artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: bundle-*
+          merge-multiple: true
+          path: dist
+
+      - name: Collect and verify installers
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
+          mkdir -p release
+
+          pick() {
+            local pattern="$1"
+            local file
+            file="$(find dist -type f -name "${pattern}" | head -n 1)"
+            if [ -z "${file}" ]; then
+              echo "error: no artifact matching ${pattern}" >&2
+              exit 1
+            fi
+            printf '%s' "${file}"
+          }
+
+          copy() {
+            local source="$1"
+            local target="release/$2"
+            if [ ! -s "${source}" ]; then
+              echo "error: ${source} is missing or empty" >&2
+              exit 1
+            fi
+            cp "${source}" "${target}"
+            local size
+            size="$(stat -c%s "${target}")"
+            if [ "${size}" -lt 100000 ]; then
+              echo "error: ${target} is suspiciously small (${size} bytes)" >&2
+              exit 1
+            fi
+            echo "${target}: ${size} bytes"
+          }
+
+          copy "$(pick '*.dmg')"        "LingXi-Launcher_${VERSION}_macos-aarch64.dmg"
+          copy "$(pick '*.app.zip')"    "LingXi-Launcher_${VERSION}_macos-aarch64.app.zip"
+          copy "$(pick '*.exe')"        "LingXi-Launcher_${VERSION}_windows-x64-setup.exe"
+          copy "$(pick '*.msi')"        "LingXi-Launcher_${VERSION}_windows-x64.msi"
+          copy "$(pick '*.AppImage')"   "LingXi-Launcher_${VERSION}_linux-x86_64.AppImage"
+          copy "$(pick '*.deb')"        "LingXi-Launcher_${VERSION}_linux-amd64.deb"
+          copy "$(pick '*.rpm')"        "LingXi-Launcher_${VERSION}_linux-x86_64.rpm"
+
+          # Every package must carry the release version in its file name.
+          for asset in release/*; do
+            case "${asset}" in
+              *.dmg|*.app.zip|*.exe|*.msi|*.AppImage|*.deb|*.rpm)
+                case "${asset}" in
+                  *"${VERSION}"*) ;;
+                  *)
+                    echo "error: ${asset} does not contain version ${VERSION}" >&2
+                    exit 1
+                    ;;
+                esac
+                ;;
+            esac
+          done
+
+      - name: Generate checksums
+        run: |
+          set -euo pipefail
+          cd release
+          sha256sum * > "SHA256SUMS-${VERSION}.txt"
+          sha256sum -c "SHA256SUMS-${VERSION}.txt"
+          cat "SHA256SUMS-${VERSION}.txt"
+
+      - name: Refuse to overwrite an existing release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if gh release view "${GITHUB_REF_NAME}" > /dev/null 2>&1; then
+            echo "error: release ${GITHUB_REF_NAME} already exists" >&2
+            exit 1
+          fi
+
+      - name: Publish pre-release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          NOTES=".github/release-notes/${GITHUB_REF_NAME}.md"
+          if [ ! -f "${NOTES}" ]; then
+            echo "error: missing release notes at ${NOTES}" >&2
+            exit 1
+          fi
+          gh release create "${GITHUB_REF_NAME}" \
+            --verify-tag \
+            --title "LingXi Launcher ${GITHUB_REF_NAME}" \
+            --notes-file "${NOTES}" \
+            --prerelease \
+            release/*
