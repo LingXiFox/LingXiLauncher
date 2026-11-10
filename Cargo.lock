@@ -1836,7 +1836,7 @@ dependencies = [
 
 [[package]]
 name = "launcher-auth"
-version = "0.10.0"
+version = "0.10.0-rc.1"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -1855,7 +1855,7 @@ dependencies = [
 
 [[package]]
 name = "launcher-cli"
-version = "0.10.0"
+version = "0.10.0-rc.1"
 dependencies = [
  "chrono",
  "clap",
@@ -1872,7 +1872,7 @@ dependencies = [
 
 [[package]]
 name = "launcher-core"
-version = "0.10.0"
+version = "0.10.0-rc.1"
 dependencies = [
  "chrono",
  "futures-util",
@@ -1894,7 +1894,7 @@ dependencies = [
 
 [[package]]
 name = "launcher-platform"
-version = "0.10.0"
+version = "0.10.0-rc.1"
 dependencies = [
  "base64 0.22.1",
  "launcher-core",
@@ -1969,7 +1969,7 @@ dependencies = [
 
 [[package]]
 name = "lingxi-desktop"
-version = "0.10.0"
+version = "0.10.0-rc.1"
 dependencies = [
  "chrono",
  "launcher-auth",
