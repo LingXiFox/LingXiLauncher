@@ -62,9 +62,9 @@ Swift 的 `ModpackRecord`（`schemaVersion` + `versionID` + `files[].byteCount`�
 ## 单向兼容边界
 
 - Rust 新安装或更新的整合包写 Rust 自有 `modpack.json` 结构，Swift 旧版不能反向读取。升级是单向的：旧数据 → Rust 可读；Rust 新数据不承诺旧 Swift 可读。
-- 设置：Swift 使用 `@AppStorage`，Rust 使用 `<dataRoot>/settings.json`。二者不共享键；首次运行 Rust 会使用默认设置，Java 路径可由用户重新选择或自动发现。
-- 性能报告：Rust 写入 `<dataRoot>/performance/` 自有报告结构；与 Swift 的历史报告尚未做字段级迁移，GUI 只展示 Rust 生成的报告。
-- 账户密钥：Microsoft 令牌仍写入系统凭据存储（macOS Keychain / Windows Credential Manager / Linux Secret Service），键名沿用 `launcher-auth` 的存储策略；未迁移 Swift 的 Keychain 服务名。
+- 设置：Swift 使用 `@AppStorage`，Rust 使用 `<dataRoot>/settings.json`。首次运行且没有 `settings.json` 时，macOS 读取 `com.lingxifox.LingXiLauncher` 的 `lingxi.*` 偏好并迁移；已有 Rust 设置不覆盖，损坏文件保留原文件。
+- 性能报告：Rust 写入 `<dataRoot>/performance/` 自有报告结构；Swift 旧报告位于 `<dataRoot>/performance/reports/*.json`，Rust 以只读方式解析并展示，不改写旧文件。
+- 账户密钥：Microsoft 令牌写入系统凭据存储（macOS Keychain / Windows DPAPI / Linux Secret Service）。macOS 兼容旧 Swift service `com.lingxifox.LingXiLauncher.microsoft` 与小写 UUID account；读取后写入新 service 并删除旧项。
 
 ## 测试
 

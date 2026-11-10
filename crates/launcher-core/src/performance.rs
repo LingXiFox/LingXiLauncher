@@ -900,4 +900,45 @@ mod tests {
         assert_eq!(recommendation.memory_mib, 1024);
         assert!(recommendation.jvm_args.is_empty());
     }
+    #[test]
+    fn legacy_swift_benchmark_is_read_without_rewriting() {
+        let root = std::env::temp_dir().join(format!(
+            "lingxi-performance-legacy-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        let layout = GameDataLayout::new(root.join("game"), root.join("data"));
+        let instance = InstanceRepository::new(layout.clone())
+            .create("legacy", "Legacy", Some("1.21.11"))
+            .expect("instance");
+        let reports = layout.data_root.join("performance").join("reports");
+        std::fs::create_dir_all(&reports).expect("reports dir");
+        let path = reports.join("legacy.json");
+        let payload = r#"{
+            "id": "legacy-1",
+            "createdAt": "2026-01-01T00:00:00Z",
+            "instanceId": "legacy",
+            "minecraftVersion": "1.21.11",
+            "loader": "fabric",
+            "aggregate": {
+                "samples": 3,
+                "startupAverage": 1234.5,
+                "cpuAverage": 42.0,
+                "residentPeakBytes": 123456
+            },
+            "notes": ["old"]
+        }"#;
+        std::fs::write(&path, payload).expect("write report");
+        let service = PerformanceService::new(layout);
+        let summaries = service
+            .list_legacy_reports_for(&instance)
+            .expect("legacy reports");
+        assert_eq!(summaries.len(), 1);
+        assert_eq!(summaries[0].id, "legacy-1");
+        assert_eq!(summaries[0].samples, 3);
+        assert_eq!(summaries[0].startup_average_ms, Some(1234.5));
+        assert_eq!(summaries[0].cpu_average, Some(42.0));
+        assert_eq!(summaries[0].resident_peak_bytes, Some(123456));
+        assert_eq!(std::fs::read_to_string(&path).expect("unchanged"), payload);
+        let _ = std::fs::remove_dir_all(root);
+    }
 }

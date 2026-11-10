@@ -8,7 +8,7 @@
 | 原版安装 | `install/vanilla.rs` | 安装向导 | `install vanilla` | 已实现；支持 official/mirror/auto/local-cache-only、并发与进度 |
 | Fabric 安装 | `install/loader.rs` | 安装向导 | `install fabric` | 已实现；默认最新 stable，可指定 loader |
 | NeoForge 安装 | `install/loader.rs` | 安装向导 | `install neoforge` | 已实现；需要 Java 21+ |
-| 游戏启动 | `launch.rs` | 首页启动、实例页启动 | `launch` | 已实现启动计划、身份、日志、退出码；真实游戏启动尚未在本机验证 |
+| 游戏启动 | `launch.rs` | 首页启动、实例页启动 | `launch` | 已实现启动计划、身份、日志、退出码；Vanilla/Fabric/NeoForge 已真实启动到渲染线程，未进入世界或联机 |
 | Java 管理 | `java.rs` | 设置页 | `java list/install`、`doctor` | 已实现发现、检查、托管安装 |
 | 本地账户 | `models/account.rs` | 账户页 | `account local ...` | 已实现创建/删除/激活与离线 UUID |
 | Microsoft 登录 | `launcher-auth` | 账户页 | `account microsoft login/...` | 已实现 PKCE + loopback + 可取消登录；真实账号登录未在本次执行 |
@@ -38,8 +38,8 @@ Tauri 注册 75 个命令；前端 `api.ts` 实际调用 61 个。未直接调�
 
 ## 明确未验证
 
-- 真实 Minecraft 客户端启动、进入世界、渲染与多人联机。
+- 进入世界、多人联机与长时间稳定性。
 - Microsoft 真实账号登录与令牌刷新。
-- Modrinth 真实下载在受限网络下的完整性（接口解析已用真实 payload 单测）。
-- Tauri Release 安装包在 macOS/Windows/Linux 的产物验证。
-- GUI 自动化测试（当前没有测试框架依赖）。
+- 资源包/光影的 Modrinth 真实下载在受限网络下的完整性。
+- Tauri Release 安装包在 Windows/Linux 的产物验证（CI 只构建可执行文件）。
+- Tauri WebView 进程内 GUI 自动化；已完成前端构建产物的 Chrome CDP 冒烟（`pnpm test:gui`）。
