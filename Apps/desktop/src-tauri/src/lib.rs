@@ -1,10 +1,16 @@
 mod commands;
+mod logging;
 mod state;
 
 use state::AppState;
 
 pub fn run() {
     let state = AppState::new().expect("failed to initialise launcher state");
+    logging::init(&state.layout);
+    logging::info(format!(
+        "launcher started: data root {}",
+        state.layout.data_root.display()
+    ));
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -43,6 +49,8 @@ pub fn run() {
             commands::versions::list_versions,
             commands::versions::refresh_versions,
             commands::versions::install_version,
+            commands::versions::cancel_install,
+            commands::versions::list_install_tasks,
             commands::versions::list_loader_versions,
             commands::versions::install_loader,
             commands::accounts::list_local_accounts,

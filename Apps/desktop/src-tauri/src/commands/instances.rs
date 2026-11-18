@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use launcher_core::error::Error;
 use launcher_core::paths::PathSafety;
@@ -69,22 +69,64 @@ pub fn update_instance(
     Ok(InstanceView::from(instance))
 }
 
-#[tauri::command]
-pub fn delete_instance(state: State<'_, AppState>, id: String) -> CommandResult<()> {
-    let instance = state.instances.load(&id).map_err(|e| e.to_string())?;
-    let root = state.layout.instances_directory();
-    let directory = instance
-        .directory
+/// Verify that `directory` is exactly `<root>/<name>` and nothing else.
+/// Refuses symlinks pointing elsewhere, shared parents and mismatched names so
+/// a corrupted manifest can never redirect a delete at unrelated data.
+fn checked_instance_path(root: &Path, directory: &Path, name: &str) -> CommandResult<PathBuf> {
+    let root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    let directory = directory
         .canonicalize()
-        .unwrap_or_else(|_| instance.directory.clone());
-    let root = root.canonicalize().unwrap_or(root);
+        .unwrap_or_else(|_| directory.to_path_buf());
     if directory == root || !directory.starts_with(&root) {
         return Err("拒绝删除实例目录之外的路径".into());
     }
-    if directory.file_name().and_then(|value| value.to_str()) != Some(instance.id()) {
+    if directory.file_name().and_then(|value| value.to_str()) != Some(name) {
         return Err("实例目录与清单不一致，已拒绝删除".into());
     }
-    std::fs::remove_dir_all(&directory).map_err(|e| e.to_string())?;
+    Ok(directory)
+}
+
+/// P1-7: deleting an instance must handle the instance directory and its
+/// isolated game directory as one lifecycle unit, and must never destroy the
+/// player's worlds by accident. `keep_saves` defaults to true: the `saves`
+/// folder is moved into `<dataRoot>/kept-saves/<id>-<timestamp>/` first.
+#[tauri::command]
+pub fn delete_instance(
+    state: State<'_, AppState>,
+    id: String,
+    keep_saves: Option<bool>,
+) -> CommandResult<()> {
+    let instance = state.instances.load(&id).map_err(|e| e.to_string())?;
+    let keep_saves = keep_saves.unwrap_or(true);
+    let directory = checked_instance_path(
+        &state.layout.instances_directory(),
+        &instance.directory,
+        instance.id(),
+    )?;
+    let game_directory = checked_instance_path(
+        &state.layout.data_root.join(".minecraft").join("versions"),
+        &instance.game_directory,
+        instance.id(),
+    )?;
+    if keep_saves {
+        let saves = game_directory.join("saves");
+        if saves.is_dir() {
+            let stamp = chrono::Utc::now().format("%Y%m%d-%H%M%S");
+            let target =
+                state
+                    .layout
+                    .kept_saves_directory()
+                    .join(format!("{}-{}", instance.id(), stamp));
+            launcher_core::layout::ensure_dir(&target).map_err(|e| e.to_string())?;
+            copy_tree(&saves, &target.join("saves"))?;
+        }
+    }
+    if directory.is_dir() {
+        std::fs::remove_dir_all(&directory).map_err(|e| e.to_string())?;
+    }
+    if game_directory.is_dir() {
+        std::fs::remove_dir_all(&game_directory).map_err(|e| e.to_string())?;
+    }
     Ok(())
 }
 

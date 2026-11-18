@@ -28,6 +28,7 @@ import {
   type MicrosoftAccount,
   type VersionFilter,
 } from "../services/api";
+import { applyInstallEvent } from "../services/progress";
 import type { ToastItem, ToastTone } from "../components/Toast";
 
 export type Section = "home" | "instances" | "downloads" | "accounts" | "logs" | "settings";
@@ -114,7 +115,7 @@ export interface AppStore {
   refreshGameStatus: () => Promise<void>;
   createInstance: (name: string, versionId: string) => Promise<GameInstance | null>;
   updateInstance: (id: string, patch: { memoryMiB?: number; jvmArguments?: string }) => Promise<boolean>;
-  deleteInstance: (id: string) => Promise<boolean>;
+  deleteInstance: (id: string, keepSaves?: boolean) => Promise<boolean>;
   copyInstance: (id: string) => Promise<GameInstance | null>;
   launchInstance: (id: string) => Promise<boolean>;
   stopGame: () => Promise<boolean>;
@@ -167,6 +168,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     typeof window.matchMedia === "function" ? window.matchMedia("(prefers-color-scheme: dark)").matches : true,
   );
 
+  // P1-5: which install task the current progress snapshot belongs to; events
+  // from any other task are ignored so two installs never share counters.
+  const installTaskId = useRef<string | null>(null);
   const toastId = useRef(0);
   const recentToasts = useRef(new Map<string, number>());
   const bootstrappedOnce = useRef(false);
@@ -337,7 +341,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
     }
 
-    void register(onInstallProgress((progress) => setInstalledProgress(progress)), (fn) => unlisten.push(fn));
+    void register(
+      onInstallProgress((event) => {
+        const taskId = event.taskId ?? null;
+        if (taskId !== null) {
+          if (installTaskId.current === null) {
+            installTaskId.current = taskId;
+          } else if (installTaskId.current !== taskId) {
+            // Another install task is reporting; keep this card untouched.
+            return;
+          }
+        }
+        setInstalledProgress((previous) => applyInstallEvent(previous, event));
+      }),
+      (fn) => unlisten.push(fn),
+    );
 
     void register(
       onGameExited((exit) => {
@@ -374,7 +392,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [toast]);
 
   /* Keep the install progress fresh when a new wizard starts. */
-  const resetInstallProgress = useCallback(() => setInstalledProgress(null), []);
+  const resetInstallProgress = useCallback(() => {
+    installTaskId.current = null;
+    setInstalledProgress(null);
+  }, []);
   const notifyInstallProgress = useCallback((progress: InstallProgress) => setInstalledProgress(progress), []);
   const recordGameLog = useCallback((event: GameLogEvent) => {
     if (!event.line) return;
@@ -455,11 +476,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
 
   const deleteInstance = useCallback(
-    async (id: string) => {
+    async (id: string, keepSaves = true) => {
       try {
-        await api.deleteInstance(id);
+        await api.deleteInstance(id, keepSaves);
         setInstances((previous) => previous.filter((item) => item.id !== id));
-        toast("success", "实例已删除");
+        toast(
+          "success",
+          keepSaves ? "实例已删除，世界已保留到 kept-saves 目录" : "实例与世界已删除",
+        );
         return true;
       } catch (error) {
         reportError("删除实例失败", error);

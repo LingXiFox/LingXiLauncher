@@ -179,6 +179,15 @@ export function InstallWizardModal({ presetVersionId }: InstallWizardModalProps)
       setBusy(false);
     }
   }
+  async function cancelInstall() {
+    if (!selected) return;
+    try {
+      const cancelled = await api.cancelInstall(selected.id);
+      setError(cancelled ? "已请求取消安装，正在停止…" : null);
+    } catch (cause) {
+      setError(errorMessage(cause));
+    }
+  }
 
   const footer = (
     <div className="install-footer">
@@ -369,7 +378,13 @@ export function InstallWizardModal({ presetVersionId }: InstallWizardModalProps)
               </div>
               <div>
                 <dt>下载源</dt>
-                <dd>{settings.source === "auto" ? "自动选择" : settings.source === "official" ? "官方源" : settings.source === "mirror" ? "镜像源" : "本地缓存"}</dd>
+                <dd>{settings.source === "auto"
+                    ? "自动选择"
+                    : settings.source === "official"
+                      ? "官方源"
+                      : settings.source === "mirror"
+                        ? "镜像源"
+                        : "仅本地缓存"}</dd>
               </div>
               <div>
                 <dt>预计占用</dt>
@@ -386,7 +401,14 @@ export function InstallWizardModal({ presetVersionId }: InstallWizardModalProps)
             hint="实例名称仅用于本机识别，可以随时在实例设置中修改。"
           />
           <ModalError error={error} />
-          {busy ? <InstallProgressPanel progress={installedProgress} label="正在准备 Minecraft 文件" /> : null}
+          {busy ? (
+            <InstallProgressPanel progress={installedProgress} label="正在准备 Minecraft 文件" />
+          ) : null}
+          {busy ? (
+            <Button variant="secondary" onClick={() => void cancelInstall()}>
+              取消安装
+            </Button>
+          ) : null}
         </div>
       ) : null}
     </Modal>

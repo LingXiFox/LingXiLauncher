@@ -21,7 +21,7 @@ const sourceOptions: Array<{ value: DownloadSource; label: string }> = [
   { value: "auto", label: "自动选择（推荐）" },
   { value: "official", label: "官方源" },
   { value: "mirror", label: "镜像源" },
-  { value: "localCache", label: "仅本地缓存" },
+  { value: "local-cache-only", label: "仅本地缓存" },
 ];
 
 const memoryPresets = [2048, 4096, 6144, 8192, 12288];
@@ -344,7 +344,7 @@ export function SettingsPage() {
                     value={draft.source}
                     onChange={(value) => updateDraft({ source: value as DownloadSource })}
                     options={sourceOptions}
-                    hint="自动模式会优先官方源，失败时回退镜像。"
+                    hint="自动模式优先官方源，仅在已配置镜像时回退到镜像。"
                   />
                   <TextInput
                     label="镜像配置路径"
@@ -352,7 +352,7 @@ export function SettingsPage() {
                     onChange={(event) => updateDraft({ mirrorConfigPath: event.target.value || null })}
                     placeholder="可选：mirror.json 的绝对路径"
                     leadingIcon="folder"
-                    hint="留空则使用内置镜像列表。"
+                    hint="可选：配置后自动/镜像模式才会使用第三方镜像源。"
                   />
                 </div>
               </div>

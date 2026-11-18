@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -50,6 +51,28 @@ pub struct RunningGameHandle {
     pub control: GameControl,
 }
 
+/// One in-flight install task. Tasks are keyed by version id; the cancel
+/// flag is shared with the downloader so a GUI click reaches the transfer
+/// loops directly (P1-5).
+#[derive(Clone)]
+#[allow(dead_code)] // version_id/started_at reserved for diagnostics
+pub struct InstallTask {
+    /// Stable registry key, e.g. `version:1.21.4` or `loader:<instance-id>`.
+    pub key: String,
+    pub version_id: String,
+    pub instance_id: Option<String>,
+    pub started_at: chrono::DateTime<chrono::Utc>,
+    pub cancel: launcher_core::install::CancelFlag,
+}
+
+impl InstallTask {
+    /// The GUI may cancel by task key, version id or instance id; all three
+    /// identify the same in-flight install.
+    pub fn matches(&self, id: &str) -> bool {
+        self.key == id || self.version_id == id || self.instance_id.as_deref() == Some(id)
+    }
+}
+
 pub struct AppState {
     pub layout: GameDataLayout,
     pub platform: PlatformContext,
@@ -61,6 +84,7 @@ pub struct AppState {
     pub auth: Arc<MicrosoftAuthService>,
     pub running: Mutex<Option<RunningGameHandle>>,
     pub auth_cancel: Mutex<Option<tokio::sync::watch::Sender<bool>>>,
+    pub installs: Mutex<HashMap<String, InstallTask>>,
 }
 
 impl AppState {
@@ -86,6 +110,7 @@ impl AppState {
             auth: Arc::new(auth),
             running: Mutex::new(None),
             auth_cancel: Mutex::new(None),
+            installs: Mutex::new(HashMap::new()),
         })
     }
 

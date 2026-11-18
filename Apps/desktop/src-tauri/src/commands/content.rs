@@ -292,7 +292,10 @@ pub async fn import_mrpack(
             ));
         }
     }
-    let progress: SharedProgress = TauriProgress::shared(app.clone());
+    // P1-5: one task id for the whole modpack install (pack extraction, vanilla
+    // files and loader) so the UI keeps a single coherent progress card.
+    let modpack_task = format!("modpack:{}", archive.display());
+    let progress: SharedProgress = TauriProgress::shared(app.clone(), modpack_task.clone());
     let label = name.unwrap_or_default();
     let mut instance = modpack::install(archive, &label, &state.layout, Some(progress), None)
         .await
@@ -321,7 +324,7 @@ pub async fn import_mrpack(
         installer
             .install(
                 &game_version,
-                TauriProgress::shared(app.clone()),
+                TauriProgress::shared(app.clone(), modpack_task.clone()),
                 CancelFlag::new(),
             )
             .await
@@ -336,7 +339,7 @@ pub async fn import_mrpack(
                         &instance,
                         &game_version,
                         Some(loader.version.as_str()),
-                        TauriProgress::shared(app.clone()),
+                        TauriProgress::shared(app.clone(), modpack_task.clone()),
                         CancelFlag::new(),
                     )
                     .await
@@ -363,7 +366,7 @@ pub async fn import_mrpack(
                         &game_version,
                         &loader.version,
                         &java,
-                        TauriProgress::shared(app.clone()),
+                        TauriProgress::shared(app.clone(), modpack_task.clone()),
                         CancelFlag::new(),
                     )
                     .await
@@ -422,7 +425,8 @@ pub async fn apply_modpack_update(
         .await
         .map_err(command_error)?
         .ok_or_else(|| "当前整合包没有可用更新".to_string())?;
-    let progress: SharedProgress = TauriProgress::shared(app);
+    let progress: SharedProgress =
+        TauriProgress::shared(app, format!("modpack-update:{instance_id}"));
     modpack::apply_update(&instance, &state.layout, &update, Some(progress), None)
         .await
         .map_err(command_error)?;

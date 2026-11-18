@@ -211,8 +211,18 @@ pub async fn begin_microsoft_login(
     let handle = app.clone();
     tauri::async_runtime::spawn(async move {
         let open_browser = move |url: &str| {
+            // P1-8: log only the redacted URL — the query string carries the
+            // OAuth state and authorization code.
+            crate::logging::info(format!(
+                "microsoft login: opening browser at {}",
+                crate::logging::redact_url(url)
+            ));
             let _ = url_tx.send(url.to_string());
-            system.open_url(url)
+            let opened = system.open_url(url);
+            if let Err(error) = &opened {
+                crate::logging::error(format!("microsoft login: cannot open browser: {error}"));
+            }
+            opened
         };
         let result = auth.sign_in_streaming(open_browser, cancel_rx).await;
         let app_state = handle.state::<AppState>();
@@ -235,6 +245,9 @@ pub async fn begin_microsoft_login(
                 let _ = handle.emit("auth-changed", serde_json::json!({ "kind": "microsoft" }));
             }
             Err(error) => {
+                // P1-8: the auth error text never includes the token exchange
+                // body; it is a code/message pair from launcher-auth.
+                crate::logging::error(format!("microsoft login failed: {error}"));
                 let _ = handle.emit("auth-error", error.to_string());
             }
         }

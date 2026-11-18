@@ -20,6 +20,9 @@ pub struct VersionView {
     pub version_type: VersionType,
     pub release_time: Option<chrono::DateTime<chrono::Utc>>,
     pub installed: bool,
+    /// P0-3: "installing" / "failed" / "complete" or null when never installed,
+    /// so the GUI can offer a repair install for partial downloads.
+    pub install_status: Option<launcher_core::install::InstallStatus>,
 }
 
 #[tauri::command]
@@ -32,6 +35,7 @@ pub fn list_versions(
         .cached_manifest()
         .ok_or_else(|| "版本清单尚未下载，请点击刷新".to_string())?;
     let filter = filter.unwrap_or_else(|| "release".into());
+    let install_state = launcher_core::install::InstallStateMap::load(&state.layout);
     Ok(manifest
         .versions
         .into_iter()
@@ -41,21 +45,26 @@ pub fn list_versions(
             _ => matches!(version.version_type, VersionType::Release),
         })
         .map(|version| {
-            let installed = state
-                .layout
-                .version_json(&version.id)
-                .map(|path| path.is_file())
-                .unwrap_or(false);
+            // P0-3: only the persistent install-state record counts as
+            // installed; a version JSON in the cache merely means metadata
+            // was fetched and must not produce a false "installed" badge.
+            let installed = install_state.is_complete(&version.id)
+                && state
+                    .layout
+                    .version_json(&version.id)
+                    .map(|path| path.is_file())
+                    .unwrap_or(false);
+            let install_status = install_state.status_of(&version.id);
             VersionView {
                 id: version.id,
                 version_type: version.version_type,
                 release_time: version.release_time,
                 installed,
+                install_status,
             }
         })
         .collect())
 }
-
 #[tauri::command]
 pub async fn refresh_versions(state: State<'_, AppState>) -> CommandResult<Vec<VersionView>> {
     state.manifest.manifest(true).await.map_err(command_error)?;
@@ -87,11 +96,82 @@ pub async fn install_version(
         policy,
         settings.mirror(),
     );
-    let progress: SharedProgress = TauriProgress::shared(app);
-    let mut report = installer
-        .install(&version_id, progress, CancelFlag::new())
-        .await
+    let progress: SharedProgress = TauriProgress::shared(app, version_id.clone());
+    // P1-5: register the task so the GUI can cancel it; refuse concurrent
+    // installs of the same version instead of silently racing two runs.
+    {
+        let mut installs = state.installs.lock().expect("installs lock");
+        if installs.contains_key(&version_id) {
+            return Err(format!("版本 {version_id} 已有安装任务进行中"));
+        }
+        installs.insert(
+            version_id.clone(),
+            crate::state::InstallTask {
+                key: version_id.clone(),
+                version_id: version_id.clone(),
+                instance_id: instance_id.clone(),
+                started_at: chrono::Utc::now(),
+                cancel: CancelFlag::new(),
+            },
+        );
+    }
+    let cancel = {
+        let installs = state.installs.lock().expect("installs lock");
+        installs
+            .get(&version_id)
+            .map(|task| task.cancel.clone())
+            .expect("install task just inserted")
+    };
+    // P0-3: record the install lifecycle so partial installs are visible and
+    // repairable instead of looking "installed".
+    let mut install_state = launcher_core::install::InstallStateMap::load(&state.layout);
+    install_state
+        .mark(
+            &version_id,
+            launcher_core::install::InstallStatus::Installing,
+        )
         .map_err(command_error)?;
+    install_state.save(&state.layout).map_err(command_error)?;
+    let started = std::time::Instant::now();
+    crate::logging::info(format!("install {version_id}: started"));
+    let result = installer.install(&version_id, progress, cancel).await;
+    match &result {
+        Ok(report) => crate::logging::timed(
+            &format!("install {version_id}"),
+            started,
+            &format!(
+                "{} files, {} bytes, {} cache hits, complete={}",
+                report.downloaded_files,
+                report.downloaded_bytes,
+                report.cache_hits,
+                report.is_complete()
+            ),
+        ),
+        Err(error) => crate::logging::error(format!(
+            "install {version_id} failed after {:.1}s: {error}",
+            started.elapsed().as_secs_f64()
+        )),
+    }
+    state
+        .installs
+        .lock()
+        .expect("installs lock")
+        .remove(&version_id);
+    match &result {
+        Ok(_) => {
+            install_state
+                .mark(&version_id, launcher_core::install::InstallStatus::Complete)
+                .map_err(command_error)?;
+            install_state.save(&state.layout).map_err(command_error)?;
+        }
+        Err(_) => {
+            install_state
+                .mark(&version_id, launcher_core::install::InstallStatus::Failed)
+                .map_err(command_error)?;
+            install_state.save(&state.layout).map_err(command_error)?;
+        }
+    }
+    let mut report = result.map_err(command_error)?;
     if let Some(instance_id) = instance_id {
         let instance = state.instances.load(&instance_id).map_err(command_error)?;
         state
@@ -101,6 +181,32 @@ pub async fn install_version(
         report.instance_id = instance_id;
     }
     Ok(report)
+}
+
+/// P1-5: request cancellation of an in-flight install. The flag is checked
+/// between files and inside every transfer loop, so the task stops promptly
+/// while keeping already-verified cache files.
+#[tauri::command]
+pub fn cancel_install(state: State<'_, AppState>, version_id: String) -> CommandResult<bool> {
+    let installs = state.installs.lock().expect("installs lock");
+    Ok(installs
+        .values()
+        .filter(|task| task.matches(&version_id))
+        .map(|task| {
+            task.cancel.cancel();
+            true
+        })
+        .collect::<Vec<_>>()
+        .first()
+        .copied()
+        .unwrap_or(false))
+}
+
+/// P1-5: which install tasks are currently running (for UI state restore).
+#[tauri::command]
+pub fn list_install_tasks(state: State<'_, AppState>) -> CommandResult<Vec<String>> {
+    let installs = state.installs.lock().expect("installs lock");
+    Ok(installs.keys().cloned().collect())
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -145,15 +251,36 @@ pub async fn install_loader(
 ) -> CommandResult<launcher_core::install::LoaderInstallResult> {
     let instance = state.instances.load(&instance_id).map_err(command_error)?;
     let installer = crate::commands::loader_installer(&state)?;
-    let progress: SharedProgress = TauriProgress::shared(app);
-    match loader.as_str() {
+    // P1-5: loader installs are keyed by instance (one loader per instance) and
+    // share the same registry as vanilla installs, so they can be cancelled.
+    let task_key = format!("loader:{instance_id}");
+    let cancel = {
+        let mut installs = state.installs.lock().expect("installs lock");
+        if installs.contains_key(&task_key) {
+            return Err(format!("实例 {instance_id} 已有安装任务进行中"));
+        }
+        let flag = CancelFlag::new();
+        installs.insert(
+            task_key.clone(),
+            crate::state::InstallTask {
+                key: task_key.clone(),
+                version_id: game_version.clone(),
+                instance_id: Some(instance_id.clone()),
+                started_at: chrono::Utc::now(),
+                cancel: flag.clone(),
+            },
+        );
+        flag
+    };
+    let progress: SharedProgress = TauriProgress::shared(app, task_key.clone());
+    let result = match loader.as_str() {
         "fabric" => installer
             .install_fabric(
                 &instance,
                 &game_version,
                 loader_version.as_deref(),
                 progress,
-                CancelFlag::new(),
+                cancel.clone(),
             )
             .await
             .map_err(command_error),
@@ -182,11 +309,25 @@ pub async fn install_loader(
                     &loader_version,
                     &java,
                     progress,
-                    CancelFlag::new(),
+                    cancel.clone(),
                 )
                 .await
                 .map_err(command_error)
         }
         _ => Err(format!("未知的加载器: {loader}")),
+    };
+    state
+        .installs
+        .lock()
+        .expect("installs lock")
+        .remove(&task_key);
+    match &result {
+        Ok(_) => crate::logging::timed(
+            &format!("loader install {task_key}"),
+            std::time::Instant::now(),
+            &format!("{} {game_version}", loader),
+        ),
+        Err(error) => crate::logging::error(format!("loader install {task_key} failed: {error}")),
     }
+    result
 }

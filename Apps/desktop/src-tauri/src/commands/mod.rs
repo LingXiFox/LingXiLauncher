@@ -282,16 +282,32 @@ impl AccountView {
 
 pub(crate) struct TauriProgress {
     app: AppHandle,
+    task_id: String,
 }
 
 impl TauriProgress {
-    pub fn shared(app: AppHandle) -> Arc<dyn ProgressSink> {
-        Arc::new(Self { app })
+    /// `task_id` identifies the install run; the emitted payload carries it so
+    /// the frontend never mixes counters from two different tasks.
+    pub fn shared(app: AppHandle, task_id: impl Into<String>) -> Arc<dyn ProgressSink> {
+        Arc::new(Self {
+            app,
+            task_id: task_id.into(),
+        })
     }
 }
 
 impl ProgressSink for TauriProgress {
     fn emit(&self, event: InstallProgressEvent) {
-        let _ = self.app.emit("install-progress", &event);
+        let mut payload = match serde_json::to_value(&event) {
+            Ok(value) => value,
+            Err(_) => return,
+        };
+        if let Some(map) = payload.as_object_mut() {
+            map.insert(
+                "taskId".to_string(),
+                serde_json::Value::String(self.task_id.clone()),
+            );
+        }
+        let _ = self.app.emit("install-progress", &payload);
     }
 }

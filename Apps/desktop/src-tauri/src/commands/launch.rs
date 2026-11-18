@@ -1,5 +1,7 @@
 use launcher_core::launch::{latest_game_log, read_tail, LaunchPlanBuilder, LaunchService};
-use launcher_core::models::account::{AccountKind, ActiveAccountStore, MicrosoftAccountStore};
+use launcher_core::models::account::{
+    AccountKind, ActiveAccountStore, LocalAccountStore, MicrosoftAccountStore,
+};
 use launcher_core::models::instance::Instance;
 use launcher_core::models::launch::{
     ExitReason, GameProcessEvent, LaunchContext, LaunchIdentity, LaunchPreview,
@@ -247,10 +249,15 @@ async fn identity_for(state: &AppState) -> CommandResult<LaunchIdentity> {
     let active = ActiveAccountStore::new(state.layout.clone()).load();
     let reference = active.ok_or_else(|| "请先在账户管理登录 Microsoft 账户".to_string())?;
     match reference.kind {
-        AccountKind::Local => Err(
-            "桌面端仅支持 Microsoft 正版账户启动；离线账户请使用 CLI: lingxi launch --identity local:<name>"
-                .to_string(),
-        ),
+        // P2-14: the GUI can create and activate offline accounts, so the
+        // launch path must accept them too instead of telling the user to use
+        // the CLI.
+        AccountKind::Local => {
+            let account = LocalAccountStore::new(state.layout.clone())
+                .load(&reference.identifier)
+                .map_err(command_error)?;
+            Ok(LaunchIdentity::local_offline(&account.profile()))
+        }
         AccountKind::Microsoft => {
             let id = uuid::Uuid::parse_str(&reference.identifier)
                 .map_err(|_| "无效的 Microsoft 账户 ID".to_string())?;

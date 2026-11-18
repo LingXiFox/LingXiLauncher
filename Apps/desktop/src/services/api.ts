@@ -1,12 +1,15 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import type { InstallEvent as InstallProgressEvent } from "./progress";
+
+export type { InstallProgressEvent };
 
 /* ------------------------------------------------------------------ */
 /* Domain types                                                        */
 /* ------------------------------------------------------------------ */
 
 export type Appearance = "dark" | "light" | "system";
-export type DownloadSource = "official" | "mirror" | "auto" | "localCache";
+export type DownloadSource = "official" | "mirror" | "auto" | "local-cache-only";
 export type VersionFilter = "release" | "snapshot" | "all";
 export type AccountKind = "microsoft" | "local";
 export type LogKind = "launcher" | "game" | "latest";
@@ -101,6 +104,7 @@ export interface GameVersion {
   type: string;
   releaseTime?: string | null;
   installed?: boolean;
+  installStatus?: "installing" | "complete" | "failed" | null;
   url?: string | null;
 }
 
@@ -390,18 +394,6 @@ function normalizeBootstrap(raw: LauncherBootstrap & { accounts?: unknown }): La
   };
 }
 
-function normalizeProgress(raw: unknown): InstallProgress {
-  const item = asRecord(raw);
-  return {
-    phase: asString(item.phase, "running"),
-    totalFiles: asNumber(item.totalFiles),
-    completedFiles: asNumber(item.completedFiles),
-    totalBytes: asNumber(item.totalBytes),
-    downloadedBytes: asNumber(item.downloadedBytes),
-    currentFile: (item.currentFile as string | null | undefined) ?? null,
-    message: (item.message as string | null | undefined) ?? null,
-  };
-}
 
 /* ------------------------------------------------------------------ */
 /* Commands                                                            */
@@ -418,7 +410,8 @@ export const api = {
     call<GameInstance>("create_instance", { name, versionId }),
   updateInstance: (id: string, patch: { memoryMiB?: number; jvmArguments?: string }) =>
     call<void>("update_instance", { id, ...patch }),
-  deleteInstance: (id: string) => call<void>("delete_instance", { id }),
+  deleteInstance: (id: string, keepSaves = true) =>
+    call<void>("delete_instance", { id, keepSaves }),
   copyInstance: (id: string, name: string) => call<GameInstance>("copy_instance", { id, name }),
   setInstanceVersion: (id: string, versionId: string) =>
     call<void>("set_instance_version", { id, versionId }),
@@ -428,6 +421,8 @@ export const api = {
   refreshVersions: () => call<GameVersion[]>("refresh_versions"),
   installVersion: (versionId: string, instanceId?: string, source?: DownloadSource) =>
     call<void>("install_version", { versionId, instanceId, source }),
+  cancelInstall: (versionId: string) => call<boolean>("cancel_install", { versionId }),
+  listInstallTasks: () => call<string[]>("list_install_tasks"),
   listLoaderVersions: (loader: string, gameVersion: string) =>
     call<LoaderVersion[]>("list_loader_versions", { loader, gameVersion }),
   installLoader: (loader: string, instanceId: string, gameVersion: string, loaderVersion?: string) =>
@@ -542,8 +537,25 @@ export const api = {
 /* Events                                                              */
 /* ------------------------------------------------------------------ */
 
-export function onInstallProgress(handler: (progress: InstallProgress) => void): Promise<UnlistenFn> {
-  return listen<unknown>("install-progress", (event) => handler(normalizeProgress(event.payload)));
+export function onInstallProgress(handler: (event: InstallProgressEvent) => void): Promise<UnlistenFn> {
+  return listen<unknown>("install-progress", (event) => {
+    const item = asRecord(event.payload);
+    handler({
+      kind: asString(item.kind, "unknown"),
+      taskId: typeof item.taskId === "string" ? item.taskId : null,
+      phase: typeof item.phase === "string" ? item.phase : undefined,
+      message: typeof item.message === "string" ? item.message : null,
+      totalFiles: typeof item.totalFiles === "number" ? item.totalFiles : undefined,
+      totalBytes: typeof item.totalBytes === "number" ? item.totalBytes : undefined,
+      cacheHits: typeof item.cacheHits === "number" ? item.cacheHits : undefined,
+      path: typeof item.path === "string" ? item.path : undefined,
+      size: typeof item.size === "number" ? item.size : undefined,
+      bytes: typeof item.bytes === "number" ? item.bytes : undefined,
+      source: typeof item.source === "string" ? item.source : undefined,
+      downloaded: typeof item.downloaded === "number" ? item.downloaded : undefined,
+      total: typeof item.total === "number" ? item.total : undefined,
+    });
+  });
 }
 
 export function onGameLog(handler: (event: GameLogEvent) => void): Promise<UnlistenFn> {

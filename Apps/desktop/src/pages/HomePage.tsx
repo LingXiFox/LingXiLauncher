@@ -88,8 +88,8 @@ export function HomePage() {
   const accountCount = accounts.microsoft.length + accounts.local.length;
   const launchHint = isGameRunning
     ? null
-    : activeProfile?.kind !== "microsoft"
-      ? "先在账户管理登录 Microsoft 账户"
+    : !activeProfile
+      ? "先在账户管理添加并选择一个账户"
       : javaRuntimes.length === 0
         ? "先在设置中选择 Java 运行时"
         : !selected?.versionId

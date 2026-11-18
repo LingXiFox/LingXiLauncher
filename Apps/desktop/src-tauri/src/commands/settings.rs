@@ -62,10 +62,10 @@ impl From<&Settings> for SettingsView {
     fn from(settings: &Settings) -> Self {
         Self {
             java_path: settings.java_path.clone(),
-            source: match settings.source.as_str() {
-                "local-cache-only" => "localCache".to_string(),
-                other => other.to_string(),
-            },
+            // P2-9: the wire value is the canonical policy string. The old
+            // "localCache" alias made every save round-trip fail to parse and
+            // silently fall back to "auto".
+            source: settings.source.clone(),
             mirror_config_path: settings.mirror_config_path.clone(),
             default_memory_mib: settings.default_memory_mib,
             appearance: settings.appearance.clone(),
@@ -104,7 +104,7 @@ pub async fn install_java(
     if !(8..=64).contains(&major) {
         return Err("Java 主版本不合理".into());
     }
-    let progress: SharedProgress = TauriProgress::shared(app);
+    let progress: SharedProgress = TauriProgress::shared(app, format!("java:{major}"));
     state
         .java
         .install_managed(major, progress, CancelFlag::new())

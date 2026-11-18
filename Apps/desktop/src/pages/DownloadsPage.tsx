@@ -103,9 +103,23 @@ export function DownloadsPage() {
       toast("success", `Minecraft ${version.id} 已安装`);
       await Promise.all([refreshVersions("all", true), refreshInstances(true)]);
     } catch (error) {
+      // P0-2: backend refuses to report success when files are missing, so
+      // every failure lands here with a user-visible reason.
       toast("error", `安装 ${version.id} 失败`, error instanceof Error ? error.message : String(error));
+      await refreshVersions("all", true);
     } finally {
       setInstallingId(null);
+    }
+  }
+
+  async function handleCancel(versionId: string) {
+    try {
+      const cancelled = await api.cancelInstall(versionId);
+      toast("info",
+        cancelled ? `正在取消 ${versionId} 的安装` : "没有正在进行的安装任务",
+      );
+    } catch (error) {
+      toast("error", "取消安装失败", error instanceof Error ? error.message : String(error));
     }
   }
 
@@ -182,7 +196,13 @@ export function DownloadsPage() {
                   {installedProgress.message || installedProgress.currentFile || "正在准备安装文件"}
                 </p>
               </div>
-              <IconButton icon="close" label="关闭安装进度" onClick={resetInstallProgress} />
+              {installingId ? (
+                <Button variant="secondary" size="sm" onClick={() => void handleCancel(installingId)}>
+                  取消安装
+                </Button>
+              ) : (
+                <IconButton icon="close" label="关闭安装进度" onClick={resetInstallProgress} />
+              )}
             </div>
             <ProgressBar
               value={installedProgress.completedFiles}
@@ -244,7 +264,13 @@ export function DownloadsPage() {
                     </span>
                     <div>
                       <strong>{version.id}</strong>
-                      {version.installed ? <span className="caption">已安装到本地</span> : <span className="caption">Minecraft Java Edition</span>}
+                      {version.installed ? (
+                        <span className="caption">已安装到本地</span>
+                      ) : version.installStatus ? (
+                        <span className="caption">上次安装未完成，可继续修复</span>
+                      ) : (
+                        <span className="caption">Minecraft Java Edition</span>
+                      )}
                     </div>
                   </div>
                   <div>
@@ -256,6 +282,10 @@ export function DownloadsPage() {
                   <div>
                     {version.installed ? (
                       <Badge tone="accent" dot>已安装</Badge>
+                    ) : version.installStatus === "failed" ? (
+                      <Badge tone="warning" dot>安装失败</Badge>
+                    ) : version.installStatus === "installing" ? (
+                      <Badge tone="neutral" dot>安装未完成</Badge>
                     ) : (
                       <span className="tertiary caption">未安装</span>
                     )}
@@ -269,12 +299,12 @@ export function DownloadsPage() {
                       <Button
                         variant="secondary"
                         size="sm"
-                        icon="download"
+                        icon={version.installStatus ? "refresh" : "download"}
                         loading={installingId === version.id}
                         disabled={installingId !== null && installingId !== version.id}
                         onClick={() => void handleInstall(version)}
                       >
-                        安装
+                        {version.installStatus ? "修复安装" : "安装"}
                       </Button>
                     )}
                   </div>
