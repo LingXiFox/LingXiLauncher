@@ -12,8 +12,18 @@ impl SystemServices for NativeSystemServices {
         #[cfg(target_os = "macos")]
         let status = quiet_command("open").arg(url).status()?;
         #[cfg(windows)]
-        let status = quiet_command("cmd")
-            .args(["/C", "start", "", url])
+        // P1-6: never pass URLs through "cmd /C start" — cmd would interpret
+        // &, ^, | and % inside query strings (OAuth state/code, loopback
+        // callbacks). PowerShell Start-Process hands the argument to
+        // ShellExecute verbatim, so every URL character survives.
+        let status = quiet_command("powershell")
+            .args([
+                "-NoProfile",
+                "-WindowStyle",
+                "Hidden",
+                "-Command",
+                &powershell_start_process(url),
+            ])
             .status()?;
         #[cfg(all(unix, not(target_os = "macos")))]
         let status = quiet_command("xdg-open").arg(url).status()?;
@@ -84,4 +94,29 @@ impl SystemServices for NativeSystemServices {
 #[cfg(target_os = "macos")]
 fn applescript_string(value: &str) -> String {
     format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
+}
+
+/// P1-6: build the PowerShell snippet used to hand a URL to ShellExecute.
+/// Single quotes are doubled so the URL can never break out of the literal;
+/// the launcher only opens http(s) URLs, so no other escaping is needed.
+#[cfg(any(windows, test))]
+fn powershell_start_process(url: &str) -> String {
+    format!("Start-Process -FilePath '{}'", url.replace('\'', "''"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn windows_url_escape_survives_oauth_query_characters() {
+        let url = "http://127.0.0.1:51234/callback?code=ab%20c&state=x'y|z^w";
+        let script = powershell_start_process(url);
+        assert!(script.starts_with("Start-Process -FilePath '"));
+        assert!(script.ends_with('\''));
+        // The apostrophe is doubled; &, |, ^ and % are untouched because
+        // PowerShell string literals do not interpret them.
+        assert!(script.contains("x''y|z^w"));
+        assert!(script.contains("code=ab%20c&state="));
+    }
 }
