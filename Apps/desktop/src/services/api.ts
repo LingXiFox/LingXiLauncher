@@ -62,7 +62,28 @@ export interface GameInstance {
   resourcePackCount?: number | null;
   shaderCount?: number | null;
   path?: string | null;
+  launch?: InstanceLaunchSettings | null;
   modpack?: { name: string; version: string; projectId?: string | null } | null;
+}
+
+export type WindowMode = "windowed" | "fullscreen" | "maximized";
+export type ProcessPriority = "low" | "belowNormal" | "normal" | "aboveNormal" | "high";
+export type GraphicsApi = "auto" | "openGl" | "vulkan";
+export type LauncherVisibility = "keep" | "minimize" | "close" | "hide";
+
+export interface InstanceLaunchSettings {
+  windowMode: WindowMode;
+  windowWidth: number;
+  windowHeight: number;
+  processPriority: ProcessPriority;
+  environment: Record<string, string>;
+  preLaunchCommand?: string | null;
+  wrapperCommand?: string | null;
+  postLaunchCommand?: string | null;
+  graphicsApi: GraphicsApi;
+  vulkanValidation: boolean;
+  verifyBeforeLaunch: boolean;
+  launcherVisibility: LauncherVisibility;
 }
 
 export interface JavaRuntime {
@@ -418,6 +439,8 @@ export const api = {
     call<GameInstance>("create_instance", { name, versionId }),
   updateInstance: (id: string, patch: { memoryMiB?: number; jvmArguments?: string }) =>
     call<void>("update_instance", { id, ...patch }),
+  updateInstanceLaunch: (id: string, launch: InstanceLaunchSettings) =>
+    call<GameInstance>("update_instance_launch", { id, launch }),
   deleteInstance: (id: string, keepSaves = true) =>
     call<void>("delete_instance", { id, keepSaves }),
   copyInstance: (id: string, name: string) => call<GameInstance>("copy_instance", { id, name }),

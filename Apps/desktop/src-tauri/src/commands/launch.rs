@@ -1,8 +1,10 @@
-use launcher_core::launch::{latest_game_log, read_tail, LaunchPlanBuilder, LaunchService};
+use launcher_core::launch::{
+    latest_game_log, read_tail, verify_installation, LaunchPlanBuilder, LaunchService,
+};
 use launcher_core::models::account::{
     AccountKind, ActiveAccountStore, LocalAccountStore, MicrosoftAccountStore,
 };
-use launcher_core::models::instance::Instance;
+use launcher_core::models::instance::{Instance, LauncherVisibility};
 use launcher_core::models::launch::{
     ExitReason, GameProcessEvent, LaunchContext, LaunchIdentity, LaunchPreview,
 };
@@ -43,6 +45,7 @@ pub fn game_status(state: State<'_, AppState>) -> CommandResult<GameStatus> {
 
 #[tauri::command]
 pub async fn preview_launch(
+    app: AppHandle,
     state: State<'_, AppState>,
     instance_id: String,
 ) -> CommandResult<LaunchPreview> {
@@ -55,7 +58,7 @@ pub async fn preview_launch(
     let version = VersionResolver
         .resolve(&version_id, &state.layout.game_root)
         .map_err(command_error)?;
-    let context = launch_context(&state, &instance, &version).await?;
+    let context = launch_context(&app, &state, &instance, &version).await?;
     LaunchPlanBuilder::preview(&instance, &version, &state.layout, &context).map_err(command_error)
 }
 
@@ -80,7 +83,24 @@ pub async fn launch_instance(
     let version = VersionResolver
         .resolve(&version_id, &state.layout.game_root)
         .map_err(command_error)?;
-    let context = launch_context(&state, &instance, &version).await?;
+    if instance.manifest.launch.verify_before_launch {
+        let report = verify_installation(&version, &state.layout, &state.platform)
+            .map_err(command_error)?;
+        if !report.is_clean() {
+            let names = report
+                .problems
+                .iter()
+                .take(5)
+                .map(|problem| problem.name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            return Err(format!(
+                "启动前完整性检查失败：{} 个文件校验不通过（{names}），请在版本页重新安装该版本",
+                report.problems.len()
+            ));
+        }
+    }
+    let context = launch_context(&app, &state, &instance, &version).await?;
     let plan = LaunchPlanBuilder::build(&instance, &version, &state.layout, &context)
         .map_err(command_error)?;
     let log_path = instance.logs_directory().join("latest.log");
@@ -158,6 +178,8 @@ pub async fn launch_instance(
         }
     });
 
+    apply_launcher_visibility(&app, instance.manifest.launch.launcher_visibility);
+
     let mut manifest = instance.manifest.clone();
     manifest.last_launched_at = Some(started_at);
     manifest.last_identity_mode = Some(plan.identity_mode);
@@ -196,7 +218,34 @@ pub fn read_game_log(
     }
 }
 
+/// Requirement 11: once the game is up, honour the per-instance visibility
+/// choice. `Close` hides the launcher and then exits it: the game is a separate
+/// process, so quitting the launcher does not stop the game.
+fn apply_launcher_visibility(app: &AppHandle, visibility: LauncherVisibility) {
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+    match visibility {
+        LauncherVisibility::Keep => {}
+        LauncherVisibility::Minimize => {
+            let _ = window.minimize();
+        }
+        LauncherVisibility::Hide => {
+            let _ = window.hide();
+        }
+        LauncherVisibility::Close => {
+            let _ = window.hide();
+            let handle = app.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(1500));
+                handle.exit(0);
+            });
+        }
+    }
+}
+
 async fn launch_context(
+    app: &AppHandle,
     state: &AppState,
     instance: &Instance,
     version: &launcher_core::version::ResolvedVersion,
@@ -212,6 +261,18 @@ async fn launch_context(
     );
     context.launcher_name = launcher_core::models::launch::LAUNCHER_NAME.into();
     context.launcher_version = launcher_core::models::launch::LAUNCHER_VERSION.into();
+    context.display_size = app
+        .primary_monitor()
+        .ok()
+        .flatten()
+        .map(|monitor| {
+            let size = monitor.size();
+            let scale = monitor.scale_factor();
+            (
+                (size.width as f64 / scale) as u32,
+                (size.height as f64 / scale) as u32,
+            )
+        });
     Ok(context)
 }
 

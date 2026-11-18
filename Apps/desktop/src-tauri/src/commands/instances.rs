@@ -69,6 +69,26 @@ pub fn update_instance(
     Ok(InstanceView::from(instance))
 }
 
+/// Updates the window, priority, hook, environment and renderer options of an
+/// instance. Everything is validated before the manifest is written so a bad
+/// command line or environment key never reaches the launch path.
+#[tauri::command]
+pub fn update_instance_launch(
+    state: State<'_, AppState>,
+    id: String,
+    launch: launcher_core::models::instance::InstanceLaunchSettings,
+) -> CommandResult<InstanceView> {
+    launch.validate().map_err(|e| e.to_string())?;
+    let mut instance = state.instances.load(&id).map_err(|e| e.to_string())?;
+    instance.manifest.launch = launch;
+    state
+        .instances
+        .save(&instance.manifest)
+        .map_err(|e| e.to_string())?;
+    let instance = state.instances.load(&id).map_err(|e| e.to_string())?;
+    Ok(InstanceView::from(instance))
+}
+
 /// Verify that `directory` is exactly `<root>/<name>` and nothing else.
 /// Refuses symlinks pointing elsewhere, shared parents and mismatched names so
 /// a corrupted manifest can never redirect a delete at unrelated data.
@@ -169,6 +189,7 @@ pub fn copy_instance(
     manifest.memory_mib = source.manifest.memory_mib;
     manifest.jvm_arguments = source.manifest.jvm_arguments.clone();
     manifest.java_runtime = source.manifest.java_runtime.clone();
+    manifest.launch = source.manifest.launch.clone();
     state.instances.save(&manifest).map_err(|e| e.to_string())?;
     let target = state
         .instances

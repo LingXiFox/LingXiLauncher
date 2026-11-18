@@ -63,6 +63,7 @@ pub struct InstanceView {
     pub game_directory: String,
     pub directory: String,
     pub java_runtime: Option<launcher_core::models::instance::JavaRuntimeRecord>,
+    pub launch: launcher_core::models::instance::InstanceLaunchSettings,
     pub modpack: Option<InstanceModpackView>,
 }
 
@@ -103,6 +104,7 @@ impl From<Instance> for InstanceView {
             memory_mib,
             jvm_arguments,
             java_runtime,
+            launch,
             ..
         } = instance.manifest;
         let version_id = version_id.unwrap_or_default();
@@ -129,6 +131,7 @@ impl From<Instance> for InstanceView {
             game_directory,
             directory,
             java_runtime,
+            launch,
             modpack,
         }
     }

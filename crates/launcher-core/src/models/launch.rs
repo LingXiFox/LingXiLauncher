@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::instance::IdentityMode;
+use super::instance::{IdentityMode, ProcessPriority};
 use crate::platform::PlatformContext;
 
 pub const LAUNCHER_NAME: &str = "LingXi Launcher";
@@ -70,6 +70,8 @@ pub struct LaunchContext {
     pub additional_jvm_arguments: Vec<String>,
     pub features: BTreeMap<String, bool>,
     pub quick_play_singleplayer: Option<String>,
+    /// Size of the display the launcher runs on, used to size a maximised game window.
+    pub display_size: Option<(u32, u32)>,
     pub launcher_name: String,
     pub launcher_version: String,
 }
@@ -91,10 +93,19 @@ impl LaunchContext {
             additional_jvm_arguments: Vec::new(),
             features: BTreeMap::new(),
             quick_play_singleplayer: None,
+            display_size: None,
             launcher_name: LAUNCHER_NAME.to_string(),
             launcher_version: LAUNCHER_VERSION.to_string(),
         }
     }
+}
+
+/// Commands the launcher runs around the game process. Both are executed
+/// through the platform shell so users can chain anything they like.
+#[derive(Debug, Clone, Default)]
+pub struct LaunchHooks {
+    pub pre_launch_command: Option<String>,
+    pub post_launch_command: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -106,6 +117,12 @@ pub struct LaunchPlan {
     pub environment_overrides: BTreeMap<String, String>,
     pub version_id: String,
     pub identity_mode: IdentityMode,
+    /// Scheduling class applied to the JVM right after it is spawned.
+    pub process_priority: ProcessPriority,
+    /// Optional command that launches the JVM, prefixed to the java command.
+    pub wrapper_command: Option<String>,
+    /// Pre/post launch shell hooks.
+    pub hooks: LaunchHooks,
 }
 
 impl LaunchPlan {

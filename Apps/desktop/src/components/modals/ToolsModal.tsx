@@ -3,6 +3,11 @@ import {
   api,
   type CrashReport,
   type DiagnosticsReport,
+  type GraphicsApi,
+  type InstanceLaunchSettings,
+  type LauncherVisibility,
+  type ProcessPriority,
+  type WindowMode,
   type World,
   type WorldBackup,
 } from "../../services/api";
@@ -11,7 +16,8 @@ import { Badge } from "../Badge";
 import { Button } from "../Button";
 import { EmptyState } from "../EmptyState";
 import { Icon } from "../Icons";
-import { TextArea, TextInput } from "../Input";
+import { Switch, TextArea, TextInput } from "../Input";
+import { Select } from "../Select";
 import { Modal, ConfirmDialog } from "../Modal";
 import { minecraftVersion } from "../../lib/format";
 import {
@@ -28,6 +34,68 @@ type ToolTab = "manage" | "worlds" | "diagnostics";
 interface ToolsModalProps {
   instanceId: string;
   initialTab?: ToolTab;
+}
+
+const DEFAULT_LAUNCH: InstanceLaunchSettings = {
+  windowMode: "windowed",
+  windowWidth: 1280,
+  windowHeight: 720,
+  processPriority: "normal",
+  environment: {},
+  preLaunchCommand: "",
+  wrapperCommand: "",
+  postLaunchCommand: "",
+  graphicsApi: "auto",
+  vulkanValidation: false,
+  verifyBeforeLaunch: false,
+  launcherVisibility: "keep",
+};
+
+const windowModeOptions: Array<{ value: WindowMode; label: string }> = [
+  { value: "windowed", label: "窗口化" },
+  { value: "maximized", label: "最大化" },
+  { value: "fullscreen", label: "全屏" },
+];
+
+const priorityOptions: Array<{ value: ProcessPriority; label: string }> = [
+  { value: "low", label: "最低" },
+  { value: "belowNormal", label: "低于正常" },
+  { value: "normal", label: "正常" },
+  { value: "aboveNormal", label: "高于正常" },
+  { value: "high", label: "最高" },
+];
+
+const graphicsOptions: Array<{ value: GraphicsApi; label: string }> = [
+  { value: "auto", label: "自动（由游戏决定）" },
+  { value: "openGl", label: "OpenGL" },
+  { value: "vulkan", label: "Vulkan（仅 26.2+）" },
+];
+
+const visibilityOptions: Array<{ value: LauncherVisibility; label: string }> = [
+  { value: "keep", label: "保持启动器可见" },
+  { value: "minimize", label: "最小化启动器" },
+  { value: "hide", label: "隐藏启动器" },
+  { value: "close", label: "启动后关闭启动器" },
+];
+
+function environmentToText(environment: Record<string, string>): string {
+  return Object.entries(environment)
+    .map(([key, value]) => `${key}=${value}`)
+    .join("\n");
+}
+
+function textToEnvironment(text: string): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const line of text.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const index = trimmed.indexOf("=");
+    if (index <= 0) continue;
+    const key = trimmed.slice(0, index).trim();
+    if (!key) continue;
+    result[key] = trimmed.slice(index + 1).trim();
+  }
+  return result;
 }
 
 const TABS: { value: ToolTab; label: string }[] = [
@@ -47,6 +115,11 @@ export function ToolsModal({ instanceId, initialTab = "manage" }: ToolsModalProp
   const [manageError, setManageError] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState(false);
 
+  const [launch, setLaunch] = useState<InstanceLaunchSettings>(instance?.launch ?? DEFAULT_LAUNCH);
+  const [environmentText, setEnvironmentText] = useState(environmentToText(instance?.launch?.environment ?? {}));
+  const [savingLaunch, setSavingLaunch] = useState(false);
+  const [launchError, setLaunchError] = useState<string | null>(null);
+
   const [worlds, setWorlds] = useState<World[]>([]);
   const [backups, setBackups] = useState<WorldBackup[]>([]);
   const [worldsLoading, setWorldsLoading] = useState(false);
@@ -65,6 +138,12 @@ export function ToolsModal({ instanceId, initialTab = "manage" }: ToolsModalProp
     setMemory(instance?.memoryMiB ? String(instance.memoryMiB) : "");
     setJvmArgs(instance?.jvmArguments ?? "");
   }, [instance?.memoryMiB, instance?.jvmArguments]);
+
+  useEffect(() => {
+    if (!instance?.launch) return;
+    setLaunch(instance.launch);
+    setEnvironmentText(environmentToText(instance.launch.environment ?? {}));
+  }, [instance?.launch]);
 
   async function loadWorlds() {
     setWorldsLoading(true);
@@ -101,6 +180,34 @@ export function ToolsModal({ instanceId, initialTab = "manage" }: ToolsModalProp
       setManageError(errorMessage(cause));
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function saveLaunch() {
+    const width = Math.round(launch.windowWidth);
+    const height = Math.round(launch.windowHeight);
+    if (!Number.isFinite(width) || width < 320 || width > 7680 || !Number.isFinite(height) || height < 240 || height > 4320) {
+      setLaunchError("窗口尺寸需在 320×240 到 7680×4320 之间。");
+      return;
+    }
+    setSavingLaunch(true);
+    setLaunchError(null);
+    try {
+      await api.updateInstanceLaunch(instanceId, {
+        ...launch,
+        windowWidth: width,
+        windowHeight: height,
+        environment: textToEnvironment(environmentText),
+        preLaunchCommand: launch.preLaunchCommand?.trim() ? launch.preLaunchCommand.trim() : null,
+        wrapperCommand: launch.wrapperCommand?.trim() ? launch.wrapperCommand.trim() : null,
+        postLaunchCommand: launch.postLaunchCommand?.trim() ? launch.postLaunchCommand.trim() : null,
+      });
+      await refreshInstances(true);
+      toast("success", "启动设置已保存", "下次启动该实例时生效");
+    } catch (cause) {
+      setLaunchError(errorMessage(cause));
+    } finally {
+      setSavingLaunch(false);
     }
   }
 
@@ -253,6 +360,116 @@ export function ToolsModal({ instanceId, initialTab = "manage" }: ToolsModalProp
                 <div className="modal-form__actions">
                   <Button variant="primary" icon="save" loading={saving} onClick={() => void saveInstance()}>
                     保存设置
+                  </Button>
+                </div>
+              </div>
+
+              <div className="tools-section-head tools-section-head--spaced">
+                <div>
+                  <h4>启动行为</h4>
+                  <p>窗口、进程优先级、前置与收尾命令都按实例保存。</p>
+                </div>
+              </div>
+
+              <div className="modal-form">
+                <div className="grid grid--2">
+                  <Select
+                    label="窗口模式"
+                    value={launch.windowMode}
+                    onChange={(value) => setLaunch((current) => ({ ...current, windowMode: value as WindowMode }))}
+                    options={windowModeOptions}
+                    hint="最大化会用主显示器尺寸作为窗口大小。"
+                  />
+                  <Select
+                    label="启动器可见性"
+                    value={launch.launcherVisibility}
+                    onChange={(value) => setLaunch((current) => ({ ...current, launcherVisibility: value as LauncherVisibility }))}
+                    options={visibilityOptions}
+                    hint="游戏启动成功后立即生效。"
+                  />
+                </div>
+                <div className="grid grid--2">
+                  <TextInput
+                    label="窗口宽度"
+                    type="number"
+                    min={320}
+                    max={7680}
+                    value={String(launch.windowWidth)}
+                    onChange={(event) => setLaunch((current) => ({ ...current, windowWidth: Number(event.target.value) }))}
+                    hint="320 – 7680 像素。"
+                  />
+                  <TextInput
+                    label="窗口高度"
+                    type="number"
+                    min={240}
+                    max={4320}
+                    value={String(launch.windowHeight)}
+                    onChange={(event) => setLaunch((current) => ({ ...current, windowHeight: Number(event.target.value) }))}
+                    hint="240 – 4320 像素。"
+                  />
+                </div>
+                <div className="grid grid--2">
+                  <Select
+                    label="进程优先级"
+                    value={launch.processPriority}
+                    onChange={(value) => setLaunch((current) => ({ ...current, processPriority: value as ProcessPriority }))}
+                    options={priorityOptions}
+                    hint="Windows 与 macOS/Linux 分别通过系统工具设置。"
+                  />
+                  <Select
+                    label="图形后端"
+                    value={launch.graphicsApi}
+                    onChange={(value) => setLaunch((current) => ({ ...current, graphicsApi: value as GraphicsApi }))}
+                    options={graphicsOptions}
+                    hint="Vulkan 需要 Minecraft 26.2 及以上版本。"
+                  />
+                </div>
+                <Switch
+                  label="启用 Vulkan 校验层"
+                  description="仅在选择 Vulkan 且版本支持时传给游戏，用于排查驱动问题。"
+                  checked={launch.vulkanValidation}
+                  onChange={(checked) => setLaunch((current) => ({ ...current, vulkanValidation: checked }))}
+                  disabled={launch.graphicsApi !== "vulkan"}
+                />
+                <Switch
+                  label="启动前校验游戏文件"
+                  description="按版本清单逐项校验库与客户端 jar 的大小和 SHA-1，发现损坏立即中止启动。"
+                  checked={launch.verifyBeforeLaunch}
+                  onChange={(checked) => setLaunch((current) => ({ ...current, verifyBeforeLaunch: checked }))}
+                />
+                <TextArea
+                  label="环境变量"
+                  rows={3}
+                  value={environmentText}
+                  onChange={(event) => setEnvironmentText(event.target.value)}
+                  placeholder="MESA_GL_VERSION_OVERRIDE=4.6&#10;# 每行一个 KEY=VALUE"
+                  hint="会注入到游戏进程，覆盖启动器自身环境。"
+                />
+                <TextInput
+                  label="启动前命令"
+                  value={launch.preLaunchCommand ?? ""}
+                  onChange={(event) => setLaunch((current) => ({ ...current, preLaunchCommand: event.target.value }))}
+                  placeholder="可选：例如 ./prepare.sh"
+                  hint="在游戏目录执行；返回非零会中止启动。"
+                />
+                <TextInput
+                  label="包装命令"
+                  value={launch.wrapperCommand ?? ""}
+                  onChange={(event) => setLaunch((current) => ({ ...current, wrapperCommand: event.target.value }))}
+                  placeholder="可选：例如 gamemoderun / prime-run"
+                  hint="命令会前缀在 Java 之前，例如 gamemoderun 可提升 Linux 下性能。"
+                />
+                <TextInput
+                  label="启动后命令"
+                  value={launch.postLaunchCommand ?? ""}
+                  onChange={(event) => setLaunch((current) => ({ ...current, postLaunchCommand: event.target.value }))}
+                  placeholder="可选：例如 notify-send '游戏已退出'"
+                  hint="游戏进程结束后在后台执行，失败只会记录日志。"
+                />
+                <ModalError error={launchError} />
+                <div className="modal-form__actions">
+                  <Button variant="primary" icon="save" loading={savingLaunch} onClick={() => void saveLaunch()}>
+                    保存启动设置
                   </Button>
                 </div>
               </div>

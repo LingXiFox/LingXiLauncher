@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
@@ -70,6 +72,226 @@ where
         .map(|value| value.unwrap_or_else(default_java_source))
 }
 
+/// How the game window should be created.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum WindowMode {
+    /// A resizable window sized to window_width x window_height.
+    Windowed,
+    /// Exclusive fullscreen, sized to the current display.
+    Fullscreen,
+    /// Windowed, sized to the primary display work area.
+    Maximized,
+}
+
+impl Default for WindowMode {
+    fn default() -> Self {
+        Self::Windowed
+    }
+}
+
+impl WindowMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Windowed => "windowed",
+            Self::Fullscreen => "fullscreen",
+            Self::Maximized => "maximized",
+        }
+    }
+}
+
+/// OS scheduling priority applied to the game process right after spawn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ProcessPriority {
+    Low,
+    BelowNormal,
+    Normal,
+    AboveNormal,
+    High,
+}
+
+impl Default for ProcessPriority {
+    fn default() -> Self {
+        Self::Normal
+    }
+}
+
+impl ProcessPriority {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Low => "low",
+            Self::BelowNormal => "belowNormal",
+            Self::Normal => "normal",
+            Self::AboveNormal => "aboveNormal",
+            Self::High => "high",
+        }
+    }
+}
+
+/// Which rendering backend the game should start with.
+///
+/// Minecraft 26.2 and newer ship a Vulkan backend selected through the
+/// --graphicsBackend command line flag; older versions only have OpenGL, so the
+/// setting is ignored there and reported as unsupported.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum GraphicsApi {
+    Auto,
+    OpenGl,
+    Vulkan,
+}
+
+impl Default for GraphicsApi {
+    fn default() -> Self {
+        Self::Auto
+    }
+}
+
+impl GraphicsApi {
+    /// Value understood by the game's --graphicsBackend flag.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Auto => "default",
+            Self::OpenGl => "opengl",
+            Self::Vulkan => "vulkan",
+        }
+    }
+}
+
+/// What the launcher window does once the game process is alive.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum LauncherVisibility {
+    /// Keep the launcher visible.
+    Keep,
+    /// Minimise the launcher while the game runs.
+    Minimize,
+    /// Close the launcher window entirely.
+    Close,
+    /// Hide the launcher and restore it when the game exits.
+    Hide,
+}
+
+impl Default for LauncherVisibility {
+    fn default() -> Self {
+        Self::Keep
+    }
+}
+
+impl LauncherVisibility {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Keep => "keep",
+            Self::Minimize => "minimize",
+            Self::Close => "close",
+            Self::Hide => "hide",
+        }
+    }
+}
+
+fn default_window_width() -> u32 {
+    1280
+}
+
+fn default_window_height() -> u32 {
+    720
+}
+
+/// Per-instance launch options.
+///
+/// Every field carries a serde default so instance files written by earlier
+/// launcher builds keep loading unchanged.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InstanceLaunchSettings {
+    #[serde(default)]
+    pub window_mode: WindowMode,
+    #[serde(default = "default_window_width")]
+    pub window_width: u32,
+    #[serde(default = "default_window_height")]
+    pub window_height: u32,
+    #[serde(default)]
+    pub process_priority: ProcessPriority,
+    /// Extra environment variables handed to the JVM.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub environment: BTreeMap<String, String>,
+    /// Shell command run before the JVM starts; a non-zero exit aborts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pre_launch_command: Option<String>,
+    /// Command prefix wrapped around the Java executable, e.g. prime-run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wrapper_command: Option<String>,
+    /// Shell command run once the game process exits.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub post_launch_command: Option<String>,
+    #[serde(default)]
+    pub graphics_api: GraphicsApi,
+    /// Enable Vulkan validation layers (debug only).
+    #[serde(default)]
+    pub vulkan_validation: bool,
+    /// Hash-check installed files before every launch.
+    #[serde(default)]
+    pub verify_before_launch: bool,
+    #[serde(default)]
+    pub launcher_visibility: LauncherVisibility,
+}
+
+impl Default for InstanceLaunchSettings {
+    fn default() -> Self {
+        Self {
+            window_mode: WindowMode::default(),
+            window_width: default_window_width(),
+            window_height: default_window_height(),
+            process_priority: ProcessPriority::default(),
+            environment: BTreeMap::new(),
+            pre_launch_command: None,
+            wrapper_command: None,
+            post_launch_command: None,
+            graphics_api: GraphicsApi::default(),
+            vulkan_validation: false,
+            verify_before_launch: false,
+            launcher_visibility: LauncherVisibility::default(),
+        }
+    }
+}
+
+impl InstanceLaunchSettings {
+    /// Rejects values the JVM or the game would choke on.
+    pub fn validate(&self) -> Result<()> {
+        if !(320..=7680).contains(&self.window_width) || !(240..=4320).contains(&self.window_height) {
+            return Err(Error::InvalidMetadata(format!(
+                "window size {}x{} outside 320x240..7680x4320",
+                self.window_width, self.window_height
+            )));
+        }
+        for (key, value) in &self.environment {
+            if key.is_empty()
+                || key.contains('=')
+                || key.contains(char::from(0))
+                || value.contains(char::from(0))
+            {
+                return Err(Error::InvalidMetadata(format!(
+                    "invalid environment variable {key:?}"
+                )));
+            }
+        }
+        for command in [
+            self.pre_launch_command.as_deref(),
+            self.wrapper_command.as_deref(),
+            self.post_launch_command.as_deref(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            if command.trim().is_empty() || command.contains(char::from(0)) {
+                return Err(Error::InvalidMetadata("empty or invalid command".into()));
+            }
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InstanceManifest {
@@ -90,6 +312,9 @@ pub struct InstanceManifest {
     pub java_runtime: Option<JavaRuntimeRecord>,
     #[serde(default)]
     pub jvm_arguments: Option<Vec<String>>,
+    /// Window, priority, hooks and GPU options added in 0.10.
+    #[serde(default)]
+    pub launch: InstanceLaunchSettings,
 }
 
 impl InstanceManifest {
@@ -109,6 +334,7 @@ impl InstanceManifest {
             memory_mib: None,
             java_runtime: None,
             jvm_arguments: None,
+            launch: InstanceLaunchSettings::default(),
         }
     }
 }

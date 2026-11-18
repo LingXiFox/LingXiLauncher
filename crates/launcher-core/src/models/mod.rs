@@ -8,7 +8,8 @@ pub use account::{
     MicrosoftAccount, MicrosoftAccountStore, PlayerAppearance,
 };
 pub use instance::{
-    Instance, InstanceManifest, InstanceMemory, InstanceRepository, JavaRuntimeRecord,
+    GraphicsApi, Instance, InstanceLaunchSettings, InstanceManifest, InstanceMemory,
+    InstanceRepository, JavaRuntimeRecord, LauncherVisibility, ProcessPriority, WindowMode,
 };
 pub use launch::{
     ExitReason, GameExit, GameProcessEvent, LaunchContext, LaunchIdentity, LaunchPlan,

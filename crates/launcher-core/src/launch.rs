@@ -13,10 +13,11 @@ use crate::error::{Error, Result};
 use crate::layout::GameDataLayout;
 use crate::models::instance::Instance;
 use crate::models::launch::{
-    ExitReason, GameExit, GameProcessEvent, LaunchDiagnostic, LaunchPlan, LaunchPreview,
+    ExitReason, GameExit, GameProcessEvent, LaunchDiagnostic, LaunchHooks, LaunchPlan, LaunchPreview,
     MissingDependency,
 };
 pub use crate::models::launch::{LaunchContext, LaunchIdentity};
+use crate::models::instance::{GraphicsApi, InstanceLaunchSettings, ProcessPriority, WindowMode};
 use crate::models::version::{AssetIndex, Library};
 use crate::platform::PlatformContext;
 use crate::version::arguments::expand;
@@ -193,6 +194,66 @@ pub(crate) fn native_artifact(
     }))
 }
 
+/// Result of a pre-launch integrity check. Size and SHA-1 of every library and
+/// of the client jar are compared against the version metadata so a truncated
+/// or half-written file is caught before the JVM starts and prints a confusing
+/// `NoClassDefFoundError` instead.
+#[derive(Debug, Clone, Default)]
+pub struct VerificationReport {
+    pub checked: usize,
+    pub problems: Vec<MissingDependency>,
+}
+
+impl VerificationReport {
+    pub fn is_clean(&self) -> bool {
+        self.problems.is_empty()
+    }
+}
+
+/// Verifies the installed files a launch depends on. Only hashes files that
+/// declare a digest; anything without one is still size checked.
+pub fn verify_installation(
+    version: &ResolvedVersion,
+    layout: &GameDataLayout,
+    platform: &PlatformContext,
+) -> Result<VerificationReport> {
+    let mut report = VerificationReport::default();
+    for library in &version.libraries {
+        if !is_allowed(&library.rules, platform)? {
+            continue;
+        }
+        let Some(artifact) = library.effective_artifact()? else {
+            continue;
+        };
+        let path = layout.library_path(&artifact.relative_path)?;
+        report.checked += 1;
+        if !crate::install::verify_file(&path, artifact.sha1.as_deref(), artifact.size)? {
+            report.problems.push(MissingDependency {
+                name: library.name.clone(),
+                reason: "library jar failed verification".into(),
+                relative_path: Some(artifact.relative_path),
+            });
+        }
+    }
+    if let Some(client) = &version.client_jar {
+        let path = layout.client_jar(&version.client_jar_version_id)?;
+        report.checked += 1;
+        let sha1 = client
+            .sha1
+            .as_deref()
+            .filter(|value| !value.is_empty());
+        let size = client.size.filter(|value| *value > 0);
+        if !crate::install::verify_file(&path, sha1, size)? {
+            report.problems.push(MissingDependency {
+                name: "client jar".into(),
+                reason: "client jar failed verification".into(),
+                relative_path: None,
+            });
+        }
+    }
+    Ok(report)
+}
+
 pub struct LaunchPlanBuilder;
 
 impl LaunchPlanBuilder {
@@ -206,6 +267,7 @@ impl LaunchPlanBuilder {
         layout: &GameDataLayout,
         context: &LaunchContext,
     ) -> Result<LaunchPreview> {
+        instance.manifest.launch.validate()?;
         let resolution = DependencyResolver::resolve(version, layout, &context.platform)?;
         let diagnostics = diagnostics(instance, version, context, &resolution);
         let variables = base_variables(instance, version, layout, context, &resolution);
@@ -248,6 +310,8 @@ impl LaunchPlanBuilder {
         layout: &GameDataLayout,
         context: &LaunchContext,
     ) -> Result<LaunchPlan> {
+        let settings = &instance.manifest.launch;
+        settings.validate()?;
         let resolution = DependencyResolver::resolve(version, layout, &context.platform)?;
         if !resolution.missing.is_empty() {
             let names = resolution
@@ -291,14 +355,18 @@ impl LaunchPlanBuilder {
         );
 
         let sensitive = ["auth_access_token", "auth_session"];
-        let mut arguments = Vec::new();
-        arguments.push(format!(
-            "-Xmx{}M",
-            instance
-                .manifest
-                .memory_mib
-                .unwrap_or_else(|| { crate::models::instance::InstanceMemory::automatic_mib() })
-        ));
+        // Requirement 7: an explicit memory value pins both heap bounds, while
+        // automatic memory scales with the machine and keeps the initial heap
+        // smaller so a quarter of RAM is not reserved up front.
+        let memory_mib = instance
+            .manifest
+            .memory_mib
+            .unwrap_or_else(crate::models::instance::InstanceMemory::automatic_mib);
+        let memory_arguments = vec![
+            format!("-Xms{}M", (memory_mib / 2).max(256).min(memory_mib)),
+            format!("-Xmx{memory_mib}M"),
+        ];
+        let mut arguments = memory_arguments.clone();
         if let Some(extra) = &instance.manifest.jvm_arguments {
             arguments.extend(extra.iter().cloned());
         }
@@ -329,6 +397,10 @@ impl LaunchPlanBuilder {
             &variables,
             &sensitive,
         )?);
+        // Window mode and renderer switches are launcher owned: vanilla only
+        // emits --width/--height behind has_custom_resolution.
+        let extra_game = launcher_game_arguments(settings, version, context);
+        arguments.extend(extra_game.iter().cloned());
 
         let mut redacted_variables = variables.clone();
         for key in sensitive {
@@ -337,7 +409,7 @@ impl LaunchPlanBuilder {
             }
         }
         let mut redacted = Vec::new();
-        redacted.push(arguments.first().cloned().unwrap_or_default());
+        redacted.extend(memory_arguments.iter().cloned());
         redacted.extend(expand(
             &version.jvm_arguments,
             &context.platform,
@@ -351,9 +423,14 @@ impl LaunchPlanBuilder {
             &redacted_variables,
             &sensitive,
         )?);
+        redacted.extend(extra_game.iter().cloned());
 
         let mut environment_overrides = BTreeMap::new();
         environment_overrides.insert("LINGXI_INSTANCE_ID".into(), instance.manifest.id.clone());
+        environment_overrides.insert("LINGXI_INSTANCE_DIR".into(), instance.directory.display().to_string());
+        for (key, value) in &settings.environment {
+            environment_overrides.insert(key.clone(), value.clone());
+        }
         Ok(LaunchPlan {
             java_executable: context.java_executable.clone(),
             arguments,
@@ -362,7 +439,249 @@ impl LaunchPlanBuilder {
             environment_overrides,
             version_id: version.id.clone(),
             identity_mode: context.identity.mode,
+            process_priority: settings.process_priority,
+            wrapper_command: settings.wrapper_command.clone(),
+            hooks: LaunchHooks {
+                pre_launch_command: settings.pre_launch_command.clone(),
+                post_launch_command: settings.post_launch_command.clone(),
+            },
         })
+    }
+}
+
+/// Window mode and renderer switches are owned by the launcher: vanilla only
+/// emits `--width`/`--height` behind `has_custom_resolution`, so per instance
+/// window settings would otherwise never reach the game.
+fn launcher_game_arguments(
+    settings: &InstanceLaunchSettings,
+    version: &ResolvedVersion,
+    context: &LaunchContext,
+) -> Vec<String> {
+    let mut arguments = Vec::new();
+    // The launcher only passes window flags to versions whose metadata knows
+    // about them; older releases parse arguments strictly and would abort.
+    let window_flags = supports_window_arguments(version);
+    match settings.window_mode {
+        WindowMode::Windowed if !window_flags => {}
+        WindowMode::Windowed => {
+            arguments.push("--width".into());
+            arguments.push(settings.window_width.to_string());
+            arguments.push("--height".into());
+            arguments.push(settings.window_height.to_string());
+        }
+        // Vanilla has no --maximized switch; sizing the window to the display
+        // work area is the closest a launcher can get without touching the
+        // game window after it appears.
+        WindowMode::Maximized if !window_flags => {}
+        WindowMode::Maximized => {
+            let (width, height) = context
+                .display_size
+                .filter(|(width, height)| *width >= 320 && *height >= 240)
+                .unwrap_or((settings.window_width, settings.window_height));
+            arguments.push("--width".into());
+            arguments.push(width.to_string());
+            arguments.push("--height".into());
+            arguments.push(height.to_string());
+        }
+        WindowMode::Fullscreen if !window_flags => {}
+        WindowMode::Fullscreen => {
+            arguments.push("--fullscreen".into());
+            // Keep a sane windowed size so leaving fullscreen restores it.
+            arguments.push("--width".into());
+            arguments.push(settings.window_width.to_string());
+            arguments.push("--height".into());
+            arguments.push(settings.window_height.to_string());
+        }
+    }
+    if settings.graphics_api != GraphicsApi::Auto && supports_graphics_backend(&version.id) {
+        arguments.push("--graphicsBackend".into());
+        arguments.push(settings.graphics_api.as_str().into());
+        if settings.graphics_api == GraphicsApi::Vulkan && settings.vulkan_validation {
+            arguments.push("--vulkanValidation".into());
+        }
+    }
+    arguments
+}
+
+/// Vanilla metadata only carries `--width`/`--height` when it defines a
+/// `has_custom_resolution` rule; versions without those templates reject the
+/// flags outright, so the launcher must check before adding them.
+fn supports_window_arguments(version: &ResolvedVersion) -> bool {
+    fn mentions(entries: &[crate::models::version::ArgumentEntry]) -> bool {
+        entries.iter().any(|entry| match entry {
+            crate::models::version::ArgumentEntry::Plain(value) => {
+                value == "--width" || value.contains("${resolution_width}")
+            }
+            crate::models::version::ArgumentEntry::Conditional { values, .. } => values
+                .iter()
+                .any(|value| value == "--width" || value.contains("${resolution_width}")),
+        })
+    }
+    mentions(&version.game_arguments)
+}
+
+/// `--graphicsBackend` landed in Minecraft 26.2 (snapshots included). Older
+/// versions reject the option, so the launcher must not pass it there.
+fn supports_graphics_backend(version_id: &str) -> bool {
+    let mut parts = version_id
+        .split(['.', '-'])
+        .filter_map(|part| part.parse::<u32>().ok());
+    let Some(major) = parts.next() else {
+        return false;
+    };
+    let minor = parts.next().unwrap_or(0);
+    major > 26 || (major == 26 && minor >= 2)
+}
+
+/// Builds the command that actually starts the JVM. A wrapper command (for
+/// example `gamemoderun` or `prime-run`) is prefixed to the java invocation so
+/// the game runs under it while the launcher keeps tracking the real process.
+fn launch_command(plan: &LaunchPlan) -> Result<tokio::process::Command> {
+    let command = match plan.wrapper_command.as_deref() {
+        Some(wrapper) => {
+            let mut words = split_command(wrapper)?;
+            if words.is_empty() {
+                return Err(Error::InvalidMetadata("empty wrapper command".into()));
+            }
+            let program = words.remove(0);
+            let mut command = tokio::process::Command::new(program);
+            command.args(words);
+            command.arg(&plan.java_executable).args(&plan.arguments);
+            command
+        }
+        None => {
+            let mut command = tokio::process::Command::new(&plan.java_executable);
+            command.args(&plan.arguments);
+            command
+        }
+    };
+    Ok(command)
+}
+
+/// Splits a command line on whitespace while honouring single and double
+/// quotes, which is all the launcher needs for wrapper and hook commands.
+fn split_command(command: &str) -> Result<Vec<String>> {
+    let mut words = Vec::new();
+    let mut current = String::new();
+    let mut quote: Option<char> = None;
+    let mut has_word = false;
+    for character in command.chars() {
+        match quote {
+            Some(open) => {
+                if character == open {
+                    quote = None;
+                } else {
+                    current.push(character);
+                }
+            }
+            None if character == '"' || character == '\'' => {
+                quote = Some(character);
+                has_word = true;
+            }
+            None if character.is_whitespace() => {
+                if has_word {
+                    words.push(std::mem::take(&mut current));
+                    has_word = false;
+                }
+            }
+            None => {
+                current.push(character);
+                has_word = true;
+            }
+        }
+    }
+    if quote.is_some() {
+        return Err(Error::InvalidMetadata(format!(
+            "unterminated quote in command {command:?}"
+        )));
+    }
+    if has_word {
+        words.push(current);
+    }
+    Ok(words)
+}
+
+/// Runs a pre- or post-launch hook. Pre-launch failures abort the launch so a
+/// half-prepared environment is never handed to the game; post-launch failures
+/// are only logged by the caller.
+async fn run_hook(label: &str, command: Option<&str>, directory: &Path) -> Result<()> {
+    let Some(command) = command else {
+        return Ok(());
+    };
+    let mut words = split_command(command)?;
+    if words.is_empty() {
+        return Ok(());
+    }
+    let program = words.remove(0);
+    let status = tokio::process::Command::new(&program)
+        .args(words)
+        .current_dir(directory)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .await
+        .map_err(|error| Error::Other(format!("{label} command failed to start: {error}")))?;
+    if !status.success() {
+        return Err(Error::Other(format!(
+            "{label} command exited with {status}"
+        )));
+    }
+    Ok(())
+}
+
+/// Applies the requested scheduling priority to a freshly spawned process.
+/// Neither std nor tokio expose this portably without extra crates, so the
+/// launcher shells out to the platform tools it already depends on and treats
+/// a failure as a warning: the game still runs at the default priority.
+fn apply_process_priority(process_id: u32, priority: ProcessPriority) {
+    if priority == ProcessPriority::Normal || process_id == 0 {
+        return;
+    }
+    let result = if cfg!(windows) {
+        let class = match priority {
+            ProcessPriority::Low => "Idle",
+            ProcessPriority::BelowNormal => "BelowNormal",
+            ProcessPriority::Normal => "Normal",
+            ProcessPriority::AboveNormal => "AboveNormal",
+            ProcessPriority::High => "High",
+        };
+        std::process::Command::new("powershell")
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-WindowStyle",
+                "Hidden",
+                "-Command",
+            ])
+            .arg(format!(
+                "(Get-Process -Id {process_id}).PriorityClass = '{class}'"
+            ))
+            .status()
+    } else {
+        let nice = match priority {
+            ProcessPriority::Low => 20_i32,
+            ProcessPriority::BelowNormal => 10,
+            ProcessPriority::Normal => 0,
+            ProcessPriority::AboveNormal => -5,
+            ProcessPriority::High => -10,
+        };
+        std::process::Command::new("renice")
+            .args(["-n", &nice.to_string(), "-p", &process_id.to_string()])
+            .status()
+    };
+    match result {
+        Ok(status) if status.success() => {}
+        Ok(status) => tracing::warn!(
+            process_id,
+            priority = priority.as_str(),
+            "could not change process priority ({status})"
+        ),
+        Err(error) => tracing::warn!(
+            process_id,
+            priority = priority.as_str(),
+            %error,
+            "could not change process priority"
+        ),
     }
 }
 
@@ -546,9 +865,14 @@ pub struct LaunchService;
 
 impl LaunchService {
     pub async fn launch(plan: &LaunchPlan, log_path: Option<PathBuf>) -> Result<RunningGame> {
-        let mut command = tokio::process::Command::new(&plan.java_executable);
+        run_hook(
+            "pre-launch",
+            plan.hooks.pre_launch_command.as_deref(),
+            &plan.working_directory,
+        )
+        .await?;
+        let mut command = launch_command(plan)?;
         command
-            .args(&plan.arguments)
             .current_dir(&plan.working_directory)
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
@@ -560,6 +884,7 @@ impl LaunchService {
             .spawn()
             .map_err(|e| Error::JavaUnusable(format!("cannot start Java: {e}")))?;
         let process_id = child.id().unwrap_or_default();
+        apply_process_priority(process_id, plan.process_priority);
         let stdout = child.stdout.take();
         let stderr = child.stderr.take();
         let (sender, receiver) = broadcast::channel(2048);
@@ -585,6 +910,8 @@ impl LaunchService {
             stopped: stopped.clone(),
         };
         let waiter_sender = sender.clone();
+        let post_launch = plan.hooks.post_launch_command.clone();
+        let post_directory = plan.working_directory.clone();
         tokio::spawn(async move {
             let exit = loop {
                 let status = {
@@ -613,6 +940,11 @@ impl LaunchService {
                 is_success: exit.success() && !cancelled,
             };
             let _ = waiter_sender.send(GameProcessEvent::Exited { exit });
+            if let Err(error) =
+                run_hook("post-launch", post_launch.as_deref(), &post_directory).await
+            {
+                tracing::warn!(error = %error, "post-launch command failed");
+            }
         });
 
         Ok(RunningGame {
@@ -742,6 +1074,7 @@ mod tests {
                 memory_mib: None,
                 java_runtime: None,
                 jvm_arguments: None,
+                launch: Default::default(),
             },
             directory: root.join("instance"),
             game_directory: root.join("instance").join("minecraft"),
