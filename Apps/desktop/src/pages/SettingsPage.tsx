@@ -191,7 +191,7 @@ export function SettingsPage() {
     setPicking(true);
     setError(null);
     try {
-      const path = await api.browseFolder();
+      const path = await api.browseImage();
       if (path) updateDraft({ backgroundImage: path });
     } catch (reason) {
       setError(`选择背景图片失败：${errorText(reason)}`);

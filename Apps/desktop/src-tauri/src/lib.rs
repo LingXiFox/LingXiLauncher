@@ -64,6 +64,8 @@ pub fn run() {
             commands::settings::detect_java,
             commands::settings::browse_java,
             commands::settings::browse_folder,
+            commands::settings::browse_image,
+            commands::settings::read_background_image,
             commands::window::open_log_window,
             commands::window::restart_app,
             commands::update::check_update,

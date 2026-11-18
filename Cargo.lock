@@ -1971,6 +1971,7 @@ dependencies = [
 name = "lingxi-desktop"
 version = "0.10.0-rc.1"
 dependencies = [
+ "base64 0.22.1",
  "chrono",
  "launcher-auth",
  "launcher-core",

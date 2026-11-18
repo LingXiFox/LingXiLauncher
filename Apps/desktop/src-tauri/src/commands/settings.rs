@@ -390,3 +390,55 @@ pub fn browse_folder(app: AppHandle) -> CommandResult<Option<String>> {
         .and_then(|path| path.into_path().ok())
         .map(|path| path.display().to_string()))
 }
+
+#[tauri::command]
+pub fn browse_image(app: AppHandle) -> CommandResult<Option<String>> {
+    let file = app
+        .dialog()
+        .file()
+        .add_filter("Image", &["png", "jpg", "jpeg", "webp", "gif", "bmp"])
+        .blocking_pick_file();
+    Ok(file
+        .and_then(|path| path.into_path().ok())
+        .map(|path| path.display().to_string()))
+}
+
+/// Upper bound for a background picture: the webview keeps the whole image in
+/// memory as a data URL, so oversized files are rejected instead of freezing.
+const MAX_BACKGROUND_IMAGE_BYTES: u64 = 8 * 1024 * 1024;
+
+/// The webview cannot read arbitrary files, so the picture is inlined as a data
+/// URL. That keeps the CSP untouched (img-src already allows data:) and avoids
+/// enabling the asset protocol for a single decorative feature.
+#[tauri::command]
+pub fn read_background_image(path: String) -> CommandResult<String> {
+    use base64::Engine;
+
+    let path = std::path::PathBuf::from(&path);
+    let metadata = std::fs::metadata(&path).map_err(|error| format!("无法读取背景图片：{error}"))?;
+    if !metadata.is_file() {
+        return Err("背景图片路径不是文件".into());
+    }
+    if metadata.len() > MAX_BACKGROUND_IMAGE_BYTES {
+        return Err(format!(
+            "背景图片过大（上限 {} MB）",
+            MAX_BACKGROUND_IMAGE_BYTES / 1024 / 1024
+        ));
+    }
+    let extension = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let mime = match extension.as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "webp" => "image/webp",
+        "gif" => "image/gif",
+        "bmp" => "image/bmp",
+        _ => return Err("背景图片仅支持 PNG / JPG / WebP / GIF / BMP".into()),
+    };
+    let bytes = std::fs::read(&path).map_err(|error| format!("无法读取背景图片：{error}"))?;
+    let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
+    Ok(format!("data:{mime};base64,{encoded}"))
+}

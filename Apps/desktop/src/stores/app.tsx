@@ -28,7 +28,6 @@ import {
   type MicrosoftAccount,
   type VersionFilter,
 } from "../services/api";
-import { convertFileSrc } from "@tauri-apps/api/core";
 import { applyInstallEvent } from "../services/progress";
 import type { ToastItem, ToastTone } from "../components/Toast";
 
@@ -275,8 +274,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (meta) meta.content = resolvedTheme === "dark" ? "#0D0F12" : "#F4F1EB";
   }, [resolvedTheme, settings.appearance, settings.accent]);
 
-  /* Background artwork is a local image the user picked; the webview serves it
-     through the asset protocol, so CSS only receives the resolved URL. */
+  /* The webview cannot read arbitrary files, so the Rust side inlines the
+     picture as a data URL and CSS only receives the finished value. */
   useEffect(() => {
     const root = document.documentElement;
     const path = settings.backgroundImage ?? null;
@@ -285,8 +284,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
       root.dataset.background = "none";
       return;
     }
-    root.style.setProperty("--app-background-image", `url("${convertFileSrc(path)}")`);
-    root.dataset.background = "custom";
+    let cancelled = false;
+    void api
+      .readBackgroundImage(path)
+      .then((url) => {
+        if (cancelled) return;
+        root.style.setProperty("--app-background-image", `url("${url}")`);
+        root.dataset.background = "custom";
+      })
+      .catch(() => {
+        if (cancelled) return;
+        root.style.removeProperty("--app-background-image");
+        root.dataset.background = "none";
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [settings.backgroundImage]);
 
   const setSection = useCallback((next: Section) => {

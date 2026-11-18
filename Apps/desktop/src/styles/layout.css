@@ -6,6 +6,22 @@
     radial-gradient(1100px 420px at 76% -10%, var(--accent-soft), transparent 60%),
     var(--canvas);
 }
+/* A user-picked picture sits under a scrim so the interface keeps contrast. */
+:root[data-background="custom"] .app-shell {
+  background-image:
+    linear-gradient(rgba(13, 15, 18, 0.82), rgba(13, 15, 18, 0.82)),
+    var(--app-background-image);
+  background-size: cover, cover;
+  background-position: center, center;
+  background-attachment: fixed, fixed;
+  background-repeat: no-repeat, no-repeat;
+}
+
+:root[data-theme="light"][data-background="custom"] .app-shell {
+  background-image:
+    linear-gradient(rgba(244, 241, 235, 0.86), rgba(244, 241, 235, 0.86)),
+    var(--app-background-image);
+}
 
 .sidebar {
   position: fixed;

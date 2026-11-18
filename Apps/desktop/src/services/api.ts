@@ -510,6 +510,9 @@ export const api = {
   detectJava: () => call<JavaRuntime[]>("detect_java"),
   browseJava: () => call<string | null>("browse_java"),
   browseFolder: () => call<string | null>("browse_folder"),
+  browseImage: () => call<string | null>("browse_image"),
+  readBackgroundImage: (path: string) =>
+    call<string>("read_background_image", { path }),
   restartApp: () => call<void>("restart_app"),
   openLogWindow: () => call<void>("open_log_window"),
   checkUpdate: () => call<UpdateInfo>("check_update"),
