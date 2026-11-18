@@ -203,18 +203,23 @@ pub async fn install_version(
 /// while keeping already-verified cache files.
 #[tauri::command]
 pub fn cancel_install(state: State<'_, AppState>, version_id: String) -> CommandResult<bool> {
-    let installs = state.installs.lock().expect("installs lock");
-    Ok(installs
-        .values()
-        .filter(|task| task.matches(&version_id))
-        .map(|task| {
-            task.cancel.cancel();
-            true
-        })
-        .collect::<Vec<_>>()
-        .first()
-        .copied()
-        .unwrap_or(false))
+    let matched = {
+        let installs = state.installs.lock().expect("installs lock");
+        installs
+            .values()
+            .filter(|task| task.matches(&version_id))
+            .map(|task| {
+                task.cancel.cancel();
+                task.key.clone()
+            })
+            .collect::<Vec<_>>()
+    };
+    crate::logging::info(format!(
+        "cancel_install({version_id}): matched {} task(s) {:?}",
+        matched.len(),
+        matched
+    ));
+    Ok(!matched.is_empty())
 }
 
 /// P1-5: which install tasks are currently running (for UI state restore).
