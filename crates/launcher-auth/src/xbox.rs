@@ -60,7 +60,7 @@ impl Default for MicrosoftAuthenticator {
 impl MicrosoftAuthenticator {
     pub fn new() -> Self {
         Self {
-            http: reqwest::Client::builder()
+            http: launcher_core::net::client_builder()
                 .timeout(Duration::from_secs(30))
                 .build()
                 .unwrap_or_default(),

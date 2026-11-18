@@ -201,13 +201,13 @@ impl Downloader {
                 "mirror policy requires --mirror-config or a built-in mirror".into(),
             ));
         }
-        let client = reqwest::Client::builder()
+        let client = crate::net::client_builder()
             .user_agent(user_agent())
             .connect_timeout(Duration::from_secs(20))
             .timeout(Duration::from_secs(600))
             .pool_max_idle_per_host(configuration.per_host_concurrency.max(2))
             .build()?;
-        let probe_client = reqwest::Client::builder()
+        let probe_client = crate::net::client_builder()
             .user_agent(user_agent())
             .connect_timeout(Duration::from_secs(10))
             .timeout(Duration::from_secs(30))

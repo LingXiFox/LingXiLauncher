@@ -16,6 +16,13 @@ pub struct SettingsView {
     pub mirror_config_path: Option<String>,
     pub default_memory_mib: u32,
     pub appearance: String,
+    pub language: String,
+    pub accent: String,
+    pub background_image: Option<String>,
+    pub proxy_mode: String,
+    pub proxy_url: Option<String>,
+    pub game_root: Option<String>,
+    pub log_window_on_start: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]

@@ -23,7 +23,7 @@ impl ManifestService {
     }
 
     pub fn with_url(layout: GameDataLayout, manifest_url: impl Into<String>) -> Result<Self> {
-        let client = reqwest::Client::builder()
+        let client = crate::net::client_builder()
             .user_agent(format!(
                 "{}/{}",
                 crate::models::launch::LAUNCHER_NAME,

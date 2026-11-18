@@ -67,7 +67,7 @@ pub struct LoaderInstaller {
 
 impl LoaderInstaller {
     pub fn new(layout: GameDataLayout) -> Result<Self> {
-        let client = reqwest::Client::builder()
+        let client = crate::net::client_builder()
             .user_agent(format!("LingXiLauncher/{}", env!("CARGO_PKG_VERSION")))
             .timeout(std::time::Duration::from_secs(60))
             .build()

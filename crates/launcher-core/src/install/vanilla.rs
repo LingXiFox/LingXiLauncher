@@ -30,7 +30,7 @@ use super::Downloader;
 /// P1-4: every metadata request gets an explicit connect/total timeout so a
 /// hung connection cannot stall the install forever.
 fn metadata_client() -> reqwest::Client {
-    reqwest::Client::builder()
+    crate::net::client_builder()
         .user_agent(format!(
             "{}/{}",
             crate::models::launch::LAUNCHER_NAME,

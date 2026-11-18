@@ -32,7 +32,7 @@ pub struct MicrosoftOAuthClient {
 
 impl MicrosoftOAuthClient {
     pub fn new(config: AuthConfig) -> Self {
-        let http = reqwest::Client::builder()
+        let http = launcher_core::net::client_builder()
             .timeout(Duration::from_secs(30))
             .build()
             .unwrap_or_default();

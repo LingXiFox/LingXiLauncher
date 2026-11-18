@@ -20,6 +20,13 @@ pub fn save_settings(
     mirror_config_path: Option<String>,
     default_memory_mib: Option<u32>,
     appearance: Option<String>,
+    language: Option<String>,
+    accent: Option<String>,
+    background_image: Option<String>,
+    proxy_mode: Option<String>,
+    proxy_url: Option<String>,
+    game_root: Option<String>,
+    log_window_on_start: Option<bool>,
 ) -> CommandResult<SettingsView> {
     let mut settings = state.settings_snapshot();
     if let Some(path) = java_path {
@@ -54,8 +61,83 @@ pub fn save_settings(
             _ => "dark".into(),
         };
     }
+    if let Some(language) = language {
+        settings.language = match language.trim() {
+            "en-US" | "en_us" => "en-US".into(),
+            _ => "zh-CN".into(),
+        };
+    }
+    if let Some(accent) = accent {
+        settings.accent = match accent.trim().to_ascii_lowercase().as_str() {
+            "blue" => "blue",
+            "green" => "green",
+            "purple" => "purple",
+            "pink" => "pink",
+            "red" => "red",
+            _ => "orange",
+        }
+        .to_string();
+    }
+    if let Some(path) = background_image {
+        let path = path.trim().to_string();
+        if !path.is_empty() && !std::path::Path::new(&path).is_file() {
+            return Err("背景图片不存在".into());
+        }
+        settings.background_image = Some(path).filter(|value| !value.is_empty());
+    }
+    if let Some(mode) = proxy_mode {
+        settings.proxy_mode = match mode.trim().to_ascii_lowercase().as_str() {
+            "manual" => "manual",
+            "off" | "none" => "off",
+            _ => "system",
+        }
+        .to_string();
+    }
+    if let Some(url) = proxy_url {
+        let url = url.trim().to_string();
+        settings.proxy_url = Some(url).filter(|value| !value.is_empty());
+    }
+    if settings.proxy_mode == "manual" {
+        let valid = settings
+            .proxy_url
+            .as_deref()
+            .is_some_and(|url| url.starts_with("http://") || url.starts_with("https://") || url.starts_with("socks5://"));
+        if !valid {
+            return Err("手动代理需要形如 http://127.0.0.1:7890 的地址".into());
+        }
+    }
+    if let Some(path) = game_root {
+        let path = path.trim().to_string();
+        if !path.is_empty() && !std::path::Path::new(&path).is_dir() {
+            return Err("Minecraft 目录不存在".into());
+        }
+        settings.game_root = Some(path).filter(|value| !value.is_empty());
+    }
+    if let Some(enabled) = log_window_on_start {
+        settings.log_window_on_start = enabled;
+    }
     state.save_settings(&settings).map_err(command_error)?;
+    // The proxy setting is process wide, so later clients pick it up without a
+    // restart. Existing connections keep their pool until they time out.
+    launcher_core::net::set_proxy(proxy_from(&settings));
     Ok(SettingsView::from(&settings))
+}
+
+fn proxy_from(settings: &Settings) -> launcher_core::net::ProxySettings {
+    let mode = match settings.proxy_mode.as_str() {
+        "manual" => launcher_core::net::ProxyMode::Manual,
+        "off" => launcher_core::net::ProxyMode::Off,
+        _ => launcher_core::net::ProxyMode::System,
+    };
+    launcher_core::net::ProxySettings {
+        mode,
+        url: settings.proxy_url.clone(),
+    }
+}
+
+/// Applies the persisted proxy choice to every HTTP client built afterwards.
+pub fn apply_saved_proxy(settings: &Settings) {
+    launcher_core::net::set_proxy(proxy_from(settings));
 }
 
 impl From<&Settings> for SettingsView {
@@ -69,6 +151,13 @@ impl From<&Settings> for SettingsView {
             mirror_config_path: settings.mirror_config_path.clone(),
             default_memory_mib: settings.default_memory_mib,
             appearance: settings.appearance.clone(),
+            language: settings.language.clone(),
+            accent: settings.accent.clone(),
+            background_image: settings.background_image.clone(),
+            proxy_mode: settings.proxy_mode.clone(),
+            proxy_url: settings.proxy_url.clone(),
+            game_root: settings.game_root.clone(),
+            log_window_on_start: settings.log_window_on_start,
         }
     }
 }
@@ -288,6 +377,14 @@ pub fn detect_java(state: State<'_, AppState>) -> CommandResult<Vec<JavaRuntimeV
 pub fn browse_java(app: AppHandle) -> CommandResult<Option<String>> {
     let file = app.dialog().file().blocking_pick_file();
     Ok(file
+        .and_then(|path| path.into_path().ok())
+        .map(|path| path.display().to_string()))
+}
+
+#[tauri::command]
+pub fn browse_folder(app: AppHandle) -> CommandResult<Option<String>> {
+    let folder = app.dialog().file().blocking_pick_folder();
+    Ok(folder
         .and_then(|path| path.into_path().ok())
         .map(|path| path.display().to_string()))
 }

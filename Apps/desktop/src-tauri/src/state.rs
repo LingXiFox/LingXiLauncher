@@ -19,6 +19,13 @@ pub struct Settings {
     pub mirror_config_path: Option<String>,
     pub default_memory_mib: u32,
     pub appearance: String,
+    pub language: String,
+    pub accent: String,
+    pub background_image: Option<String>,
+    pub proxy_mode: String,
+    pub proxy_url: Option<String>,
+    pub game_root: Option<String>,
+    pub log_window_on_start: bool,
 }
 
 impl Default for Settings {
@@ -29,6 +36,13 @@ impl Default for Settings {
             mirror_config_path: None,
             default_memory_mib: 2048,
             appearance: "dark".to_string(),
+            language: "zh-CN".to_string(),
+            accent: "orange".to_string(),
+            background_image: None,
+            proxy_mode: "system".to_string(),
+            proxy_url: None,
+            game_root: None,
+            log_window_on_start: false,
         }
     }
 }
@@ -41,6 +55,15 @@ impl Settings {
     pub fn mirror(&self) -> Option<TrustedMirrorConfiguration> {
         let path = self.mirror_config_path.as_ref().map(PathBuf::from)?;
         TrustedMirrorConfiguration::load(&path).ok()
+    }
+
+    /// Resolves the effective Minecraft root. A custom game root that no longer
+    /// exists falls back to the detected one so the launcher still starts.
+    pub fn resolved_game_root(&self, fallback: PathBuf) -> PathBuf {
+        match self.game_root.as_ref().map(PathBuf::from) {
+            Some(path) if path.is_dir() => path,
+            _ => fallback,
+        }
     }
 }
 
@@ -89,10 +112,16 @@ pub struct AppState {
 
 impl AppState {
     pub fn new() -> launcher_core::Result<Self> {
-        let layout = GameDataLayout::from_environment();
-        let (platform, runtime) = launcher_platform::native_runtime(layout.accounts_directory())?;
-
+        let mut layout = GameDataLayout::from_environment();
         let settings = load_settings(&layout);
+        // A custom Minecraft root only moves the shared game files; instances,
+        // settings and runtimes stay under the launcher data directory.
+        layout.game_root = settings.resolved_game_root(layout.game_root.clone());
+
+        // Apply the persisted proxy choice before any HTTP client is built.
+        crate::commands::settings::apply_saved_proxy(&settings);
+
+        let (platform, runtime) = launcher_platform::native_runtime(layout.accounts_directory())?;
         let auth = MicrosoftAuthService::new(
             AuthConfig::default(),
             layout.clone(),

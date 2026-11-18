@@ -5,6 +5,65 @@
 //! 403" need different reactions from the user. Messages carry the phase that
 //! failed plus a redacted URL (query strings can hold OAuth codes and tokens).
 
+use std::sync::{Mutex, OnceLock};
+
+/// How outbound HTTP traffic finds a proxy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProxyMode {
+    /// Follow the operating system / environment settings (reqwest default).
+    System,
+    /// Always use the configured proxy URL.
+    Manual,
+    /// Never use a proxy, even when the environment defines one.
+    Off,
+}
+
+/// Process wide proxy configuration shared by every HTTP client.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProxySettings {
+    pub mode: ProxyMode,
+    pub url: Option<String>,
+}
+
+impl Default for ProxySettings {
+    fn default() -> Self {
+        Self {
+            mode: ProxyMode::System,
+            url: None,
+        }
+    }
+}
+
+fn proxy_slot() -> &'static Mutex<ProxySettings> {
+    static SLOT: OnceLock<Mutex<ProxySettings>> = OnceLock::new();
+    SLOT.get_or_init(|| Mutex::new(ProxySettings::default()))
+}
+
+/// Installs the proxy configuration used by all subsequently built clients.
+pub fn set_proxy(settings: ProxySettings) {
+    *proxy_slot().lock().expect("proxy lock") = settings;
+}
+
+pub fn proxy_settings() -> ProxySettings {
+    proxy_slot().lock().expect("proxy lock").clone()
+}
+
+/// Builds a reqwest client builder honouring the process wide proxy setting.
+pub fn client_builder() -> reqwest::ClientBuilder {
+    let settings = proxy_settings();
+    let builder = reqwest::Client::builder();
+    match settings.mode {
+        ProxyMode::System => builder,
+        ProxyMode::Off => builder.no_proxy(),
+        ProxyMode::Manual => match settings.url.as_deref().map(reqwest::Proxy::all) {
+            Some(Ok(proxy)) => builder.proxy(proxy),
+            // An unparsable proxy falls back to the system setting instead of
+            // failing every request in the launcher.
+            _ => builder,
+        },
+    }
+}
+
 /// Removes query string, fragment and userinfo so a URL can be logged or shown.
 pub fn redact_url(raw: &str) -> String {
     let without_fragment = raw.split('#').next().unwrap_or(raw);

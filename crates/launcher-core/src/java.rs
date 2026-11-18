@@ -143,7 +143,7 @@ impl JavaManager {
         cancel: CancelFlag,
     ) -> Result<JavaRuntime> {
         let platform = runtime_platform();
-        let client = reqwest::Client::builder()
+        let client = crate::net::client_builder()
             .user_agent(format!(
                 "{}/{}",
                 crate::models::launch::LAUNCHER_NAME,

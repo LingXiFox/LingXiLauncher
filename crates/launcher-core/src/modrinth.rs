@@ -438,7 +438,7 @@ impl ModrinthClient {
     }
 
     pub fn with_base_url(base_url: impl Into<String>) -> Result<Self> {
-        let http = reqwest::Client::builder()
+        let http = crate::net::client_builder()
             .user_agent(MODRINTH_USER_AGENT)
             .connect_timeout(Duration::from_secs(20))
             .timeout(Duration::from_secs(180))
