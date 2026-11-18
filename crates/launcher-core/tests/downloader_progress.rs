@@ -109,6 +109,7 @@ fn downloader() -> Downloader {
             concurrency: 2,
             max_retries: 2,
             retry_delay_ms: 1,
+            ..DownloadConfiguration::default()
         },
     )
     .expect("downloader")

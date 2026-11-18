@@ -94,6 +94,21 @@ pub enum InstallProgressEvent {
         downloaded: u64,
         total: u64,
     },
+    /// Aggregate speed sample so the GUI can show MB/s and ETA without polling.
+    Speed {
+        bytes_per_second: u64,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        remaining_seconds: Option<u64>,
+        active_files: usize,
+    },
+    /// A single file is being retried; without this the UI looks frozen while a
+    /// slow mirror times out.
+    Retry {
+        path: String,
+        attempt: usize,
+        max_attempts: usize,
+        message: String,
+    },
 }
 
 pub trait ProgressSink: Send + Sync {
@@ -159,17 +174,44 @@ impl DownloadSummary {
 
 #[derive(Debug, Clone)]
 pub struct DownloadConfiguration {
+    /// Files downloaded in parallel. This is the *initial* value when adaptive
+    /// concurrency is enabled and the hard ceiling otherwise.
     pub concurrency: usize,
     pub max_retries: usize,
     pub retry_delay_ms: u64,
+    /// Absolute ceiling for concurrent file transfers (files * segments).
+    pub global_concurrency: usize,
+    /// Ceiling for concurrent transfers against a single host, so one slow
+    /// mirror cannot starve the rest of the queue.
+    pub per_host_concurrency: usize,
+    /// Maximum number of HTTP Range segments used for a single large file.
+    pub segments: usize,
+    /// Files at or above this size are eligible for segmented downloads.
+    pub segment_threshold_bytes: u64,
+    /// Grow/shrink the transfer window based on observed failures.
+    pub adaptive_concurrency: bool,
+    /// Built-in mirrors available to the auto policy (currently `bmclapi`).
+    pub builtin_mirrors: Vec<String>,
+    /// Content addressed cache root; `None` disables cross-instance reuse.
+    pub cache_directory: Option<std::path::PathBuf>,
+    /// How often aggregate speed samples are emitted.
+    pub speed_report_interval_ms: u64,
 }
 
 impl Default for DownloadConfiguration {
     fn default() -> Self {
         Self {
-            concurrency: 4,
+            concurrency: 8,
             max_retries: 3,
             retry_delay_ms: 500,
+            global_concurrency: 24,
+            per_host_concurrency: 8,
+            segments: 4,
+            segment_threshold_bytes: 4 * 1024 * 1024,
+            adaptive_concurrency: true,
+            builtin_mirrors: vec!["bmclapi".to_string()],
+            cache_directory: None,
+            speed_report_interval_ms: 500,
         }
     }
 }

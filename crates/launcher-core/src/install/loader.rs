@@ -72,13 +72,17 @@ impl LoaderInstaller {
             .timeout(std::time::Duration::from_secs(60))
             .build()
             .map_err(|e| Error::Http(e.to_string()))?;
+        let configuration = DownloadConfiguration {
+            cache_directory: Some(layout.downloads_cache_directory()),
+            ..DownloadConfiguration::default()
+        };
         Ok(Self {
             layout,
             client,
             platform: PlatformContext::current(),
             policy: DownloadSourcePolicy::Auto,
             mirror: None,
-            configuration: DownloadConfiguration::default(),
+            configuration,
         })
     }
 

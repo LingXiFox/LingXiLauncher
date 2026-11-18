@@ -116,6 +116,14 @@ export interface InstallProgress {
   downloadedBytes: number;
   currentFile?: string | null;
   message?: string | null;
+  /** Bytes per second measured by the backend speed reporter. */
+  bytesPerSecond?: number;
+  /** Estimated seconds remaining, when the backend can compute it. */
+  remainingSeconds?: number | null;
+  /** Files currently being transferred. */
+  activeFiles?: number;
+  /** Retry notice for the file that just failed and will be retried. */
+  retry?: { path: string; attempt: number; maxAttempts: number; message: string } | null;
 }
 
 export interface LogContent {
@@ -554,6 +562,12 @@ export function onInstallProgress(handler: (event: InstallProgressEvent) => void
       source: typeof item.source === "string" ? item.source : undefined,
       downloaded: typeof item.downloaded === "number" ? item.downloaded : undefined,
       total: typeof item.total === "number" ? item.total : undefined,
+      bytesPerSecond: typeof item.bytesPerSecond === "number" ? item.bytesPerSecond : undefined,
+      remainingSeconds:
+        typeof item.remainingSeconds === "number" ? item.remainingSeconds : null,
+      activeFiles: typeof item.activeFiles === "number" ? item.activeFiles : undefined,
+      attempt: typeof item.attempt === "number" ? item.attempt : undefined,
+      maxAttempts: typeof item.maxAttempts === "number" ? item.maxAttempts : undefined,
     });
   });
 }

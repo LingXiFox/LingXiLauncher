@@ -131,6 +131,28 @@ impl ProgressSink for CliProgress {
             InstallProgressEvent::FileFailed { path, message } => {
                 eprintln!("[failed] {path}: {message}");
             }
+            InstallProgressEvent::Speed {
+                bytes_per_second,
+                remaining_seconds,
+                active_files,
+            } => {
+                if let Some(remaining) = remaining_seconds {
+                    eprintln!(
+                        "[speed] {}/s, {} active, ~{}s left",
+                        format_bytes(bytes_per_second),
+                        active_files,
+                        remaining
+                    );
+                }
+            }
+            InstallProgressEvent::Retry {
+                path,
+                attempt,
+                max_attempts,
+                message,
+            } => {
+                eprintln!("[retry {attempt}/{max_attempts}] {path}: {message}");
+            }
         }
     }
 }

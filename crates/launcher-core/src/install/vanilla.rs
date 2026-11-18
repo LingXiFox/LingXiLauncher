@@ -71,12 +71,17 @@ impl VanillaInstaller {
         policy: DownloadSourcePolicy,
         mirror: Option<TrustedMirrorConfiguration>,
     ) -> Self {
+        let configuration = DownloadConfiguration {
+            // Cross-version and cross-instance reuse of verified objects.
+            cache_directory: Some(layout.downloads_cache_directory()),
+            ..DownloadConfiguration::default()
+        };
         Self {
             layout,
             platform,
             policy,
             mirror,
-            configuration: DownloadConfiguration::default(),
+            configuration,
         }
     }
 

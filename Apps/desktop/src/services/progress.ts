@@ -23,6 +23,11 @@ export interface InstallEvent {
   source?: string;
   downloaded?: number;
   total?: number;
+  bytesPerSecond?: number;
+  remainingSeconds?: number | null;
+  activeFiles?: number;
+  attempt?: number;
+  maxAttempts?: number;
 }
 
 function asNumber(value: unknown, fallback = 0): number {
@@ -92,6 +97,23 @@ export function applyInstallEvent(
         ...base,
         downloadedBytes: asNumber(event.downloaded),
         totalBytes: asNumber(event.total, base.totalBytes),
+      };
+    case "speed":
+      return {
+        ...base,
+        bytesPerSecond: asNumber(event.bytesPerSecond),
+        remainingSeconds: typeof event.remainingSeconds === "number" ? event.remainingSeconds : null,
+        activeFiles: asNumber(event.activeFiles),
+      };
+    case "retry":
+      return {
+        ...base,
+        retry: {
+          path: event.path ?? "",
+          attempt: asNumber(event.attempt),
+          maxAttempts: asNumber(event.maxAttempts),
+          message: event.message ?? "",
+        },
       };
     default:
       return base;
