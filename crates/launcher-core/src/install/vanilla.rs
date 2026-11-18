@@ -13,16 +13,34 @@ use crate::layout::{ensure_dir, GameDataLayout};
 use crate::manifest::ManifestService;
 use crate::models::launch::LaunchDiagnostic;
 use crate::models::version::Artifact;
+use crate::net::{classify_reqwest_error, describe_transfer_error, redact_url};
 use crate::platform::PlatformContext;
 use crate::version::rules::is_allowed;
 use crate::version::{ResolvedVersion, VersionResolver};
 
+use super::hashing::{sha1_bytes, verify_file};
 use super::models::{
     CancelFlag, DownloadConfiguration, DownloadSourcePolicy, DownloadTask, InstallProgressEvent,
     InstallReport, MissingDependency, MissingDependencyKind, SharedProgress,
     TrustedMirrorConfiguration,
 };
 use super::Downloader;
+
+/// Shared reqwest client for small metadata fetches (asset indexes etc.).
+/// P1-4: every metadata request gets an explicit connect/total timeout so a
+/// hung connection cannot stall the install forever.
+fn metadata_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .user_agent(format!(
+            "{}/{}",
+            crate::models::launch::LAUNCHER_NAME,
+            crate::models::launch::LAUNCHER_VERSION
+        ))
+        .connect_timeout(std::time::Duration::from_secs(20))
+        .timeout(std::time::Duration::from_secs(120))
+        .build()
+        .expect("metadata client builds with static settings")
+}
 
 #[derive(Debug, Clone)]
 struct NativeJar {
@@ -95,6 +113,11 @@ impl VanillaInstaller {
         progress: SharedProgress,
         cancel: CancelFlag,
     ) -> Result<InstallReport> {
+        // P1-4: phase event goes out before the download plan is built.
+        progress.emit(InstallProgressEvent::Phase {
+            phase: "manifest".into(),
+            message: format!("Fetching metadata for Minecraft {version_id}"),
+        });
         let plan = self.plan(version_id).await?;
         let installer =
             Downloader::new(self.policy, self.mirror.clone(), self.configuration.clone())?;
@@ -108,7 +131,6 @@ impl VanillaInstaller {
         if cancel.is_cancelled() {
             return Err(Error::Cancelled);
         }
-
         let mut diagnostics = Vec::new();
         for failure in &summary.failures {
             diagnostics.push(LaunchDiagnostic {
@@ -134,6 +156,36 @@ impl VanillaInstaller {
                     "{} files are still missing after installation",
                     missing_after_install.len()
                 ),
+            });
+        }
+        // P0-2: an incomplete install must surface as a real failure to the GUI
+        // instead of a success report that happens to carry a diagnostics list.
+        // Verified files stay cached (the downloader never touched them), so a
+        // retry resumes from the cache.
+        if !summary.failures.is_empty() {
+            let mut reasons: Vec<String> = summary
+                .failures
+                .iter()
+                .map(|f| format!("{}: {}", f.destination.display(), f.message))
+                .collect();
+            reasons.extend(
+                missing_after_install
+                    .iter()
+                    .map(|m| format!("{}: {}", m.path.display(), m.reason)),
+            );
+            return Err(Error::InstallFailed {
+                version_id: plan.version.id.clone(),
+                reasons,
+            });
+        }
+        if !missing_after_install.is_empty() {
+            let reasons: Vec<String> = missing_after_install
+                .iter()
+                .map(|m| format!("{}: {}", m.path.display(), m.reason))
+                .collect();
+            return Err(Error::InstallFailed {
+                version_id: plan.version.id.clone(),
+                reasons,
             });
         }
         Ok(InstallReport {
@@ -257,6 +309,10 @@ impl VanillaInstaller {
         Ok(())
     }
 
+    /// P1-4/P2-11/P2-13: fetch and validate the asset index with an explicit
+    /// timeout, verify cached copies against their SHA-1, write back atomically,
+    /// and enqueue only the asset objects (the index itself is no longer a
+    /// download task, so it is never fetched twice).
     async fn add_assets(
         &self,
         version: &ResolvedVersion,
@@ -269,39 +325,76 @@ impl VanillaInstaller {
         if let Some(parent) = index_path.parent() {
             ensure_dir(parent)?;
         }
-        tasks.push(DownloadTask::new(
-            index_path.clone(),
-            Some(index.url.clone()),
-            Some(index.sha1.clone()),
-            Some(index.size),
-            MissingDependencyKind::AssetIndex,
-        ));
 
-        let bytes = if index_path.is_file() {
-            std::fs::read(&index_path)?
-        } else {
-            let response = reqwest::Client::builder()
-                .user_agent(format!(
-                    "{}/{}",
-                    crate::models::launch::LAUNCHER_NAME,
-                    crate::models::launch::LAUNCHER_VERSION
-                ))
-                .build()?
-                .get(&index.url)
-                .send()
-                .await
-                .map_err(|e| Error::Http(format!("asset index request failed: {e}")))?;
-            if !response.status().is_success() {
-                return Err(Error::Http(format!(
-                    "asset index returned HTTP {}",
-                    response.status()
-                )));
+        // A cached index counts only when it matches the recorded SHA-1 and
+        // size (P2-13); corrupt files fall through to a clean re-fetch.
+        let mut bytes: Option<Vec<u8>> = None;
+        if index_path.is_file() {
+            let cached = std::fs::read(&index_path)?;
+            if verify_file(&index_path, Some(index.sha1.as_str()), Some(index.size))? {
+                bytes = Some(cached);
+            } else {
+                tracing::debug!(
+                    "cached asset index {} failed validation, refetching",
+                    index.id
+                );
+                std::fs::remove_file(&index_path).ok();
             }
-            response
-                .bytes()
-                .await
-                .map_err(|e| Error::Http(e.to_string()))?
-                .to_vec()
+        }
+
+        let bytes = match bytes {
+            Some(bytes) => bytes,
+            None => {
+                let response = metadata_client()
+                    .get(&index.url)
+                    .send()
+                    .await
+                    .map_err(|e| {
+                        Error::Http(describe_transfer_error(
+                            "asset index",
+                            &index.url,
+                            classify_reqwest_error(&e),
+                            &e.to_string(),
+                        ))
+                    })?;
+                if !response.status().is_success() {
+                    return Err(Error::Http(format!(
+                        "asset index {}: HTTP {} for {}",
+                        index.id,
+                        response.status(),
+                        redact_url(&index.url)
+                    )));
+                }
+                let downloaded = response.bytes().await.map_err(|e| {
+                    Error::Http(describe_transfer_error(
+                        "asset index body",
+                        &index.url,
+                        classify_reqwest_error(&e),
+                        &e.to_string(),
+                    ))
+                })?;
+                // Validate before caching: never persist an unverified index.
+                if downloaded.len() as u64 != index.size {
+                    return Err(Error::Http(format!(
+                        "asset index {} size mismatch: expected {}, got {}",
+                        index.id,
+                        index.size,
+                        downloaded.len()
+                    )));
+                }
+                let actual = sha1_bytes(&downloaded);
+                if !actual.eq_ignore_ascii_case(&index.sha1) {
+                    return Err(Error::HashMismatch {
+                        path: index_path.clone(),
+                        expected: index.sha1.clone(),
+                        actual,
+                    });
+                }
+                let temp = index_path.with_extension("json.part");
+                std::fs::write(&temp, &downloaded)?;
+                std::fs::rename(&temp, &index_path)?;
+                downloaded.to_vec()
+            }
         };
         let parsed: AssetIndexFile = serde_json::from_slice(&bytes).map_err(|e| {
             Error::InvalidMetadata(format!("asset index {} is malformed: {e}", index.id))

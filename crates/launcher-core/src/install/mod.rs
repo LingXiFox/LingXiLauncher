@@ -2,6 +2,7 @@ pub mod downloader;
 pub mod hashing;
 pub mod loader;
 pub mod models;
+pub mod state;
 pub mod vanilla;
 pub mod zip;
 
@@ -13,4 +14,5 @@ pub use models::{
     InstallProgressEvent, InstallReport, MissingDependencyKind, NoopProgress, ProgressSink,
     SharedProgress, TrustedMirrorConfiguration,
 };
+pub use state::{InstallStateMap, InstallStatus};
 pub use vanilla::VanillaInstaller;

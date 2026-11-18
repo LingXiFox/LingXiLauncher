@@ -177,6 +177,21 @@ impl GameDataLayout {
     pub fn java_directory(&self) -> PathBuf {
         self.data_root.join("java")
     }
+
+    /// Persistent record of which versions completed installation. The GUI
+    /// uses this to decide the "installed" badge instead of trusting the
+    /// presence of a version JSON (which exists as soon as metadata is
+    /// fetched, i.e. before any file is installed).
+    pub fn install_state_file(&self) -> PathBuf {
+        self.data_root.join("install-state.json")
+    }
+
+    /// P1-7: where instance saves are parked when a user deletes an instance
+    /// but wants to keep their worlds. Never inside the instance directory so
+    /// the delete itself cannot touch it.
+    pub fn kept_saves_directory(&self) -> PathBuf {
+        self.data_root.join("kept-saves")
+    }
 }
 
 #[cfg(target_os = "macos")]

@@ -28,6 +28,11 @@ pub enum Error {
     Authentication(String),
     #[error("cancelled")]
     Cancelled,
+    #[error("installation of {version_id} failed: {}", reasons.join("; "))]
+    InstallFailed {
+        version_id: String,
+        reasons: Vec<String>,
+    },
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
     #[error("http error: {0}")]
@@ -55,6 +60,7 @@ impl Error {
             Error::Unavailable(_) => "unavailable",
             Error::Authentication(_) => "authentication",
             Error::Cancelled => "cancelled",
+            Error::InstallFailed { .. } => "install_failed",
             Error::Io(_) => "io_error",
             Error::Http(_) => "http_error",
             Error::Json(_) => "invalid_json",
@@ -78,6 +84,7 @@ impl Error {
             Error::Authentication(_) => 7,
             Error::Io(_) => 8,
             Error::Cancelled => 130,
+            Error::InstallFailed { .. } => 10,
             Error::Other(_) => 1,
             Error::HashMismatch { .. } => 9,
         }
