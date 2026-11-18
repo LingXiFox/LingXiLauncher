@@ -1,3 +1,14 @@
+/**
+ * Cancellation is a normal outcome, not a failure: the engine reports it as
+ * the bare string "cancelled" (Error::Cancelled), and a race can also surface
+ * it as a rejected invoke while the task registry is being torn down.
+ */
+export function isCancellationMessage(message?: string | null): boolean {
+  if (!message) return false;
+  const value = message.trim().toLowerCase();
+  return value === "cancelled" || value === "canceled" || value.includes("cancelled") || value.includes("已取消");
+}
+
 export function cx(...values: Array<string | false | null | undefined>): string {
   return values.filter(Boolean).join(" ");
 }

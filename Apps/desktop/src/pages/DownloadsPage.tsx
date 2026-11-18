@@ -9,7 +9,7 @@ import { PageHeader } from "../components/PageHeader";
 import { ProgressBar } from "../components/ProgressBar";
 import { api, type GameVersion, type InstallProgress } from "../services/api";
 import { useApp } from "../stores/app";
-import { formatBytes, formatDate, formatNumber, versionTypeLabel } from "../lib/format";
+import { formatBytes, formatDate, formatNumber, isCancellationMessage, versionTypeLabel } from "../lib/format";
 
 type FilterKey = "release" | "snapshot" | "all";
 
@@ -103,9 +103,17 @@ export function DownloadsPage() {
       toast("success", `Minecraft ${version.id} 已安装`);
       await Promise.all([refreshVersions("all", true), refreshInstances(true)]);
     } catch (error) {
-      // P0-2: backend refuses to report success when files are missing, so
-      // every failure lands here with a user-visible reason.
-      toast("error", `安装 ${version.id} 失败`, error instanceof Error ? error.message : String(error));
+      const message = error instanceof Error ? error.message : String(error);
+      if (isCancellationMessage(message)) {
+        // A cancelled install leaves no progress card behind; the download
+        // engine has already removed the partial files it wrote.
+        resetInstallProgress();
+        toast("info", "已取消 " + version.id + " 的安装");
+      } else {
+        // P0-2: backend refuses to report success when files are missing, so
+        // every failure lands here with a user-visible reason.
+        toast("error", "安装 " + version.id + " 失败", message);
+      }
       await refreshVersions("all", true);
     } finally {
       setInstallingId(null);
@@ -115,9 +123,15 @@ export function DownloadsPage() {
   async function handleCancel(versionId: string) {
     try {
       const cancelled = await api.cancelInstall(versionId);
-      toast("info",
-        cancelled ? `正在取消 ${versionId} 的安装` : "没有正在进行的安装任务",
-      );
+      if (cancelled) {
+        toast("info", "正在取消 " + versionId + " 的安装");
+      } else {
+        // Nothing was in flight: drop the stale card so the page cannot keep
+        // showing a progress entry that no task is backing any more.
+        setInstallingId(null);
+        resetInstallProgress();
+        toast("info", "没有正在进行的安装任务");
+      }
     } catch (error) {
       toast("error", "取消安装失败", error instanceof Error ? error.message : String(error));
     }
