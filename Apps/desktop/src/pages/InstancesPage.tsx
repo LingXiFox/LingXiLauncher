@@ -41,6 +41,8 @@ export function InstancesPage() {
   const [deleteTarget, setDeleteTarget] = useState<GameInstance | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+  // P1-7: keeping worlds is the safe default; deleting them is opt-in.
+  const [deleteSaves, setDeleteSaves] = useState(false);
 
   const filtered = useMemo(() => {
     const term = query.trim().toLowerCase();
@@ -66,7 +68,7 @@ export function InstancesPage() {
 
   function launchBlocker(instance: GameInstance): string | null {
     if (isGameRunning) return null;
-    if (activeProfile?.kind !== "microsoft") return "先在账户管理登录 Microsoft 账户";
+    if (!activeProfile) return "先在账户管理添加并选择一个账户";
     if (javaRuntimes.length === 0) return "先在设置中选择 Java 运行时";
     if (!instance.versionId) return "该实例还没有绑定 Minecraft 版本";
     return null;
@@ -98,7 +100,7 @@ export function InstancesPage() {
     if (!deleteTarget) return;
     setDeleting(true);
     try {
-      await deleteInstance(deleteTarget.id);
+      await deleteInstance(deleteTarget.id, !deleteSaves);
       if (selectedId === deleteTarget.id) setSelectedId(null);
       setDeleteTarget(null);
     } catch {
@@ -326,7 +328,7 @@ export function InstancesPage() {
                     <button
                       type="button"
                       className="text-link instance-detail__account"
-                      onClick={() => setSection(activeProfile?.kind === "microsoft" ? "settings" : "accounts")}
+                      onClick={() => setSection(activeProfile ? "settings" : "accounts")}
                     >
                       <Icon name="alert" size={12} />
                       {launchBlocker(selected)}
@@ -342,13 +344,21 @@ export function InstancesPage() {
       {deleteTarget ? (
         <ConfirmDialog
           title="删除实例"
-          description={`确定删除「${deleteTarget.name}」吗？实例目录、模组与世界将被移除，此操作不可撤销。`}
+          description={`确定删除「${deleteTarget.name}」吗？实例目录与模组将被移除，此操作不可撤销。`}
           confirmLabel="删除实例"
           busy={deleting}
           onConfirm={() => void handleDelete()}
           onCancel={() => setDeleteTarget(null)}
         >
           <p className="caption">{minecraftVersion(deleteTarget)} · {formatMemory(deleteTarget.memoryMiB)}</p>
+          <label className="checkbox-row">
+            <input
+              type="checkbox"
+              checked={deleteSaves}
+              onChange={(event) => setDeleteSaves(event.target.checked)}
+            />
+            <span>同时删除世界与存档（默认保留到 kept-saves 目录）</span>
+          </label>
         </ConfirmDialog>
       ) : null}
     </>

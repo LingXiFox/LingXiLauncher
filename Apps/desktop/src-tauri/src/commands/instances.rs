@@ -103,14 +103,22 @@ pub fn delete_instance(
         &instance.directory,
         instance.id(),
     )?;
+    // The isolated game directory is only removed when it is the standard
+    // per-instance path. Anything else (a hand-edited manifest pointing at a
+    // shared .minecraft) is left alone: deleting it would take other
+    // instances' files with it.
     let game_directory = checked_instance_path(
         &state.layout.data_root.join(".minecraft").join("versions"),
         &instance.game_directory,
         instance.id(),
-    )?;
+    )
+    .ok();
+    let saves = game_directory
+        .as_ref()
+        .map(|path| path.join("saves"))
+        .filter(|path| path.is_dir());
     if keep_saves {
-        let saves = game_directory.join("saves");
-        if saves.is_dir() {
+        if let Some(saves) = saves {
             let stamp = chrono::Utc::now().format("%Y%m%d-%H%M%S");
             let target =
                 state
@@ -124,7 +132,7 @@ pub fn delete_instance(
     if directory.is_dir() {
         std::fs::remove_dir_all(&directory).map_err(|e| e.to_string())?;
     }
-    if game_directory.is_dir() {
+    if let Some(game_directory) = game_directory.filter(|path| path.is_dir()) {
         std::fs::remove_dir_all(&game_directory).map_err(|e| e.to_string())?;
     }
     Ok(())
