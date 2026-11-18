@@ -244,10 +244,12 @@ impl JavaManager {
                 ensure_dir(&crate::paths::PathSafety::safe_join(&root, relative)?)?;
             }
             if file.kind == "file" && file.executable.unwrap_or(false) {
-                let path = crate::paths::PathSafety::safe_join(&root, relative)?;
                 #[cfg(unix)]
                 {
                     use std::os::unix::fs::PermissionsExt;
+                    // Windows has no POSIX mode bits; the executable bit only
+                    // exists on unix, so the join is unix-only as well.
+                    let path = crate::paths::PathSafety::safe_join(&root, relative)?;
                     if let Ok(metadata) = std::fs::metadata(&path) {
                         let mut permissions = metadata.permissions();
                         permissions.set_mode(permissions.mode() | 0o755);

@@ -666,9 +666,50 @@ pub fn latest_game_log(instance: &Instance) -> Option<PathBuf> {
 }
 
 /// Reads the tail of a file without loading the whole file.
+///
+/// P2-15: Minecraft logs grow into the tens of megabytes. Reading the file in
+/// one `read_to_string` allocated the whole log plus a line index even when the
+/// caller only wanted the last few hundred lines. This walks backwards from the
+/// end in fixed-size chunks and stops as soon as it has enough line breaks, so
+/// peak memory is bounded by the chunk buffer and the returned tail.
 pub fn read_tail(path: &Path, max_lines: usize) -> Result<String> {
-    let text = std::fs::read_to_string(path)?;
-    let lines: Vec<&str> = text.lines().collect();
+    use std::io::{Read, Seek, SeekFrom};
+
+    if max_lines == 0 {
+        return Ok(String::new());
+    }
+    const CHUNK: u64 = 64 * 1024;
+
+    let mut file = std::fs::File::open(path)?;
+    let mut position = file.metadata()?.len();
+    let mut chunks: Vec<Vec<u8>> = Vec::new();
+    let mut newlines = 0usize;
+    let mut buffer = vec![0u8; CHUNK as usize];
+
+    while position > 0 {
+        let size = CHUNK.min(position) as usize;
+        position -= size as u64;
+        file.seek(SeekFrom::Start(position))?;
+        file.read_exact(&mut buffer[..size])?;
+        let chunk = buffer[..size].to_vec();
+        // One extra line break guarantees the wanted tail is fully covered
+        // even when the file ends with a newline.
+        newlines += chunk.iter().filter(|byte| **byte == b'\n').count();
+        chunks.push(chunk);
+        if newlines > max_lines {
+            break;
+        }
+    }
+    chunks.reverse();
+
+    let bytes: Vec<u8> = chunks.into_iter().flatten().collect();
+    let text = String::from_utf8_lossy(&bytes);
+    let mut lines: Vec<&str> = text.lines().collect();
+    // The scan stopped before the start of the file, so the first line is a
+    // fragment of a longer line: drop it and only ever return whole lines.
+    if position > 0 && bytes.first() != Some(&b'\n') && !lines.is_empty() {
+        lines.remove(0);
+    }
     let start = lines.len().saturating_sub(max_lines);
     Ok(lines[start..].join("\n"))
 }
@@ -715,6 +756,27 @@ mod tests {
         assert_eq!(read_tail(&log, 2).unwrap(), "four\nfive");
         assert_eq!(read_tail(&log, 50).unwrap(), "one\ntwo\nthree\nfour\nfive");
         assert_eq!(read_tail(&log, 0).unwrap(), "");
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn read_tail_reads_large_logs_across_chunk_boundaries() {
+        let root = scratch_dir("tail-large");
+        let log = root.join("big.log");
+        // ~400 KB, far beyond a single 64 KiB chunk.
+        let mut text = String::new();
+        for index in 0..20_000 {
+            text.push_str(&format!("line {index} {}\n", "x".repeat(8)));
+        }
+        std::fs::write(&log, &text).unwrap();
+        let tail = read_tail(&log, 3).unwrap();
+        assert_eq!(
+            tail,
+            "line 19997 xxxxxxxx\nline 19998 xxxxxxxx\nline 19999 xxxxxxxx"
+        );
+        // Cutting the file mid-line must not return a partial first line.
+        let cut = read_tail(&log, 1).unwrap();
+        assert_eq!(cut, "line 19999 xxxxxxxx");
         std::fs::remove_dir_all(&root).ok();
     }
 
