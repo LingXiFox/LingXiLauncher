@@ -63,6 +63,13 @@ const bootstrap = {
     mirrorConfigPath: null,
     defaultMemoryMiB: 4096,
     appearance: "dark",
+    language: "zh-CN",
+    accent: "orange",
+    backgroundImage: null,
+    proxyMode: "system",
+    proxyUrl: null,
+    gameRoot: null,
+    logWindowOnStart: false,
   },
   accounts: {
     microsoft: [],
@@ -134,6 +141,32 @@ const replies = {
   },
   latest_crash_report: null,
   game_status: { running: false, pid: null, startedAt: null, lastExit: null },
+  save_settings: {
+    javaPath: null,
+    source: "auto",
+    mirrorConfigPath: null,
+    defaultMemoryMiB: 4096,
+    appearance: "dark",
+    language: "zh-CN",
+    accent: "orange",
+    backgroundImage: null,
+    proxyMode: "system",
+    proxyUrl: null,
+    gameRoot: null,
+    logWindowOnStart: false,
+  },
+  check_update: {
+    currentVersion: "0.10.0",
+    latestVersion: "0.10.0",
+    releaseUrl: "https://github.com/LingXiFox/LingXiLauncher/releases/tag/v0.10.0",
+    releaseNotes: null,
+    publishedAt: null,
+    available: false,
+  },
+  open_log_window: null,
+  restart_app: null,
+  open_external: null,
+  browse_folder: null,
   "plugin:event|listen": 1,
   "plugin:event|unlisten": true,
   "plugin:dialog|open": null,
@@ -343,6 +376,10 @@ try {
   });
 
   await send("Page.navigate", { url: `http://127.0.0.1:${appPort}/` });
+  await waitFor("onboarding", "document.body.innerText.includes('欢迎使用灵曦启动器')");
+  await screenshot("00-onboarding");
+  await clickButton("跳过引导");
+  await waitFor("onboarding closed", "!document.querySelector('[role=dialog]')");
   await waitFor("launcher shell", "!!document.querySelector('.sidebar') && document.body.innerText.includes('首页')");
   await screenshot("01-home");
 
@@ -381,6 +418,19 @@ try {
   await waitFor("settings page", "document.body.innerText.includes('默认内存分配')");
   await screenshot("06-settings");
 
+  await clickButton("启动器");
+  await waitFor("launcher tab", "document.body.innerText.includes('启动时打开日志窗口') && document.body.innerText.includes('强调色')");
+  await screenshot("06b-settings-launcher");
+
+  await clickButton("关于");
+  await waitFor("about tab", "document.body.innerText.includes('Rust 启动核心')");
+  await clickButton("检查更新");
+  await waitFor("update check", "document.body.innerText.includes('已是最新版本')");
+  await screenshot("06c-settings-about");
+
+  await clickButton("游戏");
+  await waitFor("game tab", "document.body.innerText.includes('默认内存分配')");
+
   const changed = await evaluate(`(() => {
     const input = document.querySelector('input[type="number"]');
     if (!input) return false;
@@ -401,11 +451,13 @@ try {
   await waitFor("accounts page", "document.body.innerText.includes('Tester')");
   await screenshot("08-accounts");
 
-  await clickButton("运行日志");
-  await waitFor("logs page", "document.body.innerText.includes('smoke launcher log')");
-  await screenshot("09-logs");
+  await clickButton("首页");
+  await waitFor("home log preview", "document.body.innerText.includes('smoke launcher log')");
+  await screenshot("09-home-log-preview");
 
-  console.log("GUI smoke passed: boot, navigation, instance detail, mods/graphics/install modals, settings validation, accounts, logs");
+  console.log(
+    "GUI smoke passed: onboarding, boot, navigation, instance detail, mods/graphics/install modals, settings tabs (game/launcher/about), update check, memory validation, accounts, home log preview",
+  );
   console.log(`Screenshots: ${ARTIFACTS}`);
 } catch (error) {
   failed = true;
