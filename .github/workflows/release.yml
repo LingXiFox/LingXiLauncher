@@ -26,7 +26,7 @@ env:
 jobs:
   quality-gate:
     name: Quality gate
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 45
     steps:
       - name: Checkout
@@ -98,13 +98,13 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-15
+          - os: macos-26
             label: macOS ARM64
             platform: macos
-          - os: windows-2022
+          - os: windows-2025
             label: Windows x64
             platform: windows
-          - os: ubuntu-22.04
+          - os: ubuntu-26.04
             label: Linux x64
             platform: linux
     steps:
@@ -216,7 +216,7 @@ jobs:
     needs: [quality-gate, build]
     # Only a tag whose three platform builds all succeeded becomes a release.
     if: ${{ startsWith(github.ref, 'refs/tags/v') && (github.event_name == 'push' || inputs.validation_only == false) }}
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 20
     steps:
       - name: Checkout
