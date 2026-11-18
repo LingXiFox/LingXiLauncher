@@ -6,6 +6,7 @@ use std::path::Path;
 use crate::error::{Error, Result};
 use crate::layout::{ensure_dir, GameDataLayout};
 use crate::models::version::{VersionManifest, VersionMetadata, VersionSummary};
+use crate::net::{classify_reqwest_error, describe_transfer_error};
 
 pub const VERSION_MANIFEST_URL: &str =
     "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json";
@@ -62,17 +63,29 @@ impl ManifestService {
             .get(&self.manifest_url)
             .send()
             .await
-            .map_err(|e| Error::Http(format!("version manifest request failed: {e}")))?;
+            .map_err(|e| {
+                Error::Http(describe_transfer_error(
+                    "version manifest",
+                    &self.manifest_url,
+                    classify_reqwest_error(&e),
+                    &e.to_string(),
+                ))
+            })?;
         if !response.status().is_success() {
             return Err(Error::Http(format!(
-                "version manifest returned HTTP {}",
-                response.status()
+                "version manifest: HTTP {} for {}",
+                response.status(),
+                crate::net::redact_url(&self.manifest_url)
             )));
         }
-        let bytes = response
-            .bytes()
-            .await
-            .map_err(|e| Error::Http(e.to_string()))?;
+        let bytes = response.bytes().await.map_err(|e| {
+            Error::Http(describe_transfer_error(
+                "version manifest body",
+                &self.manifest_url,
+                classify_reqwest_error(&e),
+                &e.to_string(),
+            ))
+        })?;
         let manifest: VersionManifest = serde_json::from_slice(&bytes)
             .map_err(|e| Error::InvalidMetadata(format!("version manifest is malformed: {e}")))?;
         if manifest.versions.is_empty() {
@@ -108,23 +121,30 @@ impl ManifestService {
         if let Some(metadata) = self.cached_metadata(&summary.id) {
             return Ok(metadata);
         }
-        let response = self
-            .client
-            .get(&summary.url)
-            .send()
-            .await
-            .map_err(|e| Error::Http(format!("version metadata request failed: {e}")))?;
+        let response = self.client.get(&summary.url).send().await.map_err(|e| {
+            Error::Http(describe_transfer_error(
+                "version metadata",
+                &summary.url,
+                classify_reqwest_error(&e),
+                &e.to_string(),
+            ))
+        })?;
         if !response.status().is_success() {
             return Err(Error::Http(format!(
-                "version metadata for '{}' returned HTTP {}",
+                "version metadata for '{}': HTTP {} for {}",
                 summary.id,
-                response.status()
+                response.status(),
+                crate::net::redact_url(&summary.url)
             )));
         }
-        let bytes = response
-            .bytes()
-            .await
-            .map_err(|e| Error::Http(e.to_string()))?;
+        let bytes = response.bytes().await.map_err(|e| {
+            Error::Http(describe_transfer_error(
+                "version metadata body",
+                &summary.url,
+                classify_reqwest_error(&e),
+                &e.to_string(),
+            ))
+        })?;
         if !summary.sha1.is_empty() && !summary.sha1.eq_ignore_ascii_case(&sha1_hex(&bytes)) {
             return Err(Error::HashMismatch {
                 path: self.layout.version_json(&summary.id).unwrap_or_default(),

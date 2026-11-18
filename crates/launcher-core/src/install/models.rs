@@ -58,7 +58,15 @@ impl DownloadTask {
 }
 
 #[derive(Debug, Clone, Serialize)]
-#[serde(tag = "kind", rename_all = "camelCase")]
+// Field-level rename is required: the GUI consumes these events as JSON and
+// expects camelCase keys (totalFiles etc.) for every variant field. The plain
+// rename_all only covers variant names, which is why the Windows GUI showed
+// "waiting for file list" forever (all payload keys arrived as snake_case).
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum InstallProgressEvent {
     Phase {
         phase: String,
@@ -297,4 +305,66 @@ pub fn prepare_parent(path: &std::path::Path) -> crate::error::Result<()> {
         std::fs::create_dir_all(parent)?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod progress_event_tests {
+    use super::*;
+
+    /// Golden protocol test: the GUI reducer keys off these exact JSON shapes.
+    /// If a field name changes, this test must be updated together with the
+    /// frontend reducer in Apps/desktop/src/services/progress.ts.
+    #[test]
+    fn progress_events_serialize_with_camel_case_fields() {
+        let cases: Vec<(InstallProgressEvent, &str)> = vec![
+            (
+                InstallProgressEvent::Phase {
+                    phase: "download".into(),
+                    message: "Installing Minecraft 1.21.4".into(),
+                },
+                r#"{"kind":"phase","phase":"download","message":"Installing Minecraft 1.21.4"}"#,
+            ),
+            (
+                InstallProgressEvent::Plan {
+                    total_files: 42,
+                    total_bytes: 1_048_576,
+                    cache_hits: 3,
+                },
+                r#"{"kind":"plan","totalFiles":42,"totalBytes":1048576,"cacheHits":3}"#,
+            ),
+            (
+                InstallProgressEvent::FileStarted {
+                    path: "libraries/a.jar".into(),
+                    size: 128,
+                },
+                r#"{"kind":"fileStarted","path":"libraries/a.jar","size":128}"#,
+            ),
+            (
+                InstallProgressEvent::FileFinished {
+                    path: "libraries/a.jar".into(),
+                    bytes: 128,
+                    source: "official".into(),
+                },
+                r#"{"kind":"fileFinished","path":"libraries/a.jar","bytes":128,"source":"official"}"#,
+            ),
+            (
+                InstallProgressEvent::FileFailed {
+                    path: "libraries/a.jar".into(),
+                    message: "HTTP 500 for url".into(),
+                },
+                r#"{"kind":"fileFailed","path":"libraries/a.jar","message":"HTTP 500 for url"}"#,
+            ),
+            (
+                InstallProgressEvent::Bytes {
+                    downloaded: 512,
+                    total: 1024,
+                },
+                r#"{"kind":"bytes","downloaded":512,"total":1024}"#,
+            ),
+        ];
+        for (event, expected) in cases {
+            let actual = serde_json::to_string(&event).expect("serialize event");
+            assert_eq!(actual, expected, "event JSON drifted from protocol");
+        }
+    }
 }

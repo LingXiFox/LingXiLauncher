@@ -9,6 +9,7 @@ use crate::error::{Error, Result};
 
 use super::hashing::{sha1_file, verify_file};
 use super::models::*;
+use crate::net::{classify_reqwest_error, describe_transfer_error, redact_url};
 
 pub struct Downloader {
     client: reqwest::Client,
@@ -70,6 +71,15 @@ impl Downloader {
                 cache_hits += 1;
             } else {
                 pending.push(task);
+            }
+        }
+        // P1-5: a cancelled or crashed run can leave "<name>.<ext>.part" files
+        // behind. They are never trusted (a retry always re-streams and
+        // re-verifies), so drop them while planning and keep the cache clean.
+        for task in &pending {
+            let partial = partial_path(&task.destination);
+            if partial.is_file() {
+                let _ = std::fs::remove_file(&partial);
             }
         }
         pending.sort_by_key(|task| Reverse(task.size.unwrap_or(0)));
@@ -263,14 +273,7 @@ impl Downloader {
                 return Err((format!("cannot create {}: {e}", parent.display()), false));
             }
         }
-        let partial = task.destination.with_extension(format!(
-            "{}part",
-            task.destination
-                .extension()
-                .and_then(|e| e.to_str())
-                .map(|e| format!("{e}."))
-                .unwrap_or_default()
-        ));
+        let partial = partial_path(&task.destination);
         let mut last_error = String::new();
         for attempt in 0..self.configuration.max_retries.max(1) {
             if cancel.is_cancelled() {
@@ -293,6 +296,7 @@ impl Downloader {
                     if !matches {
                         let actual = sha1_file(&partial).unwrap_or_else(|_| "unreadable".into());
                         let _ = std::fs::remove_file(&partial);
+                        rollback_bytes(bytes, downloaded_bytes, progress, total_bytes);
                         return Err((
                             format!(
                                 "verification failed for {}: expected {:?}, got {actual}",
@@ -304,6 +308,7 @@ impl Downloader {
                     }
                     if let Err(e) = std::fs::rename(&partial, &task.destination) {
                         let _ = std::fs::remove_file(&partial);
+                        rollback_bytes(bytes, downloaded_bytes, progress, total_bytes);
                         return Err((
                             format!("cannot place {}: {e}", task.destination.display()),
                             false,
@@ -336,34 +341,84 @@ impl Downloader {
         downloaded_bytes: &Arc<AtomicU64>,
         cancel: &CancelFlag,
     ) -> std::result::Result<u64, (String, bool)> {
-        let response = self
-            .client
-            .get(url)
-            .send()
-            .await
-            .map_err(|e| (format!("network error: {e}"), true))?;
+        let result = self
+            .fetch_stream(
+                url,
+                destination,
+                progress,
+                total_bytes,
+                downloaded_bytes,
+                cancel,
+            )
+            .await;
+        if let Err((_, _, bytes)) = &result {
+            // The stream loop already added its bytes to the aggregate; if this
+            // attempt ultimately failed the bytes are discarded with the partial
+            // file, so roll the aggregate back to keep progress honest (P2-12).
+            rollback_bytes(*bytes, downloaded_bytes, progress, total_bytes);
+        }
+        result.map_err(|(message, retryable, _)| (message, retryable))
+    }
+
+    async fn fetch_stream(
+        &self,
+        url: &str,
+        destination: &Path,
+        progress: &SharedProgress,
+        total_bytes: u64,
+        downloaded_bytes: &Arc<AtomicU64>,
+        cancel: &CancelFlag,
+    ) -> std::result::Result<u64, (String, bool, u64)> {
+        let response = self.client.get(url).send().await.map_err(|e| {
+            (
+                describe_transfer_error(
+                    "download",
+                    url,
+                    classify_reqwest_error(&e),
+                    &e.to_string(),
+                ),
+                true,
+                0u64,
+            )
+        })?;
         let status = response.status();
         if !status.is_success() {
             let retryable =
                 status.as_u16() == 408 || status.as_u16() == 429 || status.is_server_error();
-            return Err((format!("HTTP {status} for {url}"), retryable));
+            return Err((
+                format!("download: HTTP {status} for {}", redact_url(url)),
+                retryable,
+                0u64,
+            ));
         }
         let mut file = tokio::fs::File::create(destination).await.map_err(|e| {
             (
                 format!("cannot create {}: {e}", destination.display()),
                 false,
+                0u64,
             )
         })?;
         let mut stream = response.bytes_stream();
         let mut written = 0u64;
         while let Some(chunk) = stream.next().await {
             if cancel.is_cancelled() {
-                return Err(("Cancelled".into(), false));
+                return Err(("Cancelled".into(), false, written));
             }
-            let chunk = chunk.map_err(|e| (format!("stream error: {e}"), true))?;
+            let chunk = chunk.map_err(|e| {
+                (
+                    describe_transfer_error(
+                        "download body",
+                        url,
+                        classify_reqwest_error(&e),
+                        &e.to_string(),
+                    ),
+                    true,
+                    written,
+                )
+            })?;
             tokio::io::AsyncWriteExt::write_all(&mut file, &chunk)
                 .await
-                .map_err(|e| (format!("write error: {e}"), false))?;
+                .map_err(|e| (format!("write error: {e}"), false, written))?;
             written += chunk.len() as u64;
             let aggregate = downloaded_bytes.fetch_add(chunk.len() as u64, Ordering::Relaxed)
                 + chunk.len() as u64;
@@ -374,7 +429,39 @@ impl Downloader {
         }
         tokio::io::AsyncWriteExt::flush(&mut file)
             .await
-            .map_err(|e| (format!("flush error: {e}"), false))?;
+            .map_err(|e| (format!("flush error: {e}"), false, written))?;
         Ok(written)
     }
+}
+
+/// P2-12: give back bytes that were counted while streaming but whose file was
+/// discarded, so the reported progress never exceeds what is on disk.
+fn rollback_bytes(
+    bytes: u64,
+    downloaded_bytes: &Arc<AtomicU64>,
+    progress: &SharedProgress,
+    total_bytes: u64,
+) {
+    if bytes == 0 {
+        return;
+    }
+    let previous = downloaded_bytes.fetch_sub(bytes, Ordering::Relaxed);
+    let remaining = previous.saturating_sub(bytes);
+    progress.emit(InstallProgressEvent::Bytes {
+        downloaded: remaining.min(total_bytes),
+        total: total_bytes,
+    });
+}
+
+/// "<name>.<ext>.part" next to the destination, so a download can never
+/// overwrite a file that already passed verification.
+fn partial_path(destination: &Path) -> std::path::PathBuf {
+    destination.with_extension(format!(
+        "{}part",
+        destination
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| format!("{e}."))
+            .unwrap_or_default()
+    ))
 }

@@ -13,6 +13,7 @@ pub mod models;
 pub mod modpack;
 pub mod modrinth;
 pub mod mods;
+pub mod net;
 pub mod paths;
 pub mod performance;
 pub mod platform;
