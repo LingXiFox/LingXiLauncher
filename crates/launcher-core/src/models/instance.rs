@@ -73,21 +73,16 @@ where
 }
 
 /// How the game window should be created.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum WindowMode {
     /// A resizable window sized to window_width x window_height.
+    #[default]
     Windowed,
     /// Exclusive fullscreen, sized to the current display.
     Fullscreen,
     /// Windowed, sized to the primary display work area.
     Maximized,
-}
-
-impl Default for WindowMode {
-    fn default() -> Self {
-        Self::Windowed
-    }
 }
 
 impl WindowMode {
@@ -101,20 +96,15 @@ impl WindowMode {
 }
 
 /// OS scheduling priority applied to the game process right after spawn.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ProcessPriority {
     Low,
     BelowNormal,
+    #[default]
     Normal,
     AboveNormal,
     High,
-}
-
-impl Default for ProcessPriority {
-    fn default() -> Self {
-        Self::Normal
-    }
 }
 
 impl ProcessPriority {
@@ -134,18 +124,13 @@ impl ProcessPriority {
 /// Minecraft 26.2 and newer ship a Vulkan backend selected through the
 /// --graphicsBackend command line flag; older versions only have OpenGL, so the
 /// setting is ignored there and reported as unsupported.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum GraphicsApi {
+    #[default]
     Auto,
     OpenGl,
     Vulkan,
-}
-
-impl Default for GraphicsApi {
-    fn default() -> Self {
-        Self::Auto
-    }
 }
 
 impl GraphicsApi {
@@ -160,10 +145,11 @@ impl GraphicsApi {
 }
 
 /// What the launcher window does once the game process is alive.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum LauncherVisibility {
     /// Keep the launcher visible.
+    #[default]
     Keep,
     /// Minimise the launcher while the game runs.
     Minimize,
@@ -171,12 +157,6 @@ pub enum LauncherVisibility {
     Close,
     /// Hide the launcher and restore it when the game exits.
     Hide,
-}
-
-impl Default for LauncherVisibility {
-    fn default() -> Self {
-        Self::Keep
-    }
 }
 
 impl LauncherVisibility {
@@ -259,7 +239,8 @@ impl Default for InstanceLaunchSettings {
 impl InstanceLaunchSettings {
     /// Rejects values the JVM or the game would choke on.
     pub fn validate(&self) -> Result<()> {
-        if !(320..=7680).contains(&self.window_width) || !(240..=4320).contains(&self.window_height) {
+        if !(320..=7680).contains(&self.window_width) || !(240..=4320).contains(&self.window_height)
+        {
             return Err(Error::InvalidMetadata(format!(
                 "window size {}x{} outside 320x240..7680x4320",
                 self.window_width, self.window_height

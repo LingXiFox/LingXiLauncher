@@ -17,16 +17,12 @@ pub fn open_log_window(app: AppHandle) -> CommandResult<()> {
         let _ = window.set_focus();
         return Ok(());
     }
-    WebviewWindowBuilder::new(
-        &app,
-        LOG_WINDOW_LABEL,
-        WebviewUrl::App("index.html".into()),
-    )
-    .title("灵曦启动器 · 运行日志")
-    .inner_size(940.0, 620.0)
-    .min_inner_size(640.0, 420.0)
-    .build()
-    .map_err(|error| format!("无法打开日志窗口: {error}"))?;
+    WebviewWindowBuilder::new(&app, LOG_WINDOW_LABEL, WebviewUrl::App("index.html".into()))
+        .title("灵曦启动器 · 运行日志")
+        .inner_size(940.0, 620.0)
+        .min_inner_size(640.0, 420.0)
+        .build()
+        .map_err(|error| format!("无法打开日志窗口: {error}"))?;
     Ok(())
 }
 

@@ -84,8 +84,8 @@ pub async fn launch_instance(
         .resolve(&version_id, &state.layout.game_root)
         .map_err(command_error)?;
     if instance.manifest.launch.verify_before_launch {
-        let report = verify_installation(&version, &state.layout, &state.platform)
-            .map_err(command_error)?;
+        let report =
+            verify_installation(&version, &state.layout, &state.platform).map_err(command_error)?;
         if !report.is_clean() {
             let names = report
                 .problems
@@ -261,18 +261,14 @@ async fn launch_context(
     );
     context.launcher_name = launcher_core::models::launch::LAUNCHER_NAME.into();
     context.launcher_version = launcher_core::models::launch::LAUNCHER_VERSION.into();
-    context.display_size = app
-        .primary_monitor()
-        .ok()
-        .flatten()
-        .map(|monitor| {
-            let size = monitor.size();
-            let scale = monitor.scale_factor();
-            (
-                (size.width as f64 / scale) as u32,
-                (size.height as f64 / scale) as u32,
-            )
-        });
+    context.display_size = app.primary_monitor().ok().flatten().map(|monitor| {
+        let size = monitor.size();
+        let scale = monitor.scale_factor();
+        (
+            (size.width as f64 / scale) as u32,
+            (size.height as f64 / scale) as u32,
+        )
+    });
     Ok(context)
 }
 

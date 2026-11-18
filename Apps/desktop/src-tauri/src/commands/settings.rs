@@ -13,6 +13,7 @@ pub fn get_settings(state: State<'_, AppState>) -> CommandResult<SettingsView> {
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub fn save_settings(
     state: State<'_, AppState>,
     java_path: Option<String>,
@@ -98,10 +99,11 @@ pub fn save_settings(
         settings.proxy_url = Some(url).filter(|value| !value.is_empty());
     }
     if settings.proxy_mode == "manual" {
-        let valid = settings
-            .proxy_url
-            .as_deref()
-            .is_some_and(|url| url.starts_with("http://") || url.starts_with("https://") || url.starts_with("socks5://"));
+        let valid = settings.proxy_url.as_deref().is_some_and(|url| {
+            url.starts_with("http://")
+                || url.starts_with("https://")
+                || url.starts_with("socks5://")
+        });
         if !valid {
             return Err("手动代理需要形如 http://127.0.0.1:7890 的地址".into());
         }

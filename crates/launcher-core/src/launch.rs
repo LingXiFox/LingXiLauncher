@@ -12,12 +12,12 @@ use tokio::sync::broadcast;
 use crate::error::{Error, Result};
 use crate::layout::GameDataLayout;
 use crate::models::instance::Instance;
+use crate::models::instance::{GraphicsApi, InstanceLaunchSettings, ProcessPriority, WindowMode};
 use crate::models::launch::{
-    ExitReason, GameExit, GameProcessEvent, LaunchDiagnostic, LaunchHooks, LaunchPlan, LaunchPreview,
-    MissingDependency,
+    ExitReason, GameExit, GameProcessEvent, LaunchDiagnostic, LaunchHooks, LaunchPlan,
+    LaunchPreview, MissingDependency,
 };
 pub use crate::models::launch::{LaunchContext, LaunchIdentity};
-use crate::models::instance::{GraphicsApi, InstanceLaunchSettings, ProcessPriority, WindowMode};
 use crate::models::version::{AssetIndex, Library};
 use crate::platform::PlatformContext;
 use crate::version::arguments::expand;
@@ -238,10 +238,7 @@ pub fn verify_installation(
     if let Some(client) = &version.client_jar {
         let path = layout.client_jar(&version.client_jar_version_id)?;
         report.checked += 1;
-        let sha1 = client
-            .sha1
-            .as_deref()
-            .filter(|value| !value.is_empty());
+        let sha1 = client.sha1.as_deref().filter(|value| !value.is_empty());
         let size = client.size.filter(|value| *value > 0);
         if !crate::install::verify_file(&path, sha1, size)? {
             report.problems.push(MissingDependency {
@@ -427,7 +424,10 @@ impl LaunchPlanBuilder {
 
         let mut environment_overrides = BTreeMap::new();
         environment_overrides.insert("LINGXI_INSTANCE_ID".into(), instance.manifest.id.clone());
-        environment_overrides.insert("LINGXI_INSTANCE_DIR".into(), instance.directory.display().to_string());
+        environment_overrides.insert(
+            "LINGXI_INSTANCE_DIR".into(),
+            instance.directory.display().to_string(),
+        );
         for (key, value) in &settings.environment {
             environment_overrides.insert(key.clone(), value.clone());
         }
