@@ -12,6 +12,22 @@ use crate::commands::instances::ensure_instance_exists;
 use crate::commands::{command_error, CommandResult, TauriProgress};
 use crate::state::AppState;
 
+/// Releases an install task slot on every exit path, including the early
+/// returns that bail out before the installer even starts. Without this a
+/// single metadata error would keep the version "installing" until restart.
+struct InstallTaskGuard<'a> {
+    installs: &'a std::sync::Mutex<std::collections::HashMap<String, crate::state::InstallTask>>,
+    key: String,
+}
+
+impl Drop for InstallTaskGuard<'_> {
+    fn drop(&mut self) {
+        if let Ok(mut installs) = self.installs.lock() {
+            installs.remove(&self.key);
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VersionView {
@@ -122,6 +138,10 @@ pub async fn install_version(
             .map(|task| task.cancel.clone())
             .expect("install task just inserted")
     };
+    let _task = InstallTaskGuard {
+        installs: &state.installs,
+        key: version_id.clone(),
+    };
     // P0-3: record the install lifecycle so partial installs are visible and
     // repairable instead of looking "installed".
     let mut install_state = launcher_core::install::InstallStateMap::load(&state.layout);
@@ -152,11 +172,6 @@ pub async fn install_version(
             started.elapsed().as_secs_f64()
         )),
     }
-    state
-        .installs
-        .lock()
-        .expect("installs lock")
-        .remove(&version_id);
     match &result {
         Ok(_) => {
             install_state
@@ -272,6 +287,10 @@ pub async fn install_loader(
         );
         flag
     };
+    let _task = InstallTaskGuard {
+        installs: &state.installs,
+        key: task_key.clone(),
+    };
     let progress: SharedProgress = TauriProgress::shared(app, task_key.clone());
     let result = match loader.as_str() {
         "fabric" => installer
@@ -316,11 +335,6 @@ pub async fn install_loader(
         }
         _ => Err(format!("未知的加载器: {loader}")),
     };
-    state
-        .installs
-        .lock()
-        .expect("installs lock")
-        .remove(&task_key);
     match &result {
         Ok(_) => crate::logging::timed(
             &format!("loader install {task_key}"),
