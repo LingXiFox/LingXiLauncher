@@ -415,7 +415,8 @@ pub fn read_background_image(path: String) -> CommandResult<String> {
     use base64::Engine;
 
     let path = std::path::PathBuf::from(&path);
-    let metadata = std::fs::metadata(&path).map_err(|error| format!("无法读取背景图片：{error}"))?;
+    let metadata =
+        std::fs::metadata(&path).map_err(|error| format!("无法读取背景图片：{error}"))?;
     if !metadata.is_file() {
         return Err("背景图片路径不是文件".into());
     }
