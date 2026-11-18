@@ -374,7 +374,15 @@ export function HomePage() {
               title="运行日志"
               caption={logPath ? logPath : "最近一次启动的日志"}
               action={
-                <button type="button" className="text-link" onClick={() => setSection("logs")}>
+                <button
+                  type="button"
+                  className="text-link"
+                  onClick={() => {
+                    void api.openLogWindow().catch((error: unknown) => {
+                      toast("error", "无法打开日志窗口", error instanceof Error ? error.message : String(error));
+                    });
+                  }}
+                >
                   全部日志
                   <Icon name="chevronRight" size={12} />
                 </button>
@@ -411,7 +419,15 @@ export function HomePage() {
                 height={218}
                 autoScroll={false}
                 actions={
-                  <Button variant="ghost" size="sm" onClick={() => setSection("logs")}>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      void api.openLogWindow().catch((error: unknown) => {
+                        toast("error", "无法打开日志窗口", error instanceof Error ? error.message : String(error));
+                      });
+                    }}
+                  >
                     展开
                   </Button>
                 }

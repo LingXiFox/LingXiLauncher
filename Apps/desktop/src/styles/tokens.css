@@ -104,3 +104,77 @@
   --grain: rgba(27, 29, 33, 0.015);
   color-scheme: light;
 }
+
+/* ---------- Accent palettes ----------
+   Every accent only overrides the four derived tokens, so components never
+   need to know which palette is active. Dark and light each get their own
+   luminance-matched pair to stay legible on both canvases. */
+:root[data-theme="dark"][data-accent="blue"] {
+  --accent: #6fa8f2;
+  --accent-strong: #93c0ff;
+  --on-accent: #0a1420;
+  --accent-soft: rgba(111, 168, 242, 0.12);
+}
+
+:root[data-theme="dark"][data-accent="green"] {
+  --accent: #7fd2a4;
+  --accent-strong: #a1e6bd;
+  --on-accent: #07170f;
+  --accent-soft: rgba(127, 210, 164, 0.12);
+}
+
+:root[data-theme="dark"][data-accent="purple"] {
+  --accent: #b193f0;
+  --accent-strong: #c9b2ff;
+  --on-accent: #130b22;
+  --accent-soft: rgba(177, 147, 240, 0.12);
+}
+
+:root[data-theme="dark"][data-accent="pink"] {
+  --accent: #f093b9;
+  --accent-strong: #ffb3d1;
+  --on-accent: #200a13;
+  --accent-soft: rgba(240, 147, 185, 0.12);
+}
+
+:root[data-theme="dark"][data-accent="red"] {
+  --accent: #ef8d84;
+  --accent-strong: #ffada4;
+  --on-accent: #1f0b09;
+  --accent-soft: rgba(239, 141, 132, 0.12);
+}
+
+:root[data-theme="light"][data-accent="blue"] {
+  --accent: #2f6fb5;
+  --accent-strong: #245a95;
+  --on-accent: #f4f9ff;
+  --accent-soft: rgba(47, 111, 181, 0.1);
+}
+
+:root[data-theme="light"][data-accent="green"] {
+  --accent: #2f7a52;
+  --accent-strong: #246142;
+  --on-accent: #f4fdf7;
+  --accent-soft: rgba(47, 122, 82, 0.1);
+}
+
+:root[data-theme="light"][data-accent="purple"] {
+  --accent: #6b4bb5;
+  --accent-strong: #563b95;
+  --on-accent: #f9f6ff;
+  --accent-soft: rgba(107, 75, 181, 0.1);
+}
+
+:root[data-theme="light"][data-accent="pink"] {
+  --accent: #b04a72;
+  --accent-strong: #943c5e;
+  --on-accent: #fff6fa;
+  --accent-soft: rgba(176, 74, 114, 0.1);
+}
+
+:root[data-theme="light"][data-accent="red"] {
+  --accent: #b0453c;
+  --accent-strong: #943830;
+  --on-accent: #fff7f6;
+  --accent-soft: rgba(176, 69, 60, 0.1);
+}

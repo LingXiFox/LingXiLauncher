@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { AppProvider, useApp } from "./stores/app";
 import { Sidebar } from "./components/Sidebar";
 import { TopBar } from "./components/TopBar";
@@ -5,12 +6,15 @@ import { ToastViewport } from "./components/Toast";
 import { FoxMark, Icon } from "./components/Icons";
 import { Button } from "./components/Button";
 import { ModalHost } from "./components/modals/ModalHost";
+import { Onboarding } from "./components/Onboarding";
 import { HomePage } from "./pages/HomePage";
 import { InstancesPage } from "./pages/InstancesPage";
 import { DownloadsPage } from "./pages/DownloadsPage";
 import { AccountsPage } from "./pages/AccountsPage";
 import { LogsPage } from "./pages/LogsPage";
 import { SettingsPage } from "./pages/SettingsPage";
+import { api } from "./services/api";
+import { isLogWindow } from "./lib/window";
 
 function CurrentPage() {
   const { section } = useApp();
@@ -23,8 +27,6 @@ function CurrentPage() {
       return <DownloadsPage />;
     case "accounts":
       return <AccountsPage />;
-    case "logs":
-      return <LogsPage />;
     case "settings":
       return <SettingsPage />;
   }
@@ -77,8 +79,27 @@ function BootScreen() {
   return null;
 }
 
+/**
+ * Reopens the detached log window on launch when the user asked for it. Guarded
+ * so the log window itself never spawns another one.
+ */
+function useLogWindowOnStart() {
+  const { ready, backendOnline, settings } = useApp();
+  const opened = useRef(false);
+
+  useEffect(() => {
+    if (opened.current || !ready || !backendOnline || isLogWindow()) return;
+    if (!settings.logWindowOnStart) return;
+    opened.current = true;
+    void api.openLogWindow().catch(() => {
+      // A missing log window is cosmetic; never block the main window for it.
+    });
+  }, [backendOnline, ready, settings.logWindowOnStart]);
+}
+
 function Shell() {
   const { bootstrapping, ready, backendOnline, toasts, dismissToast } = useApp();
+  useLogWindowOnStart();
 
   if (bootstrapping || !ready || !backendOnline) {
     return (
@@ -99,15 +120,36 @@ function Shell() {
         </main>
       </div>
       <ModalHost />
+      <Onboarding />
+      <ToastViewport items={toasts} onDismiss={dismissToast} />
+    </div>
+  );
+}
+
+/** The detached log window: same bundle, no sidebar or top bar. */
+function LogWindow() {
+  const { bootstrapping, ready, backendOnline, toasts, dismissToast } = useApp();
+
+  if (bootstrapping || !ready || !backendOnline) {
+    return (
+      <>
+        <BootScreen />
+        <ToastViewport items={toasts} onDismiss={dismissToast} />
+      </>
+    );
+  }
+
+  return (
+    <div className="app-shell log-window">
+      <main className="content log-window__content" id="main-content">
+        <LogsPage />
+      </main>
       <ToastViewport items={toasts} onDismiss={dismissToast} />
     </div>
   );
 }
 
 export default function App() {
-  return (
-    <AppProvider>
-      <Shell />
-    </AppProvider>
-  );
+  const logWindow = isLogWindow();
+  return <AppProvider>{logWindow ? <LogWindow /> : <Shell />}</AppProvider>;
 }

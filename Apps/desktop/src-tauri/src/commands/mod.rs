@@ -7,7 +7,9 @@ pub mod instances;
 pub mod launch;
 pub mod performance;
 pub mod settings;
+pub mod update;
 pub mod versions;
+pub mod window;
 
 use std::sync::Arc;
 

@@ -28,10 +28,11 @@ import {
   type MicrosoftAccount,
   type VersionFilter,
 } from "../services/api";
+import { convertFileSrc } from "@tauri-apps/api/core";
 import { applyInstallEvent } from "../services/progress";
 import type { ToastItem, ToastTone } from "../components/Toast";
 
-export type Section = "home" | "instances" | "downloads" | "accounts" | "logs" | "settings";
+export type Section = "home" | "instances" | "downloads" | "accounts" | "settings";
 
 export type AppModal =
   | { type: "install"; versionId?: string }
@@ -60,11 +61,18 @@ const DEFAULT_SETTINGS: LauncherSettings = {
   mirrorConfigPath: null,
   defaultMemoryMiB: 4096,
   appearance: "dark",
+  language: "zh-CN",
+  accent: "orange",
+  backgroundImage: null,
+  proxyMode: "system",
+  proxyUrl: null,
+  gameRoot: null,
+  logWindowOnStart: false,
 };
 
 function readStoredSection(): Section {
   const raw = localStorage.getItem("lingxi.section");
-  if (raw === "home" || raw === "instances" || raw === "downloads" || raw === "accounts" || raw === "logs" || raw === "settings") {
+  if (raw === "home" || raw === "instances" || raw === "downloads" || raw === "accounts" || raw === "settings") {
     return raw;
   }
   return "home";
@@ -258,12 +266,28 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     document.documentElement.dataset.theme = resolvedTheme;
+    document.documentElement.dataset.accent = settings.accent ?? "orange";
     document.documentElement.style.colorScheme = resolvedTheme;
     localStorage.setItem("lingxi.theme", resolvedTheme);
     localStorage.setItem("lingxi.appearance", settings.appearance);
+    localStorage.setItem("lingxi.accent", settings.accent ?? "orange");
     const meta = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
     if (meta) meta.content = resolvedTheme === "dark" ? "#0D0F12" : "#F4F1EB";
-  }, [resolvedTheme, settings.appearance]);
+  }, [resolvedTheme, settings.appearance, settings.accent]);
+
+  /* Background artwork is a local image the user picked; the webview serves it
+     through the asset protocol, so CSS only receives the resolved URL. */
+  useEffect(() => {
+    const root = document.documentElement;
+    const path = settings.backgroundImage ?? null;
+    if (!path) {
+      root.style.removeProperty("--app-background-image");
+      root.dataset.background = "none";
+      return;
+    }
+    root.style.setProperty("--app-background-image", `url("${convertFileSrc(path)}")`);
+    root.dataset.background = "custom";
+  }, [settings.backgroundImage]);
 
   const setSection = useCallback((next: Section) => {
     setSectionState(next);
@@ -539,8 +563,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const saveSettings = useCallback(
     async (patch: Partial<LauncherSettings>) => {
       try {
-        await api.saveSettings(patch);
-        setSettings((previous) => ({ ...previous, ...patch }));
+        /* The command returns the normalised settings, so the UI mirrors what
+           the core actually persisted instead of the raw draft. */
+        const saved = await api.saveSettings(patch);
+        setSettings((previous) => ({ ...DEFAULT_SETTINGS, ...previous, ...saved }));
         toast("success", "设置已保存");
         return true;
       } catch (error) {

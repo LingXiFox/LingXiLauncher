@@ -35,10 +35,7 @@ export function Sidebar() {
     },
     {
       label: "System",
-      items: [
-        { section: "logs", label: "运行日志", icon: "logs" },
-        { section: "settings", label: "设置", icon: "settings" },
-      ],
+      items: [{ section: "settings", label: "设置", icon: "settings" }],
     },
   ];
 

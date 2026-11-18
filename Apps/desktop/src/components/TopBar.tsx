@@ -18,7 +18,6 @@ export function TopBar() {
     instances: "游戏实例",
     downloads: "版本下载",
     accounts: "账户管理",
-    logs: "运行日志",
     settings: "设置",
   };
 

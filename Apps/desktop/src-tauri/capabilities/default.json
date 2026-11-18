@@ -2,6 +2,6 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Default capability for the LingXi Launcher main window",
-  "windows": ["main"],
+  "windows": ["main", "logs"],
   "permissions": ["core:default", "dialog:default"]
 }

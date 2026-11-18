@@ -9,6 +9,9 @@ export type { InstallProgressEvent };
 /* ------------------------------------------------------------------ */
 
 export type Appearance = "dark" | "light" | "system";
+export type AccentColor = "orange" | "blue" | "green" | "purple" | "pink" | "red";
+export type Language = "zh-CN" | "en-US";
+export type ProxyMode = "system" | "manual" | "off";
 export type DownloadSource = "official" | "mirror" | "auto" | "local-cache-only";
 export type VersionFilter = "release" | "snapshot" | "all";
 export type AccountKind = "microsoft" | "local";
@@ -21,6 +24,13 @@ export interface LauncherSettings {
   mirrorConfigPath?: string | null;
   defaultMemoryMiB: number;
   appearance: Appearance;
+  language: Language;
+  accent: AccentColor;
+  backgroundImage?: string | null;
+  proxyMode: ProxyMode;
+  proxyUrl?: string | null;
+  gameRoot?: string | null;
+  logWindowOnStart: boolean;
 }
 
 export interface MicrosoftAccount {
@@ -145,6 +155,15 @@ export interface InstallProgress {
   activeFiles?: number;
   /** Retry notice for the file that just failed and will be retried. */
   retry?: { path: string; attempt: number; maxAttempts: number; message: string } | null;
+}
+
+export interface UpdateInfo {
+  currentVersion: string;
+  latestVersion: string;
+  releaseUrl: string;
+  releaseNotes?: string | null;
+  publishedAt?: string | null;
+  available: boolean;
 }
 
 export interface LogContent {
@@ -415,6 +434,13 @@ function normalizeBootstrap(raw: LauncherBootstrap & { accounts?: unknown }): La
       mirrorConfigPath: (settings.mirrorConfigPath as string | null | undefined) ?? null,
       defaultMemoryMiB: asNumber(settings.defaultMemoryMiB, 4096),
       appearance: (settings.appearance as Appearance) ?? "dark",
+      language: (settings.language as LauncherSettings["language"]) ?? "zh-CN",
+      accent: (settings.accent as LauncherSettings["accent"]) ?? "orange",
+      backgroundImage: (settings.backgroundImage as string | null | undefined) ?? null,
+      proxyMode: (settings.proxyMode as LauncherSettings["proxyMode"]) ?? "system",
+      proxyUrl: (settings.proxyUrl as string | null | undefined) ?? null,
+      gameRoot: (settings.gameRoot as string | null | undefined) ?? null,
+      logWindowOnStart: asBoolean(settings.logWindowOnStart),
     },
     accounts: normalizeAccounts(raw.accounts),
     instances: Array.isArray(raw.instances) ? raw.instances : [],
@@ -479,9 +505,15 @@ export const api = {
   openLogsFolder: () => call<void>("open_logs_folder"),
   revealPath: (path: string) => call<void>("reveal_path", { path }),
   getSettings: () => call<LauncherSettings>("get_settings"),
-  saveSettings: (patch: Partial<LauncherSettings>) => call<void>("save_settings", { ...patch }),
+  saveSettings: (patch: Partial<LauncherSettings>) =>
+    call<LauncherSettings>("save_settings", { ...patch }),
   detectJava: () => call<JavaRuntime[]>("detect_java"),
   browseJava: () => call<string | null>("browse_java"),
+  browseFolder: () => call<string | null>("browse_folder"),
+  restartApp: () => call<void>("restart_app"),
+  openLogWindow: () => call<void>("open_log_window"),
+  checkUpdate: () => call<UpdateInfo>("check_update"),
+  openExternal: (url: string) => call<void>("open_external", { url }),
 
   listMods: (instanceId: string) => call<InstalledMod[]>("list_mods", { instanceId }),
   searchModrinth: async (params: {
