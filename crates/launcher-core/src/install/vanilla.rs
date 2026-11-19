@@ -20,8 +20,8 @@ use crate::version::{ResolvedVersion, VersionResolver};
 
 use super::hashing::{sha1_bytes, verify_file};
 use super::models::{
-    CancelFlag, DownloadConfiguration, DownloadSourcePolicy, DownloadTask, InstallProgressEvent,
-    InstallReport, MissingDependency, MissingDependencyKind, SharedProgress,
+    BatchProgress, CancelFlag, DownloadConfiguration, DownloadSourcePolicy, DownloadTask,
+    InstallProgressEvent, InstallReport, MissingDependency, MissingDependencyKind, SharedProgress,
     TrustedMirrorConfiguration,
 };
 use super::Downloader;
@@ -64,6 +64,14 @@ pub struct VanillaInstaller {
     configuration: DownloadConfiguration,
 }
 
+/// Files the launcher needs before the game can start, computed without any
+/// asset index network round trip.
+#[derive(Debug)]
+struct CorePlan {
+    tasks: Vec<DownloadTask>,
+    native_jars: Vec<NativeJar>,
+}
+
 impl VanillaInstaller {
     pub fn new(
         layout: GameDataLayout,
@@ -92,24 +100,44 @@ impl VanillaInstaller {
 
     /// Builds the complete download plan, fetching version metadata when needed.
     pub async fn plan(&self, version_id: &str) -> Result<VanillaInstallPlan> {
+        let version = self.resolve_version(version_id).await?;
+        let core = self.core_plan(&version)?;
+        let (asset_tasks, asset_object_count) = self.asset_tasks(&version).await?;
+        let mut tasks = core.tasks;
+        tasks.extend(asset_tasks);
+        Ok(VanillaInstallPlan {
+            version,
+            tasks,
+            native_jars: core.native_jars,
+            asset_object_count,
+        })
+    }
+
+    /// Resolves a version, fetching its metadata when it is not cached yet.
+    async fn resolve_version(&self, version_id: &str) -> Result<ResolvedVersion> {
         if !self.layout.version_json(version_id)?.is_file() {
             ManifestService::new(self.layout.clone())?
                 .metadata_by_id(version_id)
                 .await?;
         }
-        let version = VersionResolver.resolve(version_id, &self.layout.game_root)?;
+        VersionResolver.resolve(version_id, &self.layout.game_root)
+    }
+
+    /// Plans the client jar, libraries, natives and logging config.
+    fn core_plan(&self, version: &ResolvedVersion) -> Result<CorePlan> {
         let mut tasks = Vec::new();
-        self.add_client_jar(&version, &mut tasks)?;
+        self.add_client_jar(version, &mut tasks)?;
         let mut native_jars = Vec::new();
-        self.add_libraries(&version, &mut tasks, &mut native_jars)?;
-        self.add_logging(&version, &mut tasks)?;
-        let asset_object_count = self.add_assets(&version, &mut tasks).await?;
-        Ok(VanillaInstallPlan {
-            version,
-            tasks,
-            native_jars,
-            asset_object_count,
-        })
+        self.add_libraries(version, &mut tasks, &mut native_jars)?;
+        self.add_logging(version, &mut tasks)?;
+        Ok(CorePlan { tasks, native_jars })
+    }
+
+    /// Resolves the asset index and turns it into asset object tasks.
+    async fn asset_tasks(&self, version: &ResolvedVersion) -> Result<(Vec<DownloadTask>, usize)> {
+        let mut tasks = Vec::new();
+        let asset_object_count = self.add_assets(version, &mut tasks).await?;
+        Ok((tasks, asset_object_count))
     }
 
     pub async fn install(
@@ -123,16 +151,49 @@ impl VanillaInstaller {
             phase: "manifest".into(),
             message: format!("Fetching metadata for Minecraft {version_id}"),
         });
-        let plan = self.plan(version_id).await?;
+        let version = tokio::select! {
+            biased;
+            _ = cancel.cancelled() => return Err(Error::Cancelled),
+            version = self.resolve_version(version_id) => version?,
+        };
+        let core = self.core_plan(&version)?;
         let installer =
             Downloader::new(self.policy, self.mirror.clone(), self.configuration.clone())?;
         progress.emit(InstallProgressEvent::Phase {
             phase: "download".into(),
-            message: format!("Installing Minecraft {}", plan.version.id),
+            message: format!("Installing Minecraft {}", version.id),
         });
-        let summary = installer
-            .download(plan.tasks.clone(), progress.clone(), cancel.clone())
-            .await?;
+        // Core and assets share one request budget; only assets depend on the index.
+        let [core_progress, asset_progress] = BatchProgress::pair(progress.clone());
+        let core_transfer = async {
+            let result = installer
+                .download(core.tasks.clone(), core_progress.clone(), cancel.clone())
+                .await;
+            core_progress.finish();
+            result
+        };
+        let asset_transfer = async {
+            let (tasks, count) = tokio::select! {
+                biased;
+                _ = cancel.cancelled() => return Err(Error::Cancelled),
+                assets = self.asset_tasks(&version) => assets?,
+            };
+            let result = installer
+                .download(tasks.clone(), asset_progress.clone(), cancel.clone())
+                .await;
+            asset_progress.finish();
+            Ok((tasks, count, result?))
+        };
+        let (core_summary, asset_batch) = tokio::join!(biased; core_transfer, asset_transfer);
+        let mut summary = core_summary?;
+        let (asset_tasks, asset_object_count, asset_summary) = asset_batch?;
+        summary.absorb(asset_summary);
+        let plan = VanillaInstallPlan {
+            version,
+            tasks: core.tasks.into_iter().chain(asset_tasks).collect(),
+            native_jars: core.native_jars,
+            asset_object_count,
+        };
         if cancel.is_cancelled() {
             return Err(Error::Cancelled);
         }
@@ -148,7 +209,7 @@ impl VanillaInstaller {
                 phase: "natives".into(),
                 message: "Extracting native libraries".into(),
             });
-            self.extract_natives(&plan, progress.clone(), &cancel)?
+            self.extract_natives(&plan, &cancel)?
         } else {
             0
         };
@@ -429,18 +490,13 @@ impl VanillaInstaller {
         Ok(parsed.objects.len())
     }
 
-    fn extract_natives(
-        &self,
-        plan: &VanillaInstallPlan,
-        progress: SharedProgress,
-        cancel: &CancelFlag,
-    ) -> Result<usize> {
+    fn extract_natives(&self, plan: &VanillaInstallPlan, cancel: &CancelFlag) -> Result<usize> {
         let target = self.layout.natives_directory(
             &plan.version.natives_version_id,
             self.platform.architecture.jvm_name(),
         )?;
         ensure_dir(&target)?;
-        let mut extracted = 0usize;
+        let mut extracted_names = BTreeSet::new();
         for jar in &plan.native_jars {
             if cancel.is_cancelled() {
                 return Err(Error::Cancelled);
@@ -452,6 +508,9 @@ impl VanillaInstaller {
             let mut archive = zip::ZipArchive::new(file)
                 .map_err(|e| Error::Zip(format!("{}: {e}", jar.path.display())))?;
             for index in 0..archive.len() {
+                if cancel.is_cancelled() {
+                    return Err(Error::Cancelled);
+                }
                 let mut entry = archive
                     .by_index(index)
                     .map_err(|e| Error::Zip(format!("{}: {e}", jar.path.display())))?;
@@ -475,15 +534,10 @@ impl VanillaInstaller {
                 let mut data = Vec::with_capacity(entry.size() as usize);
                 entry.read_to_end(&mut data)?;
                 std::fs::write(&destination, &data)?;
-                extracted += 1;
+                extracted_names.insert(file_name.to_string());
             }
-            progress.emit(InstallProgressEvent::FileFinished {
-                path: jar.path.display().to_string(),
-                bytes: std::fs::metadata(&jar.path).map(|m| m.len()).unwrap_or(0),
-                source: "natives".into(),
-            });
         }
-        Ok(extracted)
+        Ok(extracted_names.len())
     }
 
     fn missing_dependencies(&self, plan: &VanillaInstallPlan) -> Result<Vec<MissingDependency>> {

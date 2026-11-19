@@ -1,6 +1,8 @@
+use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
-use crate::error::Result;
+use crate::error::{Error, Result};
 
 use super::super::hashing::{sha1_file, verify_file};
 
@@ -13,6 +15,52 @@ pub struct ContentCache {
     root: PathBuf,
 }
 
+// Keep an in-process sweep from unlinking an object that was just replaced.
+static PUBLICATION: [Mutex<()>; 16] = [const { Mutex::new(()) }; 16];
+
+fn publication(hash: &str) -> std::sync::MutexGuard<'static, ()> {
+    PUBLICATION[hash
+        .chars()
+        .next()
+        .and_then(|c| c.to_digit(16))
+        .expect("valid SHA-1") as usize]
+        .lock()
+        .expect("cache publication lock")
+}
+
+pub(super) fn is_sha1(hash: &str) -> bool {
+    hash.len() == 40 && hash.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+/// Copy to a private sibling and verify the exact bytes being published.
+fn publish(
+    source: &Path,
+    destination: &Path,
+    verify: impl FnOnce(&Path) -> Result<bool>,
+) -> Result<bool> {
+    let parent = destination
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    std::fs::create_dir_all(parent)?;
+    let temp = parent.join(format!(".lingxi-cache-{}.part", uuid::Uuid::new_v4()));
+    let mut output = std::fs::File::create_new(&temp)?;
+    let result = (|| {
+        io::copy(&mut std::fs::File::open(source)?, &mut output)?;
+        output.sync_data()?;
+        drop(output);
+        if !verify(&temp)? {
+            return Ok(false);
+        }
+        std::fs::rename(&temp, destination)?;
+        Ok(true)
+    })();
+    if !matches!(result, Ok(true)) {
+        let _ = std::fs::remove_file(&temp);
+    }
+    result
+}
+
 impl ContentCache {
     pub fn new(root: PathBuf) -> Self {
         Self { root }
@@ -22,45 +70,39 @@ impl ContentCache {
         &self.root
     }
 
-    pub fn object_path(&self, sha1: &str) -> PathBuf {
+    pub fn object_path(&self, sha1: &str) -> Option<PathBuf> {
+        if !is_sha1(sha1) {
+            return None;
+        }
         let lower = sha1.to_ascii_lowercase();
-        let prefix = lower.get(..2).unwrap_or("xx");
-        self.root.join(prefix).join(&lower)
+        Some(self.root.join(&lower[..2]).join(&lower))
     }
 
     /// Returns the cached object when it is present and still matches the hash.
-    /// A corrupt or truncated entry is deleted so the next run re-downloads it.
+    /// Leave invalid entries in place until an atomic repair or explicit sweep.
     pub fn lookup(&self, sha1: &str, size: Option<u64>) -> Option<PathBuf> {
-        let path = self.object_path(sha1);
-        if !path.is_file() {
-            return None;
-        }
-        match verify_file(&path, Some(sha1), size) {
-            Ok(true) => Some(path),
-            _ => {
-                let _ = std::fs::remove_file(&path);
-                None
-            }
-        }
+        let path = self.object_path(sha1)?;
+        verify_file(&path, Some(sha1), size)
+            .unwrap_or(false)
+            .then_some(path)
     }
 
-    /// Copies or links `source` into the cache. Returns the cached path.
+    /// Store an independent copy so writing to a game directory cannot mutate the cache.
     pub fn store(&self, sha1: &str, source: &Path) -> Result<PathBuf> {
-        let destination = self.object_path(sha1);
-        if destination.is_file() && verify_file(&destination, Some(sha1), None).unwrap_or(false) {
+        let destination = self
+            .object_path(sha1)
+            .ok_or_else(|| Error::InvalidMetadata("invalid cache SHA-1".into()))?;
+        let _publication = publication(sha1);
+        if verify_file(&destination, Some(sha1), None)? {
             return Ok(destination);
         }
-        if let Some(parent) = destination.parent() {
-            std::fs::create_dir_all(parent)?;
+        if !publish(source, &destination, |temp| {
+            verify_file(temp, Some(sha1), None)
+        })? {
+            return Err(Error::InvalidMetadata(
+                "cache source does not match its SHA-1".into(),
+            ));
         }
-        let temp = destination.with_extension("cache-part");
-        let _ = std::fs::remove_file(&temp);
-        // Hard links keep the disk cost at zero when both paths are on the same
-        // volume; the copy fallback covers caches on a different drive.
-        if std::fs::hard_link(source, &temp).is_err() {
-            std::fs::copy(source, &temp)?;
-        }
-        std::fs::rename(&temp, &destination)?;
         Ok(destination)
     }
 
@@ -92,10 +134,13 @@ impl ContentCache {
                 let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
                     continue;
                 };
-                let good = sha1_file(&path)
-                    .map(|actual| actual.eq_ignore_ascii_case(name))
-                    .unwrap_or(false);
-                if !good && std::fs::remove_file(&path).is_ok() {
+                if self.object_path(name).as_deref() != Some(&path) {
+                    continue;
+                }
+                let _publication = publication(name);
+                if sha1_file(&path).is_ok_and(|actual| !actual.eq_ignore_ascii_case(name))
+                    && std::fs::remove_file(&path).is_ok()
+                {
                     removed += 1;
                 }
             }
@@ -103,15 +148,32 @@ impl ContentCache {
         Ok(removed)
     }
 
-    /// Places a cached object at `destination` (hard link when possible).
+    /// Places a validated copy atomically without removing the previous file first.
     pub fn place(&self, object: &Path, destination: &Path) -> Result<()> {
-        if let Some(parent) = destination.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        let _ = std::fs::remove_file(destination);
-        if std::fs::hard_link(object, destination).is_err() {
-            std::fs::copy(object, destination)?;
+        let hash = object
+            .file_name()
+            .and_then(|name| name.to_str())
+            .filter(|name| self.object_path(name).as_deref() == Some(object))
+            .ok_or_else(|| Error::InvalidMetadata("invalid cache object path".into()))?;
+        if !self.materialize(hash, None, destination)? {
+            return Err(Error::InvalidMetadata(
+                "cache object is missing or corrupt".into(),
+            ));
         }
         Ok(())
+    }
+
+    pub(super) fn materialize(
+        &self,
+        sha1: &str,
+        size: Option<u64>,
+        destination: &Path,
+    ) -> Result<bool> {
+        let Some(object) = self.object_path(sha1).filter(|path| path.is_file()) else {
+            return Ok(false);
+        };
+        publish(&object, destination, |temp| {
+            verify_file(temp, Some(sha1), size)
+        })
     }
 }

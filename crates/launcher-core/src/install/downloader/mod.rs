@@ -1,17 +1,19 @@
 use std::cmp::Reverse;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
-use futures_util::StreamExt;
-use tokio::sync::{Notify, Semaphore};
+use futures_util::{StreamExt, TryStreamExt};
+use reqwest::header::{CONTENT_RANGE, LOCATION, RANGE};
+use reqwest::{Response, StatusCode};
+use tokio::sync::{Notify, OwnedSemaphorePermit, Semaphore};
 
 use crate::error::{Error, Result};
 use crate::net::{classify_reqwest_error, describe_transfer_error, redact_url};
 
-use super::hashing::{sha1_file, verify_file};
+use super::hashing::verify_file;
 use super::models::*;
 
 pub mod cache;
@@ -23,166 +25,218 @@ pub use source::{
     HostRewrite,
 };
 
-/// Smallest slice we are willing to split a file into. Below this the HTTP
-/// overhead dominates and a single stream is faster.
 const MIN_SEGMENT_BYTES: u64 = 1024 * 1024;
+type HostGates = Mutex<HashMap<String, Arc<Semaphore>>>;
 
-/// A failed transfer slice. Carries the byte count already written so the
-/// aggregate progress can be rolled back precisely.
+static GLOBAL: LazyLock<Semaphore> =
+    LazyLock::new(|| Semaphore::new(DownloadConfiguration::default().global_concurrency));
+static HOSTS: LazyLock<HostGates> = LazyLock::new(HostGates::default);
+static DESTINATIONS: LazyLock<[tokio::sync::Mutex<()>; 1024]> =
+    LazyLock::new(|| std::array::from_fn(|_| tokio::sync::Mutex::new(())));
+
 #[derive(Debug)]
 struct FetchError {
     message: String,
     retryable: bool,
-    written: u64,
-    /// The server ignored Range and answered 200 OK, so segmented or resumable
-    /// transfer is impossible for this file.
+    source_failure: bool,
     range_unsupported: bool,
 }
 
 impl FetchError {
-    fn new(message: impl Into<String>, retryable: bool, written: u64) -> Self {
+    fn local(error: impl std::fmt::Display) -> Self {
         Self {
-            message: message.into(),
-            retryable,
-            written,
+            message: error.to_string(),
+            retryable: false,
+            source_failure: false,
             range_unsupported: false,
         }
     }
 
-    fn range_unsupported(written: u64) -> Self {
+    fn remote(message: String, retryable: bool, source_failure: bool) -> Self {
         Self {
-            message: "server does not support byte ranges".into(),
-            retryable: false,
-            written,
+            message,
+            retryable,
+            source_failure,
+            range_unsupported: false,
+        }
+    }
+
+    fn transport(url: &str, error: &reqwest::Error) -> Self {
+        Self::remote(
+            describe_transfer_error(
+                "download",
+                url,
+                classify_reqwest_error(error),
+                &error.to_string(),
+            ),
+            true,
+            true,
+        )
+    }
+
+    fn status(response: &Response) -> Self {
+        let status = response.status();
+        let transient = matches!(status.as_u16(), 408 | 429) || status.is_server_error();
+        Self::remote(
+            format!("HTTP {status} for {}", redact_url(response.url().as_str())),
+            transient,
+            transient || matches!(status.as_u16(), 401 | 403),
+        )
+    }
+
+    fn range() -> Self {
+        Self {
             range_unsupported: true,
+            ..Self::remote(
+                "server returned an incompatible byte range".into(),
+                true,
+                false,
+            )
         }
+    }
+
+    fn cancelled() -> Self {
+        Self::local("Cancelled")
     }
 }
 
-/// Live byte counters shared by every transfer, plus the denominator used for
-/// the percentage.
+#[derive(Default)]
+struct Counters {
+    downloaded: u64,
+    declared: u64,
+    received: u64,
+}
+
 struct TransferStats {
-    downloaded: AtomicU64,
-    total: AtomicU64,
-    active: AtomicUsize,
+    counters: Mutex<Counters>,
+    active: Arc<std::sync::atomic::AtomicUsize>,
 }
 
-impl TransferStats {
-    fn new(total: u64) -> Arc<Self> {
-        Arc::new(Self {
-            downloaded: AtomicU64::new(0),
-            total: AtomicU64::new(total),
-            active: AtomicUsize::new(0),
-        })
-    }
+struct AttemptProgress {
+    stats: Arc<TransferStats>,
+    sink: SharedProgress,
+    credited: std::sync::atomic::AtomicU64,
+}
 
-    fn add(&self, bytes: u64, progress: &SharedProgress) {
-        let total = self.total.load(Ordering::Relaxed);
-        let aggregate = self.downloaded.fetch_add(bytes, Ordering::Relaxed) + bytes;
-        let denominator = total.max(aggregate);
-        progress.emit(InstallProgressEvent::Bytes {
-            downloaded: aggregate.min(denominator),
-            total: denominator,
+impl AttemptProgress {
+    fn add(&self, bytes: u64, received: bool) {
+        use std::sync::atomic::Ordering::Relaxed;
+        self.credited.fetch_add(bytes, Relaxed);
+        self.update(|counters| {
+            counters.downloaded += bytes;
+            if received {
+                counters.received += bytes;
+            }
         });
     }
 
-    fn rollback(&self, bytes: u64, progress: &SharedProgress) {
-        if bytes == 0 {
-            return;
+    fn update(&self, change: impl FnOnce(&mut Counters)) {
+        // Serialize both the counter and its event across parallel requests.
+        let mut counters = self.stats.counters.lock().expect("progress counters");
+        change(&mut counters);
+        self.sink.emit(InstallProgressEvent::Bytes {
+            downloaded: counters.downloaded,
+            total: counters.declared.max(counters.downloaded),
+        });
+    }
+
+    fn reset(&self) {
+        use std::sync::atomic::Ordering::Relaxed;
+        let bytes = self.credited.swap(0, Relaxed);
+        if bytes != 0 {
+            self.update(|counters| counters.downloaded -= bytes);
         }
-        let previous = self.downloaded.fetch_sub(bytes, Ordering::Relaxed);
-        let remaining = previous.saturating_sub(bytes);
-        let total = self.total.load(Ordering::Relaxed);
-        progress.emit(InstallProgressEvent::Bytes {
-            downloaded: remaining.min(total),
-            total,
-        });
+    }
+
+    fn commit(&mut self) {
+        *self.credited.get_mut() = 0;
     }
 }
 
-/// Adjustable concurrency window. Starts at the configured value, shrinks when
-/// transfers start failing and grows back once the network recovers.
+impl Drop for AttemptProgress {
+    fn drop(&mut self) {
+        self.reset();
+    }
+}
+
 struct AdaptiveGate {
-    limit: AtomicUsize,
-    in_flight: AtomicUsize,
+    state: Mutex<(usize, usize)>, // (limit, in flight)
     max: usize,
     adaptive: bool,
     notify: Notify,
 }
 
-struct GatePermit<'a> {
-    gate: &'a AdaptiveGate,
-}
+struct GatePermit(Arc<AdaptiveGate>);
 
-impl Drop for GatePermit<'_> {
+impl Drop for GatePermit {
     fn drop(&mut self) {
-        self.gate.in_flight.fetch_sub(1, Ordering::SeqCst);
-        self.gate.notify.notify_waiters();
+        self.0.state.lock().expect("request gate").1 -= 1;
+        self.0.notify.notify_waiters();
     }
 }
 
 impl AdaptiveGate {
     fn new(limit: usize, max: usize, adaptive: bool) -> Self {
+        let max = max.max(1);
         Self {
-            limit: AtomicUsize::new(limit.max(1)),
-            in_flight: AtomicUsize::new(0),
-            max: max.max(limit.max(1)),
+            state: Mutex::new((limit.clamp(1, max), 0)),
+            max,
             adaptive,
             notify: Notify::new(),
         }
     }
 
-    async fn acquire(&self) -> GatePermit<'_> {
+    async fn acquire(self: &Arc<Self>) -> GatePermit {
         loop {
-            // Register interest before checking so a release between the check
-            // and the await cannot be missed.
             let notified = self.notify.notified();
-            let limit = self.limit.load(Ordering::SeqCst).max(1);
-            let in_flight = self.in_flight.load(Ordering::SeqCst);
-            if in_flight < limit {
-                self.in_flight.fetch_add(1, Ordering::SeqCst);
-                return GatePermit { gate: self };
+            {
+                let mut state = self.state.lock().expect("request gate");
+                if state.1 < state.0 {
+                    state.1 += 1;
+                    return GatePermit(Arc::clone(self));
+                }
             }
             notified.await;
         }
     }
 
     fn on_success(&self) {
-        if !self.adaptive {
-            return;
-        }
-        let limit = self.limit.load(Ordering::SeqCst);
-        if limit < self.max {
-            self.limit
-                .store((limit + 1).min(self.max), Ordering::SeqCst);
-            self.notify.notify_waiters();
+        if self.adaptive {
+            let mut state = self.state.lock().expect("request gate");
+            if state.0 < self.max {
+                state.0 += 1;
+                self.notify.notify_waiters();
+            }
         }
     }
 
     fn on_failure(&self) {
-        if !self.adaptive {
-            return;
+        if self.adaptive {
+            let mut state = self.state.lock().expect("request gate");
+            state.0 = (state.0 / 2).max(1);
         }
-        let limit = self.limit.load(Ordering::SeqCst);
-        self.limit.store((limit / 2).max(1), Ordering::SeqCst);
-    }
-
-    #[cfg(test)]
-    fn current(&self) -> usize {
-        self.limit.load(Ordering::SeqCst)
     }
 }
 
+struct ActiveRequest {
+    response: Response,
+    _host: OwnedSemaphorePermit,
+    _shared_host: OwnedSemaphorePermit,
+    _gate: GatePermit,
+    _global: tokio::sync::SemaphorePermit<'static>,
+}
+
+#[derive(Clone)]
 pub struct Downloader {
     client: reqwest::Client,
-    probe_client: reqwest::Client,
     policy: DownloadSourcePolicy,
     mirror: Option<TrustedMirrorConfiguration>,
     builtin: Vec<BuiltinMirror>,
     configuration: DownloadConfiguration,
     health: Arc<HealthRegistry>,
-    host_gates: std::sync::Mutex<HashMap<String, Arc<Semaphore>>>,
-    cache: Option<ContentCache>,
+    gate: Arc<AdaptiveGate>,
+    host_gates: Arc<HostGates>,
+    cache: Option<Arc<ContentCache>>,
 }
 
 impl Downloader {
@@ -191,7 +245,7 @@ impl Downloader {
         mirror: Option<TrustedMirrorConfiguration>,
         configuration: DownloadConfiguration,
     ) -> Result<Self> {
-        let builtin: Vec<BuiltinMirror> = configuration
+        let builtin: Vec<_> = configuration
             .builtin_mirrors
             .iter()
             .filter_map(|id| builtin_mirror(id))
@@ -202,27 +256,36 @@ impl Downloader {
             ));
         }
         let client = crate::net::client_builder()
-            .user_agent(user_agent())
+            .user_agent(format!(
+                "{}/{}",
+                crate::models::launch::LAUNCHER_NAME,
+                crate::models::launch::LAUNCHER_VERSION
+            ))
             .connect_timeout(Duration::from_secs(20))
             .timeout(Duration::from_secs(600))
-            .pool_max_idle_per_host(configuration.per_host_concurrency.max(2))
+            .redirect(reqwest::redirect::Policy::none())
+            .no_gzip()
             .build()?;
-        let probe_client = crate::net::client_builder()
-            .user_agent(user_agent())
-            .connect_timeout(Duration::from_secs(10))
-            .timeout(Duration::from_secs(30))
-            .build()?;
-        let cache = configuration.cache_directory.clone().map(ContentCache::new);
+        let cache = configuration
+            .cache_directory
+            .clone()
+            .map(ContentCache::new)
+            .map(Arc::new);
+        let gate = AdaptiveGate::new(
+            configuration.concurrency,
+            configuration.global_concurrency,
+            configuration.adaptive_concurrency,
+        );
         Ok(Self {
             client,
-            probe_client,
             policy,
             mirror,
             builtin,
             configuration,
-            health: Arc::new(HealthRegistry::new(4, Duration::from_secs(20))),
-            host_gates: std::sync::Mutex::new(HashMap::new()),
             cache,
+            gate: Arc::new(gate),
+            health: Arc::new(HealthRegistry::new(4, Duration::from_secs(20))),
+            host_gates: Arc::new(HostGates::default()),
         })
     }
 
@@ -230,21 +293,76 @@ impl Downloader {
         self.policy
     }
 
-    /// Per-host concurrency gate, created on first use.
-    fn host_gate(&self, url: &str) -> Arc<Semaphore> {
-        let host = url::Url::parse(url)
-            .ok()
-            .and_then(|parsed| parsed.host_str().map(|value| value.to_string()))
-            .unwrap_or_else(|| "unknown".to_string());
-        let mut gates = self.host_gates.lock().expect("host gate lock");
-        gates
-            .entry(host)
-            .or_insert_with(|| {
-                Arc::new(Semaphore::new(
-                    self.configuration.per_host_concurrency.max(1),
-                ))
-            })
-            .clone()
+    async fn request(
+        &self,
+        url: &str,
+        range: Option<&str>,
+        cancel: &CancelFlag,
+    ) -> std::result::Result<ActiveRequest, FetchError> {
+        let operation = async {
+            let mut target = url::Url::parse(url).map_err(FetchError::local)?;
+            for hop in 0..=10 {
+                let host = target
+                    .host_str()
+                    .ok_or_else(|| FetchError::local("download URL has no host"))?;
+                let local = host_gate(
+                    &self.host_gates,
+                    host,
+                    self.configuration.per_host_concurrency,
+                );
+                let shared = host_gate(
+                    &HOSTS,
+                    host,
+                    DownloadConfiguration::default().per_host_concurrency,
+                );
+                let local = local.acquire_owned().await.expect("host gate is open");
+                let shared = shared.acquire_owned().await.expect("host gate is open");
+                let gate = self.gate.acquire().await;
+                let global = GLOBAL.acquire().await.expect("global gate is open");
+                let mut request = self.client.get(target.clone());
+                if let Some(range) = range {
+                    request = request.header(RANGE, range);
+                }
+                let response = request
+                    .send()
+                    .await
+                    .map_err(|error| FetchError::transport(target.as_str(), &error))?;
+                if matches!(response.status().as_u16(), 301 | 302 | 303 | 307 | 308) {
+                    if let Some(next) = response
+                        .headers()
+                        .get(LOCATION)
+                        .and_then(|value| value.to_str().ok())
+                        .and_then(|value| target.join(value).ok())
+                    {
+                        if hop == 10
+                            || !matches!(next.scheme(), "http" | "https")
+                            || (target.scheme() == "https" && next.scheme() == "http")
+                        {
+                            return Err(FetchError::remote(
+                                "invalid download redirect chain".into(),
+                                false,
+                                true,
+                            ));
+                        }
+                        target = next;
+                        continue; // Release the old host before acquiring the next one.
+                    }
+                }
+                return Ok(ActiveRequest {
+                    response,
+                    _host: local,
+                    _shared_host: shared,
+                    _gate: gate,
+                    _global: global,
+                });
+            }
+            unreachable!()
+        };
+        tokio::select! {
+            biased;
+            _ = cancel.cancelled() => Err(FetchError::cancelled()),
+            result = operation => result,
+        }
     }
 
     pub async fn download(
@@ -253,44 +371,43 @@ impl Downloader {
         progress: SharedProgress,
         cancel: CancelFlag,
     ) -> Result<DownloadSummary> {
-        let mut seen = std::collections::HashSet::new();
-        let mut unique = Vec::new();
-        for task in tasks {
-            if seen.insert(task.destination.clone()) {
-                unique.push(task);
-            }
-        }
+        use std::sync::atomic::Ordering::Relaxed;
 
-        // A file can be satisfied from the destination itself or from the
-        // shared content cache, which is what makes cross-instance reuse work.
-        let mut cache_hits = 0usize;
+        let mut seen = HashSet::new();
+        let mut summary = DownloadSummary::default();
         let mut pending = Vec::new();
-        for task in unique {
-            if verify_file(&task.destination, task.sha1.as_deref(), task.size)? {
-                cache_hits += 1;
+        for task in tasks {
+            if cancel.is_cancelled() {
+                return Err(Error::Cancelled);
+            }
+            if !seen.insert(task.destination.clone()) {
                 continue;
             }
-            if let (Some(cache), Some(sha1)) = (&self.cache, task.sha1.as_deref()) {
-                if let Some(object) = cache.lookup(sha1, task.size) {
-                    if cache.place(&object, &task.destination).is_ok() {
-                        cache_hits += 1;
-                        continue;
-                    }
-                }
+            let guard = tokio::select! {
+                biased;
+                _ = cancel.cancelled() => return Err(Error::Cancelled),
+                guard = destination_gate(&task.destination).lock() => guard,
+            };
+            if self.cached(&task)? {
+                summary.cache_hits += 1;
+            } else {
+                pending.push(task);
             }
-            pending.push(task);
+            drop(guard);
         }
-
-        pending.sort_by_key(|task| Reverse(task.size.unwrap_or(0)));
-        let declared_bytes: u64 = pending.iter().map(|task| task.size.unwrap_or(0)).sum();
+        let declared = pending.iter().map(|task| task.size.unwrap_or(0)).sum();
+        summary.declared_bytes = declared;
         progress.emit(InstallProgressEvent::Plan {
-            total_files: cache_hits + pending.len(),
-            total_bytes: declared_bytes,
-            cache_hits,
+            total_files: summary.cache_hits + pending.len(),
+            total_bytes: declared,
+            cache_hits: summary.cache_hits,
         });
 
+        if cancel.is_cancelled() {
+            return Err(Error::Cancelled);
+        }
         if self.policy == DownloadSourcePolicy::LocalCacheOnly {
-            let failures = pending
+            summary.failures = pending
                 .into_iter()
                 .map(|task| DownloadFailure {
                     destination: task.destination,
@@ -298,783 +415,706 @@ impl Downloader {
                     message: "local-cache-only: file is not present in the local cache".into(),
                 })
                 .collect();
-            return Ok(DownloadSummary {
-                downloaded: Vec::new(),
-                cache_hits,
-                failures,
-            });
+            return Ok(summary);
         }
 
-        let stats = TransferStats::new(declared_bytes);
-        let gate = Arc::new(AdaptiveGate::new(
-            self.configuration
-                .concurrency
-                .max(1)
-                .min(self.configuration.global_concurrency.max(1)),
-            self.configuration.global_concurrency.max(1),
-            self.configuration.adaptive_concurrency,
-        ));
-        let stop_speed = Arc::new(AtomicU64::new(0));
-        let speed_task =
-            self.spawn_speed_reporter(stats.clone(), progress.clone(), stop_speed.clone());
-
-        let results: Vec<std::result::Result<DownloadedFile, DownloadFailure>> =
-            futures_util::stream::iter(pending.into_iter().map(|task| {
-                let stats = stats.clone();
-                let progress = progress.clone();
-                let cancel = cancel.clone();
-                let gate = gate.clone();
-                async move { self.perform(task, &stats, &gate, &progress, &cancel).await }
-            }))
-            .buffer_unordered(self.configuration.global_concurrency.max(1))
-            .collect()
-            .await;
-
-        stop_speed.store(1, Ordering::SeqCst);
-        speed_task.await.ok();
-
+        // Launch-critical files first, asset bulk last: the first window of
+        // transfers decides whether the game becomes startable quickly, so the
+        // client jar goes first, then libraries and natives, then assets.
+        pending.sort_by_key(|task| (schedule_rank(task.kind), Reverse(task.size.unwrap_or(0))));
+        let stats = Arc::new(TransferStats {
+            counters: Mutex::new(Counters {
+                declared,
+                ..Counters::default()
+            }),
+            active: Arc::default(),
+        });
+        let downloader = Arc::new(self.clone());
+        let mut transfers = futures_util::stream::iter(pending.into_iter().map(|task| {
+            Arc::clone(&downloader).perform(
+                task,
+                Arc::clone(&stats),
+                progress.clone(),
+                cancel.clone(),
+            )
+        }))
+        .buffer_unordered(self.configuration.global_concurrency.max(1));
+        let interval = Duration::from_millis(self.configuration.speed_report_interval_ms.max(100));
+        let mut ticker = tokio::time::interval_at(tokio::time::Instant::now() + interval, interval);
+        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        let (mut last_bytes, mut last_tick) = (0, Instant::now());
+        loop {
+            tokio::select! {
+                result = transfers.next() => match result {
+                    Some(Ok(Some(file))) => summary.downloaded.push(file),
+                    Some(Ok(None)) => summary.cache_hits += 1,
+                    Some(Err(failure)) => summary.failures.push(failure),
+                    None => break,
+                },
+                _ = ticker.tick() => {
+                    let counters = stats.counters.lock().expect("speed counters");
+                    let per_second = ((counters.received - last_bytes) as f64 / last_tick.elapsed().as_secs_f64()) as u64;
+                    last_bytes = counters.received;
+                    last_tick = Instant::now();
+                    progress.emit(InstallProgressEvent::Speed {
+                        bytes_per_second: per_second,
+                        remaining_seconds: counters.declared.saturating_sub(counters.downloaded).checked_div(per_second),
+                        active_files: stats.active.load(Relaxed),
+                    });
+                }
+            }
+        }
         if cancel.is_cancelled() {
-            // Requirement: a cancelled install must not leave half-written data
-            // behind. Verified files stay in the content cache so a later run
-            // restores them instantly.
-            for file in results.iter().filter_map(|result| result.as_ref().ok()) {
-                let _ = std::fs::remove_file(&file.path);
-            }
-            for failure in results.iter().filter_map(|result| result.as_ref().err()) {
-                remove_partials(&failure.destination);
-            }
             return Err(Error::Cancelled);
         }
-
-        let mut downloaded = Vec::new();
-        let mut failures = Vec::new();
-        for result in results {
-            match result {
-                Ok(file) => downloaded.push(file),
-                Err(failure) => {
-                    remove_partials(&failure.destination);
-                    failures.push(failure);
-                }
-            }
-        }
-        downloaded.sort_by(|a, b| a.path.cmp(&b.path));
-        failures.sort_by(|a, b| a.destination.cmp(&b.destination));
-        Ok(DownloadSummary {
-            downloaded,
-            cache_hits,
-            failures,
-        })
+        summary.declared_bytes = stats.counters.lock().expect("progress counters").declared;
+        summary.downloaded.sort_by(|a, b| a.path.cmp(&b.path));
+        summary
+            .failures
+            .sort_by(|a, b| a.destination.cmp(&b.destination));
+        Ok(summary)
     }
 
-    fn spawn_speed_reporter(
-        &self,
-        stats: Arc<TransferStats>,
-        progress: SharedProgress,
-        stop: Arc<AtomicU64>,
-    ) -> tokio::task::JoinHandle<()> {
-        let interval = Duration::from_millis(self.configuration.speed_report_interval_ms.max(100));
-        tokio::spawn(async move {
-            let mut last_bytes = 0u64;
-            let mut ticker = tokio::time::interval(interval);
-            ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-            ticker.tick().await;
-            loop {
-                ticker.tick().await;
-                if stop.load(Ordering::SeqCst) != 0 {
-                    break;
-                }
-                let now = stats.downloaded.load(Ordering::Relaxed);
-                let delta = now.saturating_sub(last_bytes);
-                last_bytes = now;
-                let per_second = (delta as f64 / interval.as_secs_f64()) as u64;
-                let total = stats.total.load(Ordering::Relaxed);
-                let remaining = if per_second > 0 && total > now {
-                    Some((total - now) / per_second)
-                } else {
-                    None
-                };
-                progress.emit(InstallProgressEvent::Speed {
-                    bytes_per_second: per_second,
-                    remaining_seconds: remaining,
-                    active_files: stats.active.load(Ordering::Relaxed),
-                });
-            }
-        })
+    fn cached(&self, task: &DownloadTask) -> Result<bool> {
+        if verify_file(&task.destination, task.sha1.as_deref(), task.size)? {
+            return Ok(true);
+        }
+        Ok(self
+            .cache
+            .as_ref()
+            .zip(task.sha1.as_deref())
+            .is_some_and(|(cache, hash)| {
+                cache
+                    .materialize(hash, task.size, &task.destination)
+                    .unwrap_or(false)
+            }))
     }
 
     async fn perform(
-        &self,
+        self: Arc<Self>,
         task: DownloadTask,
-        stats: &Arc<TransferStats>,
-        gate: &Arc<AdaptiveGate>,
-        progress: &SharedProgress,
-        cancel: &CancelFlag,
-    ) -> std::result::Result<DownloadedFile, DownloadFailure> {
-        if cancel.is_cancelled() {
-            return Err(DownloadFailure {
-                destination: task.destination,
-                code: "cancelled".into(),
-                message: "Cancelled".into(),
-            });
-        }
-        progress.emit(InstallProgressEvent::FileStarted {
-            path: task.destination.to_string_lossy().to_string(),
-            size: task.size.unwrap_or(0),
-        });
-        let Some(official) = task.official_url.clone() else {
-            let message = format!(
-                "version metadata provides no download URL for {}",
-                task.destination.display()
-            );
-            progress.emit(InstallProgressEvent::FileFailed {
-                path: task.destination.to_string_lossy().to_string(),
-                message: message.clone(),
-            });
-            return Err(DownloadFailure {
-                destination: task.destination,
-                code: "missing_dependency".into(),
-                message,
-            });
-        };
-
-        let candidates = self.candidates(&official);
-        if candidates.is_empty() {
-            let message = format!("no download source available for {}", redact_url(&official));
-            progress.emit(InstallProgressEvent::FileFailed {
-                path: task.destination.to_string_lossy().to_string(),
-                message: message.clone(),
-            });
-            return Err(DownloadFailure {
-                destination: task.destination,
-                code: "unavailable".into(),
-                message,
-            });
-        }
-
-        let mut last_message = String::from("download failed");
-        for (url, source_name) in candidates {
-            let host_gate = self.host_gate(&url);
-            let _host_permit = host_gate.acquire().await;
-            let gate_permit = gate.acquire().await;
-            stats.active.fetch_add(1, Ordering::Relaxed);
-            let started = Instant::now();
-            let outcome = self
-                .attempt(&task, &url, &source_name, stats, progress, cancel)
-                .await;
-            stats.active.fetch_sub(1, Ordering::Relaxed);
-            drop(gate_permit);
-            match outcome {
-                Ok(bytes) => {
-                    gate.on_success();
-                    self.health.record_success(&source_name, started.elapsed());
-                    if let (Some(cache), Some(sha1)) = (&self.cache, task.sha1.as_deref()) {
-                        let _ = cache.store(sha1, &task.destination);
-                    }
-                    progress.emit(InstallProgressEvent::FileFinished {
-                        path: task.destination.to_string_lossy().to_string(),
-                        bytes,
-                        source: source_name.clone(),
-                    });
-                    return Ok(DownloadedFile {
-                        path: task.destination,
-                        bytes,
-                        source: source_name,
-                    });
-                }
-                Err((message, retryable)) => {
-                    gate.on_failure();
-                    self.health.record_failure(&source_name);
-                    last_message = message;
-                    // A hard failure on one mirror still deserves a try on the
-                    // next one, so only give up early for fixed policies.
-                    if !retryable && self.policy != DownloadSourcePolicy::Auto {
-                        break;
-                    }
-                }
-            }
-        }
-        progress.emit(InstallProgressEvent::FileFailed {
-            path: task.destination.to_string_lossy().to_string(),
-            message: last_message.clone(),
-        });
-        Err(DownloadFailure {
-            destination: task.destination,
-            code: "download_failed".into(),
-            message: last_message,
-        })
-    }
-
-    fn candidates(&self, official: &str) -> Vec<(String, String)> {
-        let mut list: Vec<(String, String)> = Vec::new();
-        match self.policy {
-            DownloadSourcePolicy::Official => {
-                list.push((official.to_string(), "official".into()));
-            }
-            DownloadSourcePolicy::Mirror => {
-                if let Some(mirror) = &self.mirror {
-                    if let Some(rewritten) = mirror.rewrite(official) {
-                        list.push((rewritten, format!("mirror:{}", mirror.id)));
-                    }
-                }
-                for mirror in &self.builtin {
-                    if let Some(rewritten) = rewrite_url(mirror, official) {
-                        list.push((rewritten, format!("builtin:{}", mirror.id)));
-                    }
-                }
-            }
-            DownloadSourcePolicy::Auto => {
-                list.push((official.to_string(), "official".into()));
-                if let Some(mirror) = &self.mirror {
-                    if let Some(rewritten) = mirror.rewrite(official) {
-                        list.push((rewritten, format!("mirror:{}", mirror.id)));
-                    }
-                }
-                for mirror in &self.builtin {
-                    if let Some(rewritten) = rewrite_url(mirror, official) {
-                        list.push((rewritten, format!("builtin:{}", mirror.id)));
-                    }
-                }
-                // Rank by observed health so a broken source falls behind.
-                let health = &self.health;
-                list.sort_by(|a, b| {
-                    health
-                        .score(&b.1)
-                        .partial_cmp(&health.score(&a.1))
-                        .unwrap_or(std::cmp::Ordering::Equal)
+        stats: Arc<TransferStats>,
+        progress: SharedProgress,
+        cancel: CancelFlag,
+    ) -> std::result::Result<Option<DownloadedFile>, DownloadFailure> {
+        use std::sync::atomic::Ordering::Relaxed;
+        let path = task.destination.to_string_lossy().into_owned();
+        let failure = |code: &str, message: String| {
+            if !cancel.is_cancelled() {
+                progress.emit(InstallProgressEvent::FileFailed {
+                    path: path.clone(),
+                    message: message.clone(),
                 });
             }
-            DownloadSourcePolicy::LocalCacheOnly => {}
+            DownloadFailure {
+                destination: task.destination.clone(),
+                code: code.into(),
+                message,
+            }
+        };
+        let mut credited = AttemptProgress {
+            stats: Arc::clone(&stats),
+            sink: progress.clone(),
+            credited: Default::default(),
+        };
+        let destination = destination_gate(&task.destination);
+        let _guard = tokio::select! {
+            biased;
+            _ = cancel.cancelled() => return Err(failure("cancelled", "Cancelled".into())),
+            guard = destination.lock() => guard,
+        };
+
+        // Another installation may have populated the same destination while queued.
+        if self
+            .cached(&task)
+            .map_err(|error| failure("download_failed", error.to_string()))?
+        {
+            credited.update(|counters| counters.declared -= task.size.unwrap_or(0));
+            progress.emit(InstallProgressEvent::FileFinished {
+                path: path.clone(),
+                bytes: 0,
+                source: "cache".into(),
+            });
+            return Ok(None);
         }
+        prepare_parent(&task.destination)
+            .map_err(|error| failure("download_failed", error.to_string()))?;
+        let partial = partial_path(&task.destination);
+        let segments = segments_path(&task.destination);
+        if let Some(hash) = task.sha1.as_deref().filter(|hash| cache::is_sha1(hash)) {
+            for staged in [&partial, &segments.join("assembled.part")] {
+                if !verify_file(staged, Some(hash), task.size)
+                    .map_err(|error| failure("download_failed", error.to_string()))?
+                {
+                    continue;
+                }
+                if cancel.is_cancelled() {
+                    return Err(failure("cancelled", "Cancelled".into()));
+                }
+                std::fs::rename(staged, &task.destination)
+                    .map_err(|error| failure("download_failed", error.to_string()))?;
+                discard_segments(&segments);
+                if let Some(cache) = &self.cache {
+                    let _ = cache.store(hash, &task.destination);
+                }
+                credited.update(|counters| counters.declared -= task.size.unwrap_or(0));
+                progress.emit(InstallProgressEvent::FileFinished {
+                    path,
+                    bytes: 0,
+                    source: "cache".into(),
+                });
+                return Ok(None);
+            }
+        }
+        let official = task.official_url.as_deref().ok_or_else(|| {
+            failure(
+                "missing_dependency",
+                format!("version metadata provides no download URL for {path}"),
+            )
+        })?;
+        progress.emit(InstallProgressEvent::FileStarted {
+            path: path.clone(),
+            size: task.size.unwrap_or(0),
+        });
+
+        struct ActiveFile(Arc<std::sync::atomic::AtomicUsize>);
+        impl Drop for ActiveFile {
+            fn drop(&mut self) {
+                self.0.fetch_sub(1, Relaxed);
+            }
+        }
+        stats.active.fetch_add(1, Relaxed);
+        let _active = ActiveFile(Arc::clone(&stats.active));
+        let mut last = format!("no available download source for {}", redact_url(official));
+        let candidates = self.candidates(official);
+        for (url, source, health_key) in candidates {
+            if cancel.is_cancelled() {
+                break;
+            }
+            let Some(admission) = self.health.admit(&health_key) else {
+                continue;
+            };
+            let started = Instant::now();
+            let outcome = self
+                .attempt(
+                    &task,
+                    &url,
+                    partial.clone(),
+                    segments.clone(),
+                    &credited,
+                    &cancel,
+                    admission.is_probe(),
+                )
+                .await;
+            if cancel.is_cancelled() && outcome.is_err() {
+                credited.reset();
+                break;
+            }
+            match outcome {
+                Ok(bytes) => {
+                    credited.commit();
+                    self.gate.on_success();
+                    admission.success(started.elapsed());
+                    if let (Some(cache), Some(hash)) = (&self.cache, task.sha1.as_deref()) {
+                        let _ = cache.store(hash, &task.destination);
+                    }
+                    progress.emit(InstallProgressEvent::FileFinished {
+                        path,
+                        bytes,
+                        source: source.clone(),
+                    });
+                    return Ok(Some(DownloadedFile {
+                        path: task.destination,
+                        bytes,
+                        source,
+                    }));
+                }
+                Err(error) => {
+                    credited.reset();
+                    if error.source_failure {
+                        self.gate.on_failure();
+                        admission.failure();
+                    } else {
+                        admission.defer();
+                    }
+                    last = format!("{} (source: {source})", error.message);
+                }
+            }
+        }
+        if cancel.is_cancelled() {
+            return Err(failure("cancelled", "Cancelled".into()));
+        }
+        Err(failure("download_failed", last))
+    }
+
+    fn candidates(&self, official: &str) -> Vec<(String, String, String)> {
+        let mut list = Vec::new();
+        if matches!(
+            self.policy,
+            DownloadSourcePolicy::Auto | DownloadSourcePolicy::Official
+        ) {
+            list.push((official.to_owned(), "official".to_owned()));
+        }
+        if matches!(
+            self.policy,
+            DownloadSourcePolicy::Auto | DownloadSourcePolicy::Mirror
+        ) {
+            if let Some(mirror) = &self.mirror {
+                if let Some(url) = mirror.rewrite(official) {
+                    list.push((url, format!("mirror:{}", mirror.id)));
+                }
+            }
+            for mirror in &self.builtin {
+                if let Some(url) = rewrite_url(mirror, official) {
+                    list.push((url, format!("builtin:{}", mirror.id)));
+                }
+            }
+        }
+        let mut seen = HashSet::new();
+        let mut list: Vec<_> = list
+            .into_iter()
+            .filter_map(|(url, source)| {
+                if !seen.insert(url.clone()) {
+                    return None;
+                }
+                let parsed = url::Url::parse(&url).ok()?;
+                let key = format!("{source}:{}", parsed.origin().ascii_serialization());
+                Some((url, source, key))
+            })
+            .collect();
+        // A due recovery probe must not be permanently outranked by a healthy fallback.
+        list.sort_by_cached_key(|(_, _, key)| Reverse(self.health.priority(key)));
         list
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn attempt(
         &self,
         task: &DownloadTask,
         url: &str,
-        source: &str,
-        stats: &Arc<TransferStats>,
-        progress: &SharedProgress,
+        partial: PathBuf,
+        segments: PathBuf,
+        progress: &AttemptProgress,
         cancel: &CancelFlag,
-    ) -> std::result::Result<u64, (String, bool)> {
-        if let Some(parent) = task.destination.parent() {
-            if let Err(error) = std::fs::create_dir_all(parent) {
-                return Err((
-                    format!("cannot create {}: {error}", parent.display()),
-                    false,
-                ));
-            }
-        }
-        let partial = partial_path(&task.destination);
-        let mut last_error: Option<(String, bool)> = None;
-        let attempts = self.configuration.max_retries.max(1);
+        probe: bool,
+    ) -> std::result::Result<u64, FetchError> {
+        let attempts = if probe {
+            1
+        } else {
+            self.configuration.max_retries.max(1)
+        };
+        let mut segmented = task.sha1.as_deref().is_some_and(cache::is_sha1)
+            && self.configuration.segments > 1
+            && task.size.is_some_and(|size| {
+                size >= self
+                    .configuration
+                    .segment_threshold_bytes
+                    .max(2 * MIN_SEGMENT_BYTES)
+            });
+        let mut last = FetchError::local("download failed");
         for attempt in 0..attempts {
             if cancel.is_cancelled() {
-                remove_partials(&task.destination);
-                return Err(("Cancelled".into(), false));
+                return Err(FetchError::cancelled());
             }
             if attempt > 0 {
-                progress.emit(InstallProgressEvent::Retry {
-                    path: task.destination.to_string_lossy().to_string(),
+                progress.sink.emit(InstallProgressEvent::Retry {
+                    path: task.destination.to_string_lossy().into_owned(),
                     attempt,
                     max_attempts: attempts,
-                    message: last_error
-                        .as_ref()
-                        .map(|(message, _)| message.clone())
-                        .unwrap_or_default(),
+                    message: last.message.clone(),
                 });
                 let delay = self
                     .configuration
                     .retry_delay_ms
                     .saturating_mul(1u64 << attempt.min(4))
                     .min(8000);
-                tokio::time::sleep(Duration::from_millis(delay)).await;
-            }
-
-            let outcome = if self.should_segment(task) {
-                self.fetch_segmented(&task.destination, url, stats, progress, cancel)
-                    .await
-            } else {
-                self.fetch_single(&partial, url, stats, progress, cancel)
-                    .await
-            };
-
-            match outcome {
-                Ok(bytes) => match self.finish_transfer(task, &partial, bytes, stats, progress) {
-                    Ok(()) => return Ok(bytes),
-                    Err(Retry::Recoverable(message)) => {
-                        last_error = Some((message, true));
-                        continue;
-                    }
-                    Err(Retry::Fatal(message)) => return Err((message, false)),
-                },
-                Err(error) => {
-                    // The bytes live in a partial file that is about to be
-                    // discarded, so take them out of the aggregate again.
-                    stats.rollback(error.written, progress);
-                    if error.range_unsupported {
-                        match self
-                            .fetch_single(&partial, url, stats, progress, cancel)
-                            .await
-                        {
-                            Ok(bytes) => {
-                                match self.finish_transfer(task, &partial, bytes, stats, progress) {
-                                    Ok(()) => return Ok(bytes),
-                                    Err(Retry::Recoverable(message)) => {
-                                        last_error = Some((message, true));
-                                        continue;
-                                    }
-                                    Err(Retry::Fatal(message)) => return Err((message, false)),
-                                }
-                            }
-                            Err(plain) => {
-                                stats.rollback(plain.written, progress);
-                                remove_partials(&task.destination);
-                                if !plain.retryable {
-                                    return Err((plain.message, false));
-                                }
-                                last_error = Some((plain.message, true));
-                                continue;
-                            }
-                        }
-                    }
-                    remove_partials(&task.destination);
-                    if !error.retryable {
-                        return Err((error.message, false));
-                    }
-                    last_error = Some((error.message, true));
+                tokio::select! {
+                    _ = cancel.cancelled() => return Err(FetchError::cancelled()),
+                    _ = tokio::time::sleep(Duration::from_millis(delay)) => (),
                 }
             }
+            let assembly = segments.join("assembled.part");
+            let mut staged = partial.clone();
+            let outcome = if segmented && !partial.is_file() {
+                match self
+                    .fetch_segmented(
+                        task,
+                        url,
+                        assembly.clone(),
+                        segments.clone(),
+                        progress,
+                        cancel,
+                    )
+                    .await
+                {
+                    Err(error) if error.range_unsupported => {
+                        progress.reset();
+                        segmented = false;
+                        self.fetch_single(task, url, partial.clone(), progress, cancel)
+                            .await
+                    }
+                    result => {
+                        staged = assembly.clone();
+                        result
+                    }
+                }
+            } else {
+                self.fetch_single(task, url, partial.clone(), progress, cancel)
+                    .await
+            };
+            match outcome {
+                Ok(bytes) => {
+                    if cancel.is_cancelled() {
+                        return Err(FetchError::cancelled());
+                    }
+                    if verify_file(&staged, task.sha1.as_deref(), task.size)
+                        .map_err(FetchError::local)?
+                    {
+                        std::fs::rename(&staged, &task.destination).map_err(FetchError::local)?;
+                        // The destination is complete now, so any segment state
+                        // (including layouts left by an older hash) is dead weight.
+                        discard_segments(&segments);
+                        return Ok(bytes);
+                    }
+                    let _ = std::fs::remove_file(&staged);
+                    discard_segments(&segments);
+                    last = FetchError::remote(
+                        format!("verification failed for {}", task.destination.display()),
+                        true,
+                        true,
+                    );
+                }
+                Err(error) => {
+                    if staged == assembly || !task.sha1.as_deref().is_some_and(cache::is_sha1) {
+                        let _ = std::fs::remove_file(staged);
+                    }
+                    if !error.retryable {
+                        progress.reset();
+                        return Err(error);
+                    }
+                    last = error;
+                }
+            }
+            progress.reset();
         }
-        let (message, retryable) = last_error.unwrap_or_else(|| ("download failed".into(), true));
-        Err((format!("{message} (source: {source})"), retryable))
-    }
-
-    /// Verifies the freshly written partial file and atomically moves it into
-    /// place. Verification failures are retried, placement failures are not.
-    fn finish_transfer(
-        &self,
-        task: &DownloadTask,
-        partial: &Path,
-        bytes: u64,
-        stats: &Arc<TransferStats>,
-        progress: &SharedProgress,
-    ) -> std::result::Result<(), Retry> {
-        let matches = verify_file(partial, task.sha1.as_deref(), task.size).unwrap_or(false);
-        if !matches {
-            let actual = sha1_file(partial).unwrap_or_else(|_| "unreadable".into());
-            remove_partials(&task.destination);
-            stats.rollback(bytes, progress);
-            return Err(Retry::Recoverable(format!(
-                "verification failed for {}: expected {:?}, got {actual}",
-                task.destination.display(),
-                task.sha1
-            )));
-        }
-        if let Err(error) = std::fs::rename(partial, &task.destination) {
-            remove_partials(&task.destination);
-            stats.rollback(bytes, progress);
-            return Err(Retry::Fatal(format!(
-                "cannot place {}: {error}",
-                task.destination.display()
-            )));
-        }
-        Ok(())
-    }
-
-    /// Large files with a known size are split into HTTP Range segments. An
-    /// unsupported server is handled by the caller falling back to a stream.
-    fn should_segment(&self, task: &DownloadTask) -> bool {
-        let Some(size) = task.size else {
-            return false;
-        };
-        self.configuration.segments > 1
-            && size
-                >= self
-                    .configuration
-                    .segment_threshold_bytes
-                    .max(MIN_SEGMENT_BYTES)
+        Err(last)
     }
 
     async fn fetch_segmented(
         &self,
-        destination: &Path,
+        task: &DownloadTask,
         url: &str,
-        stats: &Arc<TransferStats>,
-        progress: &SharedProgress,
+        partial: PathBuf,
+        segments: PathBuf,
+        progress: &AttemptProgress,
         cancel: &CancelFlag,
     ) -> std::result::Result<u64, FetchError> {
-        let Some((_total, ranges)) = self.probe_ranges(url).await? else {
-            return Err(FetchError::range_unsupported(0));
-        };
-        if ranges.len() < 2 {
-            return Err(FetchError::range_unsupported(0));
+        let total = task.size.expect("segmented file has a size");
+        let hash = task.sha1.as_deref().expect("segmented file has a hash");
+        let count = (self.configuration.segments as u64).min(total / MIN_SEGMENT_BYTES);
+        let chunk = total.div_ceil(count);
+        let directory = segments.join(hash).join(format!("{total}-{chunk}"));
+        std::fs::create_dir_all(&directory).map_err(FetchError::local)?;
+        let ranges: Vec<_> = (0..count)
+            .filter_map(|index| {
+                let start = index * chunk;
+                (start < total).then(|| {
+                    (
+                        directory.join(index.to_string()),
+                        start,
+                        start.saturating_add(chunk - 1).min(total - 1),
+                    )
+                })
+            })
+            .collect();
+        if !ranges.iter().all(|(segment, start, end)| {
+            segment
+                .metadata()
+                .is_ok_and(|meta| meta.len() == end - start + 1)
+        }) {
+            let mut probe = self.request(url, Some("bytes=0-0"), cancel).await?;
+            range_response(&probe.response, 0, 0, total)?;
+            let probe_data = tokio::select! {
+                _ = cancel.cancelled() => return Err(FetchError::cancelled()),
+                data = probe.response.chunk() => data.map_err(|error| FetchError::transport(url, &error))?,
+            };
+            if !probe_data.is_some_and(|data| data.len() == 1) {
+                return Err(FetchError::range());
+            }
         }
-        let mut futures = Vec::new();
-        for (index, range) in ranges.into_iter().enumerate() {
-            let segment = segment_path(destination, index);
-            let stats = stats.clone();
-            let progress = progress.clone();
-            let cancel = cancel.clone();
-            futures.push(async move {
-                self.download_range(url, &segment, range, &stats, &progress, &cancel)
-                    .await
-            });
-        }
-        let results = futures_util::stream::iter(futures)
-            .buffer_unordered(self.configuration.segments.max(1))
-            .collect::<Vec<_>>()
-            .await;
-        let mut written = 0u64;
-        let mut first_error: Option<FetchError> = None;
-        for result in results {
-            match result {
-                Ok(bytes) => written += bytes,
-                Err(error) => {
-                    if first_error.is_none() {
-                        first_error = Some(error);
-                    }
+        futures_util::stream::iter(ranges.clone().into_iter().map(
+            |(segment, start, end)| async move {
+                let length = end - start + 1;
+                let existing = valid_prefix(&segment, length)?;
+                if existing == length {
+                    progress.add(existing, false);
+                    return Ok(());
                 }
-            }
-        }
-        if let Some(error) = first_error {
-            return Err(error);
-        }
-        // Concatenate the segments into the canonical partial file so the
-        // regular verification path can handle it.
-        let partial = partial_path(destination);
-        let mut output = tokio::fs::File::create(&partial).await.map_err(|error| {
-            FetchError::new(
-                format!("cannot create {}: {error}", partial.display()),
-                false,
-                0,
-            )
-        })?;
-        let mut index = 0usize;
-        while segment_path(destination, index).is_file() {
-            let segment = segment_path(destination, index);
-            let mut input = tokio::fs::File::open(&segment).await.map_err(|error| {
-                FetchError::new(format!("cannot read segment: {error}"), true, 0)
-            })?;
-            tokio::io::copy(&mut input, &mut output)
-                .await
-                .map_err(|error| {
-                    FetchError::new(format!("cannot assemble segments: {error}"), true, 0)
-                })?;
-            let _ = std::fs::remove_file(&segment);
-            index += 1;
-        }
-        tokio::io::AsyncWriteExt::flush(&mut output)
-            .await
-            .map_err(|error| FetchError::new(format!("flush error: {error}"), false, written))?;
-        Ok(written)
-    }
+                let from = start + existing;
+                let request = self
+                    .request(url, Some(&format!("bytes={from}-{end}")), cancel)
+                    .await?;
+                range_response(&request.response, from, end, total)?;
+                self.write_response(request, segment, existing, Some(length), progress, cancel)
+                    .await?;
+                Ok(())
+            },
+        ))
+        .buffer_unordered(
+            self.configuration
+                .segments
+                .min(self.configuration.global_concurrency.max(1)),
+        )
+        .try_collect::<Vec<_>>()
+        .await?;
 
-    /// Asks the server whether it honours Range and returns the byte ranges to
-    /// fetch. None means "no range support, use a single stream".
-    async fn probe_ranges(
-        &self,
-        url: &str,
-    ) -> std::result::Result<Option<(u64, Vec<(u64, u64)>)>, FetchError> {
-        let response = self
-            .probe_client
-            .get(url)
-            .header(reqwest::header::RANGE, "bytes=0-0")
-            .send()
-            .await
-            .map_err(|error| {
-                FetchError::new(
-                    describe_transfer_error(
-                        "range probe",
-                        url,
-                        classify_reqwest_error(&error),
-                        &error.to_string(),
-                    ),
-                    true,
-                    0,
-                )
-            })?;
-        if response.status() != reqwest::StatusCode::PARTIAL_CONTENT {
-            return Ok(None);
-        }
-        let total = response
-            .headers()
-            .get(reqwest::header::CONTENT_RANGE)
-            .and_then(|value| value.to_str().ok())
-            .and_then(|value| value.rsplit('/').next().map(|part| part.to_string()))
-            .and_then(|value| value.parse::<u64>().ok());
-        let Some(total) = total else {
-            return Ok(None);
-        };
-        if total < MIN_SEGMENT_BYTES {
-            return Ok(None);
-        }
-        let wanted = self.configuration.segments.max(1) as u64;
-        let segments = wanted.min((total / MIN_SEGMENT_BYTES).max(1));
-        if segments < 2 {
-            return Ok(None);
-        }
-        let chunk = total.div_ceil(segments);
-        let mut ranges = Vec::new();
-        let mut start = 0u64;
-        while start < total {
-            let end = (start + chunk - 1).min(total - 1);
-            ranges.push((start, end));
-            start = end + 1;
-        }
-        Ok(Some((total, ranges)))
-    }
-
-    async fn download_range(
-        &self,
-        url: &str,
-        segment: &Path,
-        (start, end): (u64, u64),
-        stats: &Arc<TransferStats>,
-        progress: &SharedProgress,
-        cancel: &CancelFlag,
-    ) -> std::result::Result<u64, FetchError> {
-        let existing = std::fs::metadata(segment)
-            .map(|meta| meta.len())
-            .unwrap_or(0);
-        let expected = end - start + 1;
-        if existing >= expected {
-            return Ok(0);
-        }
-        let from = start + existing;
-        let response = self
-            .client
-            .get(url)
-            .header(reqwest::header::RANGE, format!("bytes={from}-{end}"))
-            .send()
-            .await
-            .map_err(|error| {
-                FetchError::new(
-                    describe_transfer_error(
-                        "segment",
-                        url,
-                        classify_reqwest_error(&error),
-                        &error.to_string(),
-                    ),
-                    true,
-                    0,
-                )
-            })?;
-        if response.status() == reqwest::StatusCode::OK {
-            return Err(FetchError::range_unsupported(0));
-        }
-        let status = response.status();
-        if !status.is_success() {
-            let retryable =
-                status.as_u16() == 408 || status.as_u16() == 429 || status.is_server_error();
-            return Err(FetchError::new(
-                format!("segment: HTTP {status} for {}", redact_url(url)),
-                retryable,
-                0,
-            ));
-        }
-        let mut file = if existing > 0 {
-            tokio::fs::OpenOptions::new()
-                .append(true)
-                .open(segment)
-                .await
-        } else {
-            tokio::fs::File::create(segment).await
-        }
-        .map_err(|error| FetchError::new(format!("cannot open segment: {error}"), false, 0))?;
-
-        let mut stream = response.bytes_stream();
-        let mut written = 0u64;
-        while let Some(chunk) = stream.next().await {
+        // Keep intact segments until the assembled file is validated and published.
+        let mut output = std::fs::File::create(&partial).map_err(FetchError::local)?;
+        for (segment, _, _) in &ranges {
             if cancel.is_cancelled() {
-                return Err(FetchError::new("Cancelled", false, written));
+                return Err(FetchError::cancelled());
             }
-            let chunk = chunk.map_err(|error| {
-                FetchError::new(
-                    describe_transfer_error(
-                        "segment body",
-                        url,
-                        classify_reqwest_error(&error),
-                        &error.to_string(),
-                    ),
-                    true,
-                    written,
-                )
-            })?;
-            tokio::io::AsyncWriteExt::write_all(&mut file, &chunk)
-                .await
-                .map_err(|error| {
-                    FetchError::new(format!("write error: {error}"), false, written)
-                })?;
-            written += chunk.len() as u64;
-            stats.add(chunk.len() as u64, progress);
+            let mut input = std::fs::File::open(segment).map_err(FetchError::local)?;
+            io::copy(&mut input, &mut output).map_err(FetchError::local)?;
         }
-        tokio::io::AsyncWriteExt::flush(&mut file)
-            .await
-            .map_err(|error| FetchError::new(format!("flush error: {error}"), false, written))?;
-        Ok(written)
+        output.sync_data().map_err(FetchError::local)?;
+        Ok(total)
     }
 
-    /// Single stream download with resume support: an existing partial file is
-    /// continued with Range when the server allows it.
     async fn fetch_single(
         &self,
-        partial: &Path,
+        task: &DownloadTask,
         url: &str,
-        stats: &Arc<TransferStats>,
-        progress: &SharedProgress,
+        partial: PathBuf,
+        progress: &AttemptProgress,
         cancel: &CancelFlag,
     ) -> std::result::Result<u64, FetchError> {
-        let existing = std::fs::metadata(partial)
-            .map(|meta| meta.len())
-            .unwrap_or(0);
-        let mut request = self.client.get(url);
-        if existing > 0 {
-            request = request.header(reqwest::header::RANGE, format!("bytes={existing}-"));
-        }
-        let response = request.send().await.map_err(|error| {
-            FetchError::new(
-                describe_transfer_error(
-                    "download",
-                    url,
-                    classify_reqwest_error(&error),
-                    &error.to_string(),
-                ),
-                true,
-                0,
+        let mut existing = if task.sha1.as_deref().is_some_and(cache::is_sha1) {
+            valid_prefix(
+                &partial,
+                task.size.map_or(u64::MAX, |size| size.saturating_sub(1)),
+            )?
+        } else {
+            0
+        };
+        let mut expected = task.size;
+        let mut request = if existing == 0 {
+            self.request(url, None, cancel).await?
+        } else {
+            self.request(url, Some(&format!("bytes={existing}-")), cancel)
+                .await?
+        };
+        if existing > 0
+            && matches!(
+                request.response.status(),
+                StatusCode::PARTIAL_CONTENT | StatusCode::RANGE_NOT_SATISFIABLE
             )
-        })?;
-        let status = response.status();
-        if !status.is_success() {
-            let retryable =
-                status.as_u16() == 408 || status.as_u16() == 429 || status.is_server_error();
-            return Err(FetchError::new(
-                format!("download: HTTP {status} for {}", redact_url(url)),
-                retryable,
-                0,
+        {
+            match content_range(&request.response) {
+                Some((start, end, total))
+                    if request.response.status() == StatusCode::PARTIAL_CONTENT
+                        && start == existing
+                        && end == total - 1
+                        && expected.is_none_or(|size| size == total) =>
+                {
+                    expected = Some(total)
+                }
+                _ => {
+                    drop(request);
+                    let _ = std::fs::remove_file(&partial);
+                    existing = 0;
+                    request = self.request(url, None, cancel).await?;
+                }
+            }
+        } else if request.response.status() == StatusCode::OK {
+            existing = 0;
+        }
+        if request.response.status() != StatusCode::OK
+            && !(existing > 0 && request.response.status() == StatusCode::PARTIAL_CONTENT)
+        {
+            return Err(FetchError::status(&request.response));
+        }
+        let expected = expected.or_else(|| request.response.content_length());
+        self.write_response(request, partial, existing, expected, progress, cancel)
+            .await
+    }
+
+    async fn write_response(
+        &self,
+        mut request: ActiveRequest,
+        path: PathBuf,
+        existing: u64,
+        expected: Option<u64>,
+        progress: &AttemptProgress,
+        cancel: &CancelFlag,
+    ) -> std::result::Result<u64, FetchError> {
+        if let (Some(length), Some(expected)) = (request.response.content_length(), expected) {
+            if length != expected.saturating_sub(existing) {
+                return Err(FetchError::remote(
+                    "unexpected download Content-Length".into(),
+                    true,
+                    true,
+                ));
+            }
+        }
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .append(existing > 0)
+            .truncate(existing == 0)
+            .open(&path)
+            .map_err(FetchError::local)?;
+        let mut written = existing;
+        progress.add(existing, false);
+        loop {
+            let chunk = tokio::select! {
+                biased;
+                _ = cancel.cancelled() => return Err(FetchError::cancelled()),
+                chunk = request.response.chunk() => chunk.map_err(|error| FetchError::transport(request.response.url().as_str(), &error))?,
+            };
+            let Some(chunk) = chunk else {
+                break;
+            };
+            if expected
+                .is_some_and(|expected| chunk.len() as u64 > expected.saturating_sub(written))
+            {
+                return Err(FetchError::remote(
+                    "download body exceeded its expected size".into(),
+                    true,
+                    true,
+                ));
+            }
+            file.write_all(&chunk).map_err(FetchError::local)?;
+            written += chunk.len() as u64;
+            progress.add(chunk.len() as u64, true);
+        }
+        drop(request);
+        if expected.is_some_and(|expected| expected != written) {
+            return Err(FetchError::remote(
+                "download body ended before its expected size".into(),
+                true,
+                true,
             ));
         }
-        // A 200 means the request was answered in full: start from zero.
-        let resume = existing > 0 && status == reqwest::StatusCode::PARTIAL_CONTENT;
-        let mut file = if resume {
-            tokio::fs::OpenOptions::new()
-                .append(true)
-                .open(partial)
-                .await
-        } else {
-            tokio::fs::File::create(partial).await
-        }
-        .map_err(|error| {
-            FetchError::new(
-                format!("cannot create {}: {error}", partial.display()),
-                false,
-                0,
-            )
-        })?;
-
-        let mut stream = response.bytes_stream();
-        let mut written = 0u64;
-        while let Some(chunk) = stream.next().await {
-            if cancel.is_cancelled() {
-                return Err(FetchError::new("Cancelled", false, written));
-            }
-            let chunk = chunk.map_err(|error| {
-                FetchError::new(
-                    describe_transfer_error(
-                        "download body",
-                        url,
-                        classify_reqwest_error(&error),
-                        &error.to_string(),
-                    ),
-                    true,
-                    written,
-                )
-            })?;
-            tokio::io::AsyncWriteExt::write_all(&mut file, &chunk)
-                .await
-                .map_err(|error| {
-                    FetchError::new(format!("write error: {error}"), false, written)
-                })?;
-            written += chunk.len() as u64;
-            stats.add(chunk.len() as u64, progress);
-        }
-        tokio::io::AsyncWriteExt::flush(&mut file)
-            .await
-            .map_err(|error| FetchError::new(format!("flush error: {error}"), false, written))?;
+        file.sync_data().map_err(FetchError::local)?;
         Ok(written)
     }
 }
 
-fn user_agent() -> String {
-    format!(
-        "{}/{}",
-        crate::models::launch::LAUNCHER_NAME,
-        crate::models::launch::LAUNCHER_VERSION
-    )
-}
-
-enum Retry {
-    Recoverable(String),
-    Fatal(String),
-}
-
-/// "<name>.<ext>.part" next to the destination, so a download can never
-/// overwrite a file that already passed verification.
-fn partial_path(destination: &Path) -> PathBuf {
-    let extension = destination
-        .extension()
-        .and_then(|value| value.to_str())
-        .map(|value| format!("{value}.part"))
-        .unwrap_or_else(|| "part".to_string());
-    destination.with_extension(extension)
-}
-
-fn segment_path(destination: &Path, index: usize) -> PathBuf {
-    let mut path = partial_path(destination).into_os_string();
-    path.push(format!(".seg{index}"));
-    PathBuf::from(path)
-}
-
-/// Removes every artefact a cancelled or failed transfer may have produced.
-fn remove_partials(destination: &Path) {
-    let _ = std::fs::remove_file(partial_path(destination));
-    let mut index = 0usize;
-    while segment_path(destination, index).exists() {
-        let _ = std::fs::remove_file(segment_path(destination, index));
-        index += 1;
+/// Scheduling tier for a download kind.
+///
+/// Everything the JVM needs to reach the title screen (client jar, libraries,
+/// natives, logging config) is ranked ahead of the asset bulk, which is only
+/// read once the game opens a resource screen. Without the tiers a large asset
+/// object could occupy the first window and delay the files the launch needs.
+fn schedule_rank(kind: MissingDependencyKind) -> u8 {
+    match kind {
+        MissingDependencyKind::ClientJar => 0,
+        MissingDependencyKind::Native | MissingDependencyKind::Library => 1,
+        MissingDependencyKind::LogConfig | MissingDependencyKind::VersionMetadata => 2,
+        MissingDependencyKind::AssetIndex => 3,
+        MissingDependencyKind::Asset => 4,
+        MissingDependencyKind::Java => 5,
     }
+}
+
+fn host_gate(gates: &HostGates, host: &str, size: usize) -> Arc<Semaphore> {
+    gates
+        .lock()
+        .expect("host gates")
+        .entry(host.to_owned())
+        .or_insert_with(|| Arc::new(Semaphore::new(size.max(1))))
+        .clone()
+}
+
+fn destination_gate(path: &Path) -> &'static tokio::sync::Mutex<()> {
+    use std::hash::{DefaultHasher, Hash, Hasher};
+    // ponytail: stripe destination locks in-process; unrelated paths may occasionally share a slot.
+    let mut hasher = DefaultHasher::new();
+    path.hash(&mut hasher);
+    &DESTINATIONS[hasher.finish() as usize % DESTINATIONS.len()]
+}
+
+fn content_range(response: &Response) -> Option<(u64, u64, u64)> {
+    let header = response
+        .headers()
+        .get(CONTENT_RANGE)?
+        .to_str()
+        .ok()?
+        .strip_prefix("bytes ")?;
+    let (span, total) = header.split_once('/')?;
+    let (start, end) = span.split_once('-')?;
+    let (start, end, total) = (start.parse().ok()?, end.parse().ok()?, total.parse().ok()?);
+    (start <= end && end < total).then_some((start, end, total))
+}
+
+fn range_response(
+    response: &Response,
+    start: u64,
+    end: u64,
+    total: u64,
+) -> std::result::Result<(), FetchError> {
+    match response.status() {
+        StatusCode::PARTIAL_CONTENT if content_range(response) == Some((start, end, total)) => {
+            Ok(())
+        }
+        StatusCode::OK | StatusCode::PARTIAL_CONTENT | StatusCode::RANGE_NOT_SATISFIABLE => {
+            Err(FetchError::range())
+        }
+        _ => Err(FetchError::status(response)),
+    }
+}
+
+fn valid_prefix(path: &Path, max: u64) -> std::result::Result<u64, FetchError> {
+    match std::fs::metadata(path) {
+        Ok(metadata) if metadata.is_file() && metadata.len() <= max => Ok(metadata.len()),
+        Ok(_) => std::fs::remove_file(path)
+            .map(|()| 0)
+            .map_err(FetchError::local),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(0),
+        Err(error) => Err(FetchError::local(error)),
+    }
+}
+
+fn suffixed(path: &Path, suffix: &str) -> PathBuf {
+    let mut name = path.as_os_str().to_owned();
+    name.push(suffix);
+    PathBuf::from(name)
+}
+
+fn partial_path(destination: &Path) -> PathBuf {
+    suffixed(destination, ".part")
+}
+
+fn segments_path(destination: &Path) -> PathBuf {
+    suffixed(destination, ".part.segments")
+}
+
+/// Removes the segment scratch directory of a destination.
+///
+/// Segment directories are named by content hash, so a destination whose hash
+/// changed (or a run interrupted between layouts) can leave several behind.
+/// They are only resumable while the destination is incomplete, so the whole
+/// tree goes away once the file is verified.
+fn discard_segments(segments: &Path) {
+    let _ = std::fs::remove_dir_all(segments);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn partial_and_segment_paths_are_predictable() {
-        let destination = PathBuf::from("/tmp/libs/example.jar");
-        assert_eq!(
-            partial_path(&destination),
-            PathBuf::from("/tmp/libs/example.jar.part")
-        );
-        assert_eq!(
-            segment_path(&destination, 2),
-            PathBuf::from("/tmp/libs/example.jar.part.seg2")
-        );
-        let plain = PathBuf::from("/tmp/no-extension");
-        assert_eq!(
-            partial_path(&plain),
-            PathBuf::from("/tmp/no-extension.part")
-        );
+    #[tokio::test]
+    async fn gate_shrinks_on_failure_and_recovers() {
+        let gate = Arc::new(AdaptiveGate::new(2, 3, true));
+        let first = gate.acquire().await;
+        gate.on_failure();
+        assert!(gate.acquire().now_or_never().is_none());
+        gate.on_success();
+        let second = gate.acquire().await;
+        assert!(gate.acquire().now_or_never().is_none());
+        drop((first, second));
     }
 
-    #[test]
-    fn gate_shrinks_on_failure_and_recovers() {
-        let gate = AdaptiveGate::new(8, 16, true);
-        gate.on_failure();
-        assert_eq!(gate.current(), 4);
-        gate.on_failure();
-        assert_eq!(gate.current(), 2);
-        gate.on_success();
-        assert_eq!(gate.current(), 3);
-    }
+    use futures_util::FutureExt;
 }

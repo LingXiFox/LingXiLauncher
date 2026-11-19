@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
@@ -113,12 +113,70 @@ struct Health {
     failures: u64,
     latency_ms: f64,
     open_until: Option<Instant>,
+    probing: bool,
+    generation: u64,
 }
 
 pub struct HealthRegistry {
     inner: Mutex<HashMap<String, Health>>,
     failure_threshold: u32,
     base_cooldown: Duration,
+}
+
+pub(super) struct Admission {
+    registry: Arc<HealthRegistry>,
+    source: String,
+    generation: u64,
+    probe: bool,
+}
+
+impl Admission {
+    pub(super) fn is_probe(&self) -> bool {
+        self.probe
+    }
+
+    pub(super) fn success(self, latency: Duration) {
+        let mut inner = self.registry.inner.lock().expect("health registry lock");
+        let health = inner.get_mut(&self.source).expect("admitted source");
+        if health.generation == self.generation {
+            if self.probe {
+                // Rank a recovered source on fresh observations, not old outages.
+                health.failures = 0;
+                health.successes = 0;
+                health.latency_ms = 0.0;
+            }
+            HealthRegistry::success(health, latency);
+        }
+    }
+
+    pub(super) fn failure(self) {
+        let mut inner = self.registry.inner.lock().expect("health registry lock");
+        let health = inner.get_mut(&self.source).expect("admitted source");
+        if health.generation == self.generation {
+            self.registry.failure(health);
+        }
+    }
+
+    pub(super) fn defer(self) {
+        if self.probe {
+            let mut inner = self.registry.inner.lock().expect("health registry lock");
+            let health = inner.get_mut(&self.source).expect("admitted source");
+            if health.generation == self.generation {
+                health.open_until = Some(Instant::now() + self.registry.base_cooldown);
+            }
+        }
+    }
+}
+
+impl Drop for Admission {
+    fn drop(&mut self) {
+        if self.probe {
+            let mut inner = self.registry.inner.lock().expect("health registry lock");
+            if let Some(health) = inner.get_mut(&self.source) {
+                health.probing = false;
+            }
+        }
+    }
 }
 
 impl HealthRegistry {
@@ -133,15 +191,57 @@ impl HealthRegistry {
     /// True while the source is not in an open circuit.
     pub fn is_available(&self, source: &str) -> bool {
         let guard = self.inner.lock().expect("health registry lock");
-        match guard.get(source).and_then(|h| h.open_until) {
-            Some(until) => Instant::now() >= until,
-            None => true,
+        guard.get(source).is_none_or(|health| {
+            !health.probing
+                && health
+                    .open_until
+                    .is_none_or(|until| Instant::now() >= until)
+        })
+    }
+
+    pub(super) fn admit(self: &Arc<Self>, source: &str) -> Option<Admission> {
+        let mut inner = self.inner.lock().expect("health registry lock");
+        let health = inner.entry(source.to_owned()).or_default();
+        let probe = health.open_until.is_some();
+        if health.probing
+            || health
+                .open_until
+                .is_some_and(|until| Instant::now() < until)
+        {
+            return None;
+        }
+        health.probing = probe;
+        Some(Admission {
+            registry: Arc::clone(self),
+            source: source.to_owned(),
+            generation: health.generation,
+            probe,
+        })
+    }
+
+    pub(super) fn priority(&self, source: &str) -> u32 {
+        let guard = self.inner.lock().expect("health registry lock");
+        match guard.get(source) {
+            Some(health) if health.probing => 0,
+            Some(health)
+                if health
+                    .open_until
+                    .is_some_and(|until| Instant::now() >= until) =>
+            {
+                u32::MAX
+            }
+            Some(health) if health.open_until.is_some() => 0,
+            health => (Self::health_score(health) * 100.0) as u32 + 1,
         }
     }
 
     pub fn record_success(&self, source: &str, latency: Duration) {
         let mut guard = self.inner.lock().expect("health registry lock");
         let health = guard.entry(source.to_string()).or_default();
+        Self::success(health, latency);
+    }
+
+    fn success(health: &mut Health, latency: Duration) {
         health.successes += 1;
         health.consecutive_failures = 0;
         health.open_until = None;
@@ -156,12 +256,17 @@ impl HealthRegistry {
     pub fn record_failure(&self, source: &str) {
         let mut guard = self.inner.lock().expect("health registry lock");
         let health = guard.entry(source.to_string()).or_default();
+        self.failure(health);
+    }
+
+    fn failure(&self, health: &mut Health) {
         health.failures += 1;
         health.consecutive_failures += 1;
         if health.consecutive_failures >= self.failure_threshold {
             let exponent = (health.consecutive_failures - self.failure_threshold).min(4);
             let cooldown = self.base_cooldown * 2u32.pow(exponent);
             health.open_until = Some(Instant::now() + cooldown);
+            health.generation += 1;
         }
     }
 
@@ -169,7 +274,11 @@ impl HealthRegistry {
     /// launcher keeps probing them instead of freezing on stale data.
     pub fn score(&self, source: &str) -> f64 {
         let guard = self.inner.lock().expect("health registry lock");
-        let Some(health) = guard.get(source) else {
+        Self::health_score(guard.get(source))
+    }
+
+    fn health_score(health: Option<&Health>) -> f64 {
+        let Some(health) = health else {
             return 50.0;
         };
         let total = health.successes + health.failures;
@@ -252,5 +361,32 @@ mod tests {
         }
         let ordered = registry.ordered(&["mirror".to_string(), "official".to_string()]);
         assert_eq!(ordered, vec!["official".to_string(), "mirror".to_string()]);
+    }
+
+    #[test]
+    fn only_one_due_probe_and_stale_success_cannot_close_a_circuit() {
+        let registry = Arc::new(HealthRegistry::new(1, Duration::from_secs(30)));
+        let stale = registry.admit("mirror").unwrap();
+        registry.admit("mirror").unwrap().failure();
+        stale.success(Duration::ZERO);
+        assert!(registry.admit("mirror").is_none());
+
+        registry
+            .inner
+            .lock()
+            .unwrap()
+            .get_mut("mirror")
+            .unwrap()
+            .open_until = Some(Instant::now());
+        assert!(registry.priority("mirror") > registry.priority("other"));
+        let probe = registry.admit("mirror").unwrap();
+        assert!(probe.is_probe());
+        assert!(registry.admit("mirror").is_none());
+        drop(probe); // Cancellation must not consume the recovery slot.
+        registry
+            .admit("mirror")
+            .unwrap()
+            .success(Duration::from_millis(5));
+        assert!(!registry.admit("mirror").unwrap().is_probe());
     }
 }

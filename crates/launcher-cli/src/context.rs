@@ -126,6 +126,13 @@ impl ProgressSink for CliProgress {
                     "[plan] {total_files} files, {total_bytes} bytes, {cache_hits} from cache"
                 );
             }
+            InstallProgressEvent::ExtendPlan {
+                total_files,
+                total_bytes,
+                ..
+            } => {
+                eprintln!("[plan] extended to {total_files} files ({total_bytes} bytes)");
+            }
             InstallProgressEvent::FileStarted { .. } | InstallProgressEvent::Bytes { .. } => {}
             InstallProgressEvent::FileFinished { .. } => {}
             InstallProgressEvent::FileFailed { path, message } => {
