@@ -35,6 +35,10 @@ impl RequestLog {
     fn paths(&self) -> Vec<String> {
         self.paths.lock().expect("path log").clone()
     }
+
+    fn peak(&self) -> usize {
+        self.peak.load(SeqCst)
+    }
 }
 
 /// Loopback HTTP server with optional range support. Returns the base URL plus
@@ -252,6 +256,38 @@ async fn large_files_are_downloaded_in_parallel_ranges() {
         ranges.len() >= 4,
         "expected at least four range requests, saw {ranges:?}"
     );
+}
+
+#[tokio::test]
+async fn segmented_download_completes_with_single_per_host_permit() {
+    let body = payload(6 * 1024 * 1024);
+    let (base, log) = serve(body.clone(), true);
+    let directory = temp_dir("single-host-permit");
+    let destination = directory.join("client.jar");
+    let mut configuration = configuration(4);
+    configuration.per_host_concurrency = 1;
+
+    let summary = tokio::time::timeout(
+        Duration::from_secs(10),
+        Downloader::new(DownloadSourcePolicy::Official, None, configuration)
+            .expect("downloader")
+            .download(
+                vec![task(
+                    destination.clone(),
+                    format!("{base}/client.jar"),
+                    &body,
+                )],
+                progress(),
+                CancelFlag::new(),
+            ),
+    )
+    .await
+    .expect("segmented download should not deadlock")
+    .expect("segmented download");
+
+    assert!(summary.is_success());
+    assert_eq!(std::fs::read(&destination).expect("read"), body);
+    assert_eq!(log.peak(), 1);
 }
 
 #[tokio::test]

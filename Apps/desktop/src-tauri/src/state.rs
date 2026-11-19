@@ -1,4 +1,6 @@
 use std::collections::HashMap;
+use std::fs::{File, OpenOptions};
+use std::io;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -132,12 +134,14 @@ pub struct AppState {
     /// Identifies this launch in the install-state file; see
     /// [`AppState::load_install_state`].
     session: String,
+    _instance_lock: InstanceLock,
     install_state_lock: Mutex<()>,
 }
 
 impl AppState {
     pub fn new() -> launcher_core::Result<Self> {
         let mut layout = GameDataLayout::from_environment();
+        let instance_lock = InstanceLock::acquire(&layout.data_root)?;
         let settings = load_settings(&layout);
         // A custom Minecraft root only moves the shared game files; instances,
         // settings and runtimes stay under the launcher data directory.
@@ -166,6 +170,7 @@ impl AppState {
             auth_cancel: Mutex::new(None),
             installs: Mutex::new(HashMap::new()),
             session: new_session_id(),
+            _instance_lock: instance_lock,
             install_state_lock: Mutex::new(()),
         })
     }
@@ -206,6 +211,145 @@ impl AppState {
         write_settings_file(&self.layout, settings)?;
         *current = settings.clone();
         Ok(())
+    }
+}
+
+struct InstanceLock {
+    _file: File,
+}
+
+impl InstanceLock {
+    fn acquire(data_root: &std::path::Path) -> io::Result<Self> {
+        std::fs::create_dir_all(data_root)?;
+        let path = data_root.join(".launcher.lock");
+        let file = open_lock_file(&path)?;
+        lock_file(&file)?;
+        Ok(Self { _file: file })
+    }
+}
+
+#[cfg(unix)]
+fn open_lock_file(path: &std::path::Path) -> io::Result<File> {
+    OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(path)
+}
+
+#[cfg(unix)]
+fn lock_file(file: &File) -> io::Result<()> {
+    use std::os::fd::AsRawFd;
+
+    const LOCK_EX: i32 = 2;
+    const LOCK_NB: i32 = 4;
+
+    unsafe extern "C" {
+        fn flock(fd: i32, operation: i32) -> i32;
+    }
+
+    if unsafe { flock(file.as_raw_fd(), LOCK_EX | LOCK_NB) } == 0 {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
+    }
+}
+
+#[cfg(windows)]
+fn open_lock_file(path: &std::path::Path) -> io::Result<File> {
+    use std::os::windows::ffi::OsStrExt;
+    use std::ptr::null_mut;
+
+    const GENERIC_READ: u32 = 0x8000_0000;
+    const GENERIC_WRITE: u32 = 0x4000_0000;
+    const OPEN_ALWAYS: u32 = 4;
+    const FILE_ATTRIBUTE_NORMAL: u32 = 0x80;
+
+    unsafe extern "system" {
+        fn CreateFileW(
+            file_name: *const u16,
+            desired_access: u32,
+            share_mode: u32,
+            security_attributes: *mut std::ffi::c_void,
+            creation_disposition: u32,
+            flags_and_attributes: u32,
+            template_file: *mut std::ffi::c_void,
+        ) -> *mut std::ffi::c_void;
+    }
+
+    let mut path = path.as_os_str().encode_wide().collect::<Vec<_>>();
+    path.push(0);
+    let handle = unsafe {
+        CreateFileW(
+            path.as_ptr(),
+            GENERIC_READ | GENERIC_WRITE,
+            0,
+            null_mut(),
+            OPEN_ALWAYS,
+            FILE_ATTRIBUTE_NORMAL,
+            null_mut(),
+        )
+    };
+    if handle == (-1isize) as *mut std::ffi::c_void {
+        return Err(io::Error::last_os_error());
+    }
+
+    use std::os::windows::io::FromRawHandle;
+    Ok(unsafe { File::from_raw_handle(handle) })
+}
+
+#[cfg(windows)]
+fn lock_file(file: &File) -> io::Result<()> {
+    use std::os::windows::io::AsRawHandle;
+
+    const LOCKFILE_FAIL_IMMEDIATELY: u32 = 1;
+    const LOCKFILE_EXCLUSIVE_LOCK: u32 = 2;
+    const MAX_LOCK_LENGTH: u32 = u32::MAX;
+
+    #[repr(C)]
+    struct Overlapped {
+        internal: usize,
+        internal_high: usize,
+        offset: u32,
+        offset_high: u32,
+        event: *mut std::ffi::c_void,
+    }
+
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn LockFileEx(
+            file: *mut std::ffi::c_void,
+            flags: u32,
+            reserved: u32,
+            bytes_to_lock_low: u32,
+            bytes_to_lock_high: u32,
+            overlapped: *mut Overlapped,
+        ) -> i32;
+    }
+
+    let mut overlapped = Overlapped {
+        internal: 0,
+        internal_high: 0,
+        offset: 0,
+        offset_high: 0,
+        event: std::ptr::null_mut(),
+    };
+    let locked = unsafe {
+        LockFileEx(
+            file.as_raw_handle().cast(),
+            LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY,
+            0,
+            MAX_LOCK_LENGTH,
+            MAX_LOCK_LENGTH,
+            &mut overlapped,
+        )
+    };
+
+    if locked != 0 {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
     }
 }
 
@@ -320,4 +464,28 @@ fn new_session_id() -> String {
         .map(|elapsed| elapsed.as_nanos())
         .unwrap_or_default();
     format!("{}-{nanos}", std::process::id())
+}
+
+#[cfg(test)]
+mod instance_lock_tests {
+    use super::InstanceLock;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn instance_lock_is_exclusive_until_drop() {
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let directory = std::env::temp_dir().join(format!(
+            "lingxi-launcher-instance-lock-{}-{suffix}",
+            std::process::id()
+        ));
+        let first = InstanceLock::acquire(&directory).expect("first lock");
+        assert!(InstanceLock::acquire(&directory).is_err());
+        drop(first);
+        let second = InstanceLock::acquire(&directory).expect("lock after drop");
+        drop(second);
+        std::fs::remove_dir_all(directory).expect("remove test directory");
+    }
 }

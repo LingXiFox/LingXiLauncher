@@ -832,14 +832,16 @@ impl Downloader {
                 .metadata()
                 .is_ok_and(|meta| meta.len() == end - start + 1)
         }) {
-            let mut probe = self.request(url, Some("bytes=0-0"), cancel).await?;
-            range_response(&probe.response, 0, 0, total)?;
-            let probe_data = tokio::select! {
-                _ = cancel.cancelled() => return Err(FetchError::cancelled()),
-                data = probe.response.chunk() => data.map_err(|error| FetchError::transport(url, &error))?,
-            };
-            if !probe_data.is_some_and(|data| data.len() == 1) {
-                return Err(FetchError::range());
+            {
+                let mut probe = self.request(url, Some("bytes=0-0"), cancel).await?;
+                range_response(&probe.response, 0, 0, total)?;
+                let probe_data = tokio::select! {
+                    _ = cancel.cancelled() => return Err(FetchError::cancelled()),
+                    data = probe.response.chunk() => data.map_err(|error| FetchError::transport(url, &error))?,
+                };
+                if !probe_data.is_some_and(|data| data.len() == 1) {
+                    return Err(FetchError::range());
+                }
             }
         }
         futures_util::stream::iter(ranges.clone().into_iter().map(
