@@ -5,7 +5,7 @@
 - 实现提交：`ae9b1a9` `fix: download loader dependencies and validate real launches`
 - 文档与 GUI 冒烟：`4195ca9` `test: add GUI smoke and finalize release verification`
 - 安装包修复：`605a307` `fix: declare bundle icons for Linux and Windows installers`
-- Swift 历史备份：tag `swift-implementation-before-removal` → `6aae3fd`
+- Swift 历史基线为提交 `6aae3fd`，原标签为 `swift-implementation-before-removal`。
 - 验收环境：macOS Apple Silicon，Java 27/26/21/17/8，Node 26，pnpm，Rust stable
 - Tauri CLI：`2.12.4`（`package.json` 精确锁定；运行时 `tauri 2.12.5`）
 - 状态日期：2026-11-10
@@ -155,7 +155,7 @@ cd Apps/desktop && pnpm typecheck && pnpm build && pnpm test:gui
 
 - Swift 源码、测试、旧 app、`Package.swift`、旧脚本已从工作树移除（提交 `aceecae`，223 个文件）。
 - 运行时代码与构建不再依赖 Swift。
-- 历史实现保留在 tag `swift-implementation-before-removal`（`6aae3fd`）。
+- 历史基线可通过提交 `6aae3fd` 查看。
 - `docs/archive/swift` 保留旧开发文档与 Apps README，仅作参考。
 
 ## 11. 已知问题与未验证项

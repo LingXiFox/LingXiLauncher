@@ -16,6 +16,7 @@ import {
   type Language,
   type LauncherSettings,
   type ProxyMode,
+  type UpdateChannel,
   type UpdateInfo,
 } from "../services/api";
 import { useApp } from "../stores/app";
@@ -54,6 +55,12 @@ const languageOptions: Array<{ value: Language; label: string }> = [
   { value: "en-US", label: "English（预览）" },
 ];
 
+const updateChannelOptions: Array<{ value: UpdateChannel; label: string }> = [
+  { value: "stable", label: "Stable · 仅正式版" },
+  { value: "rc", label: "RC · 候选版与正式版" },
+  { value: "beta", label: "Beta · 测试版、候选版与正式版" },
+];
+
 const memoryPresets = [2048, 4096, 6144, 8192, 12288];
 
 type SettingsTab = "game" | "launcher" | "about";
@@ -83,7 +90,8 @@ function sameSettings(left: LauncherSettings, right: LauncherSettings): boolean 
     left.proxyMode === right.proxyMode &&
     (left.proxyUrl ?? "") === (right.proxyUrl ?? "") &&
     (left.gameRoot ?? "") === (right.gameRoot ?? "") &&
-    left.logWindowOnStart === right.logWindowOnStart
+    left.logWindowOnStart === right.logWindowOnStart &&
+    left.updateChannel === right.updateChannel
   );
 }
 
@@ -112,6 +120,8 @@ export function SettingsPage() {
   const [checking, setChecking] = useState(false);
   const [update, setUpdate] = useState<UpdateInfo | null>(null);
   const [updateError, setUpdateError] = useState<string | null>(null);
+  const channelChanged = draft.updateChannel !== settings.updateChannel;
+  const release = update?.release;
 
   useEffect(() => {
     setDraft(settings);
@@ -225,9 +235,14 @@ export function SettingsPage() {
       proxyUrl: draft.proxyUrl ?? "",
       gameRoot: draft.gameRoot ?? "",
       defaultMemoryMiB: parsed,
+      updateChannel: channelChanged ? draft.updateChannel : undefined,
     });
     setSaving(false);
     if (!ok) return;
+    if (channelChanged) {
+      setUpdate(null);
+      setUpdateError(null);
+    }
     setDraft((previous) => ({ ...previous, defaultMemoryMiB: parsed }));
     setMemoryText(String(parsed));
     if ((before.gameRoot ?? "") !== (draft.gameRoot ?? "")) {
@@ -256,14 +271,15 @@ export function SettingsPage() {
 
   async function handleCheckUpdate() {
     setChecking(true);
+    setUpdate(null);
     setUpdateError(null);
     try {
       const info = await api.checkUpdate();
       setUpdate(info);
-      if (info.available) {
-        toast("info", "发现新版本", `${info.latestVersion}（当前 ${info.currentVersion}）`);
+      if (info.release) {
+        toast("info", "发现新版本", `${info.release.version}（当前 ${info.currentVersion}）`);
       } else {
-        toast("success", "已是最新版本", `当前 ${info.currentVersion}`);
+        toast("success", "当前频道暂无更新", `当前 ${info.currentVersion}`);
       }
     } catch (reason) {
       setUpdateError(errorText(reason));
@@ -734,43 +750,47 @@ export function SettingsPage() {
               <Card className="settings-card">
                 <SectionHeader
                   title="更新"
-                  caption="从 GitHub Releases 检查最新版本。"
                   action={
-                    <Button size="sm" variant="secondary" icon="download" loading={checking} onClick={() => void handleCheckUpdate()}>
+                    <Button size="sm" variant="secondary" icon="download" loading={checking} disabled={saving || channelChanged} onClick={() => void handleCheckUpdate()}>
                       检查更新
                     </Button>
                   }
                 />
+                <Select
+                  label="更新频道"
+                  options={updateChannelOptions}
+                  value={draft.updateChannel}
+                  onChange={(value) => updateDraft({ updateChannel: value as UpdateChannel })}
+                  hint={channelChanged ? "保存设置后可检查此频道。" : undefined}
+                  disabled={checking || saving}
+                />
                 {updateError ? <ErrorBanner message={updateError} title="检查更新失败" onDismiss={() => setUpdateError(null)} /> : null}
-                {update ? (
+                {update && !channelChanged ? (
                   <div className="update-card">
                     <div className="update-card__head">
                       <div>
                         <p className="update-card__version">
-                          {update.available ? `新版本 ${update.latestVersion}` : "已是最新版本"}
+                          {release ? `新版本 ${release.version}` : "当前频道暂无更新"}
                         </p>
                         <p className="update-card__meta">
                           当前 {update.currentVersion}
-                          {update.publishedAt ? ` · 发布于 ${update.publishedAt}` : ""}
+                          {release?.publishedAt ? ` · 发布于 ${release.publishedAt}` : ""}
                         </p>
                       </div>
-                      <Badge tone={update.available ? "accent" : "success"} dot>
-                        {update.available ? "可更新" : "最新"}
-                      </Badge>
+                      {release ? <Badge tone="accent" dot>可更新</Badge> : null}
                     </div>
-                    {update.releaseNotes ? (
-                      <pre className="update-card__notes">{update.releaseNotes.slice(0, 1200)}</pre>
+                    {release?.notes ? (
+                      <pre className="update-card__notes">{release.notes.slice(0, 1200)}</pre>
                     ) : null}
-                    <div className="about-actions">
-                      <Button variant="primary" icon="external" onClick={() => void handleOpen(update.releaseUrl)}>
-                        打开下载页面
-                      </Button>
-                    </div>
-                    <p className="field__message">自动下载与静默安装尚未接入；当前版本会打开 Release 页面由你手动安装。</p>
+                    {release ? (
+                      <div className="about-actions">
+                        <Button variant="primary" icon="external" onClick={() => void handleOpen(release.url)}>
+                          打开下载页面
+                        </Button>
+                      </div>
+                    ) : null}
                   </div>
-                ) : (
-                  <p className="field__message">尚未检查更新。点击右上角「检查更新」从 GitHub 拉取最新发布。</p>
-                )}
+                ) : null}
               </Card>
             </div>
 

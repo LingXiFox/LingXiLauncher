@@ -12,7 +12,7 @@
 | macOS 产物 | 通过：`.app` 11.30 MiB、`.dmg` 6.51 MiB，ad-hoc 签名且资源已封闭，`hdiutil verify` VALID |
 | Windows / Linux 产物 | 由 CI 构建，本机不做实机验证（见第 6 节） |
 | 发布形态 | GitHub pre-release，7 个安装包 + SHA256 校验文件 |
-| 发布结果 | 已发布：<https://github.com/LingXiFox/LingXiLauncher/releases/tag/v0.10.0-rc.1>；`release.yml` run `42845799097` 全部 job 全绿（quality-gate、Windows、macOS、Linux、publish） |
+| 发布结果 | 已发布，发布页现为 [v0.10.0-beta.2](https://github.com/LingXiFox/LingXiLauncher/releases/tag/v0.10.0-beta.2)。原 `release.yml` run `42845799097` 的 quality-gate、Windows、macOS、Linux 和 publish 均通过。 |
 
 结论：满足 RC 发布条件。签名状态已在 Release Notes 与 `KNOWN-ISSUES.md` 明示，未冒称 Apple 公证或 Windows 代码签名。
 

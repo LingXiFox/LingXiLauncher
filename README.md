@@ -72,6 +72,12 @@ CARGO_HOME=$PWD/.cargo-home cargo run -p launcher-cli -- java list
 CARGO_HOME=$PWD/.cargo-home cargo run -p launcher-cli -- instance list
 ```
 
+### 发布版本
+
+只在根目录 `Cargo.toml` 的 `[workspace.package].version` 填写版本。使用 `X.Y.Z-beta.N`、`X.Y.Z-rc.N` 或 `X.Y.Z`。运行 `node scripts/release/version.mjs prepare` 刷新 `Cargo.lock`。添加 `.github/release-notes/<标签>.md` 后提交并推送分支，等 CI 通过，再从同一个提交推送 `node scripts/release/version.mjs tag` 输出的标签。Beta 和 RC 会发布为 Pre-release，正式版会发布为 Release。
+
+应用的「设置 → 关于 → 更新频道」可选择 Stable、RC 或 Beta。RC 包含正式版，Beta 包含 RC 和正式版。初始值由安装版本决定，保存后沿用用户选择。
+
 ## 数据目录
 
 - 游戏根：官方 `.minecraft`，可用 `--root` 或 `LINGXI_GAME_ROOT` 覆盖。

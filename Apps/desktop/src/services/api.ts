@@ -12,6 +12,7 @@ export type Appearance = "dark" | "light" | "system";
 export type AccentColor = "orange" | "blue" | "green" | "purple" | "pink" | "red";
 export type Language = "zh-CN" | "en-US";
 export type ProxyMode = "system" | "manual" | "off";
+export type UpdateChannel = "stable" | "rc" | "beta";
 export type DownloadSource = "official" | "mirror" | "auto" | "local-cache-only";
 export type VersionFilter = "release" | "snapshot" | "all";
 export type AccountKind = "microsoft" | "local";
@@ -31,6 +32,7 @@ export interface LauncherSettings {
   proxyUrl?: string | null;
   gameRoot?: string | null;
   logWindowOnStart: boolean;
+  updateChannel: UpdateChannel;
 }
 
 export interface MicrosoftAccount {
@@ -159,11 +161,12 @@ export interface InstallProgress {
 
 export interface UpdateInfo {
   currentVersion: string;
-  latestVersion: string;
-  releaseUrl: string;
-  releaseNotes?: string | null;
-  publishedAt?: string | null;
-  available: boolean;
+  release: {
+    version: string;
+    url: string;
+    notes: string | null;
+    publishedAt: string | null;
+  } | null;
 }
 
 export interface LogContent {
@@ -441,6 +444,7 @@ function normalizeBootstrap(raw: LauncherBootstrap & { accounts?: unknown }): La
       proxyUrl: (settings.proxyUrl as string | null | undefined) ?? null,
       gameRoot: (settings.gameRoot as string | null | undefined) ?? null,
       logWindowOnStart: asBoolean(settings.logWindowOnStart),
+      updateChannel: (settings.updateChannel as UpdateChannel) ?? "stable",
     },
     accounts: normalizeAccounts(raw.accounts),
     instances: Array.isArray(raw.instances) ? raw.instances : [],

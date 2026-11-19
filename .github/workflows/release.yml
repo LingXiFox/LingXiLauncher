@@ -1,6 +1,6 @@
 name: Release
 
-# Tag pushes build, verify and publish a GitHub pre-release.
+# Tag pushes build, verify and publish a GitHub Release.
 # Manual runs default to a validation build: artifacts only, never a release.
 on:
   push:
@@ -76,10 +76,10 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --locked --workspace --all-targets -- -D warnings
 
       - name: Tests
-        run: cargo test --workspace
+        run: cargo test --locked --workspace
 
       - name: Frontend typecheck
         working-directory: Apps/desktop
@@ -153,15 +153,11 @@ jobs:
           pnpm build
           pnpm test:gui
 
-      # Windows Installer needs a numeric product version; the prerelease
-      # suffix stays in the package file name and the release metadata.
       - name: Derive numeric WiX version
         if: runner.os == 'Windows'
         run: node scripts/release/version.mjs wix-config "${{ runner.temp }}/wix.json"
 
-      # The rpm bundler rejects prerelease suffixes, so rpm is built from an
-      # overlay config with the numeric version; deb and AppImage keep rc.1.
-      - name: Derive numeric rpm version
+      - name: Derive RPM package version
         if: runner.os == 'Linux'
         run: node scripts/release/version.mjs rpm-config "${{ runner.temp }}/rpm.json"
 
@@ -186,12 +182,28 @@ jobs:
             pnpm tauri build --ci
           fi
 
+      - name: Set the DEB package version
+        if: runner.os == 'Linux'
+        run: |
+          original="$(find target/release/bundle/deb -type f -name '*.deb' -print -quit)"
+          deb_version="$(node scripts/release/version.mjs deb-version)"
+          unpacked="$RUNNER_TEMP/lingxi-deb"
+          updated="$RUNNER_TEMP/lingxi-versioned.deb"
+          dpkg-deb --raw-extract "$original" "$unpacked"
+          sed -i "s/^Version: .*/Version: $deb_version/" "$unpacked/DEBIAN/control"
+          dpkg-deb --build --root-owner-group "$unpacked" "$updated"
+          test "$(dpkg-deb --field "$updated" Version)" = "$deb_version"
+          mv "$updated" "$original"
+
       - name: Verify bundled macOS version
         if: runner.os == 'macOS'
         run: |
           PLIST="target/release/bundle/macos/LingXi Launcher.app/Contents/Info.plist"
           test -f "$PLIST"
-          /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$PLIST"
+          tag="$(node scripts/release/version.mjs tag)"
+          bundle_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$PLIST")"
+          test "$bundle_version" = "${tag#v}"
+          echo "macOS bundle version: $bundle_version"
           /usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$PLIST"
           APP="target/release/bundle/macos/LingXi Launcher.app"
           codesign --verify --deep --strict --verbose=2 "$APP"
@@ -212,7 +224,7 @@ jobs:
           retention-days: 7
 
   publish:
-    name: Publish GitHub pre-release
+    name: Publish GitHub Release
     needs: [quality-gate, build]
     # Only a tag whose three platform builds all succeeded becomes a release.
     if: ${{ startsWith(github.ref, 'refs/tags/v') && (github.event_name == 'push' || inputs.validation_only == false) }}
@@ -308,7 +320,7 @@ jobs:
             exit 1
           fi
 
-      - name: Publish pre-release
+      - name: Publish Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -318,9 +330,14 @@ jobs:
             echo "error: missing release notes at ${NOTES}" >&2
             exit 1
           fi
+          channel="$(node scripts/release/version.mjs channel "${GITHUB_REF_NAME}")"
+          flags=()
+          if [ "$channel" != stable ]; then
+            flags+=(--prerelease)
+          fi
           gh release create "${GITHUB_REF_NAME}" \
             --verify-tag \
             --title "LingXi Launcher ${GITHUB_REF_NAME}" \
             --notes-file "${NOTES}" \
-            --prerelease \
+            "${flags[@]}" \
             release/*

@@ -67,6 +67,7 @@ const DEFAULT_SETTINGS: LauncherSettings = {
   proxyUrl: null,
   gameRoot: null,
   logWindowOnStart: false,
+  updateChannel: "stable",
 };
 
 function readStoredSection(): Section {

@@ -6,7 +6,7 @@ use tauri::State;
 
 use crate::commands::accounts::{collect_account_snapshot, AccountSnapshotView};
 use crate::commands::{AccountView, CommandResult, InstanceView, JavaRuntimeView};
-use crate::state::AppState;
+use crate::state::{AppState, UpdateChannel};
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -23,6 +23,7 @@ pub struct SettingsView {
     pub proxy_url: Option<String>,
     pub game_root: Option<String>,
     pub log_window_on_start: bool,
+    pub update_channel: UpdateChannel,
 }
 
 #[derive(Debug, Clone, Serialize)]

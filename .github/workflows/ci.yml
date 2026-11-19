@@ -56,14 +56,19 @@ jobs:
         working-directory: Apps/desktop
         run: pnpm install --frozen-lockfile
 
+      - name: Check release versioning
+        run: |
+          node scripts/release/version.mjs check
+          node --test scripts/release/version.test.mjs
+
       - name: Check formatting
         run: cargo fmt --all -- --check
 
       - name: Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --locked --workspace --all-targets -- -D warnings
 
       - name: Tests
-        run: cargo test --workspace
+        run: cargo test --locked --workspace
 
       - name: Frontend typecheck
         working-directory: Apps/desktop
@@ -120,7 +125,7 @@ jobs:
         run: pnpm build
 
       - name: Build desktop binary
-        run: cargo build --release -p lingxi-desktop --features custom-protocol
+        run: cargo build --locked --release -p lingxi-desktop --features custom-protocol
 
   cli-smoke:
     name: CLI smoke test
@@ -139,7 +144,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Build CLI
-        run: cargo build -p launcher-cli
+        run: cargo build --locked -p launcher-cli
 
       - name: Run offline CLI checks
         run: |

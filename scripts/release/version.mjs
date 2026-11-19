@@ -1,127 +1,93 @@
 #!/usr/bin/env node
-// Single source of truth for the release version.
-//
-// The launcher version lives in three manifests. This script fails the build
-// when they drift apart, when a release tag does not match, and it derives the
-// numeric WiX version that MSI installers require.
-//
-// Usage:
-//   node scripts/release/version.mjs check [vX.Y.Z-pre]
-//   node scripts/release/version.mjs wix-config <output.json>
-//   node scripts/release/version.mjs rpm-config <output.json>
-//   node scripts/release/version.mjs numeric
+import { spawnSync } from "node:child_process";
+import { readFile, writeFile } from "node:fs/promises";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
-import { readFile, writeFile, mkdir } from "node:fs/promises";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
+const root = new URL("../../", import.meta.url);
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-
-async function readWorkspaceVersion() {
-  const manifest = await readFile(path.join(root, "Cargo.toml"), "utf8");
-  const section = manifest.split(/^\[workspace\.package\]/m)[1];
-  if (!section) throw new Error("Cargo.toml has no [workspace.package] section");
-  const match = section.match(/^version\s*=\s*"([^"]+)"/m);
-  if (!match) throw new Error("Cargo.toml [workspace.package] has no version");
-  return match[1];
-}
-
-async function readJsonVersion(relative) {
-  const data = JSON.parse(await readFile(path.join(root, relative), "utf8"));
-  if (typeof data.version !== "string") throw new Error(`${relative} has no version`);
-  return data.version;
-}
-
-async function versions() {
+export function releaseVersion(version) {
+  const match = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(beta|rc)\.([1-9]\d*))?$/.exec(version);
+  if (match?.[0] !== version) {
+    throw new Error(`Expected X.Y.Z, X.Y.Z-beta.N or X.Y.Z-rc.N: ${version}`);
+  }
+  const [, major, minor, patch, channel = "stable", sequence] = match;
+  if (Number(major) > 255 || Number(minor) > 255 || Number(patch) > 255 || Number(sequence) > 127) {
+    throw new Error(`Version exceeds MSI limits (255 per core field, 127 builds per channel): ${version}`);
+  }
+  const core = `${major}.${minor}.${patch}`;
+  // MSI compares only three fields. Reserve one byte of the third field for prerelease order.
+  const installerBuild = channel === "stable" ? 255 : Number(sequence) + (channel === "rc" ? 127 : 0);
+  // Keep normalized packages above historical DEBs and RPMs with the same core version.
+  const rpmRelease = channel === "stable" ? "2" : `1.${channel === "beta" ? 1 : 2}.${sequence}`;
+  const debSuffix = channel === "stable" ? "" : `~${channel}.${sequence}`;
   return {
-    "Cargo.toml [workspace.package]": await readWorkspaceVersion(),
-    "Apps/desktop/package.json": await readJsonVersion("Apps/desktop/package.json"),
-    "Apps/desktop/src-tauri/tauri.conf.json": await readJsonVersion(
-      "Apps/desktop/src-tauri/tauri.conf.json"
-    ),
+    tag: `v${version}`,
+    channel,
+    core,
+    wix: `${major}.${minor}.${Number(patch) * 256 + installerBuild}`,
+    rpmRelease,
+    deb: `${core}+lingxi${debSuffix}`,
   };
 }
 
-function numericVersion(version) {
-  const match = version.match(/^(\d+)\.(\d+)\.(\d+)/);
-  if (!match) throw new Error(`not a semantic version: ${version}`);
-  return `${match[1]}.${match[2]}.${match[3]}`;
-}
+async function main([command = "check", argument] = process.argv.slice(2)) {
+  const manifest = await readFile(new URL("Cargo.toml", root), "utf8");
+  const workspace = manifest.split(/^\[workspace\.package\][ \t]*$/m)[1]?.split(/^\[/m)[0];
+  const version = /^version\s*=\s*"([^"]+)"/m.exec(workspace ?? "")?.[1];
+  if (!version) throw new Error("Cargo.toml [workspace.package] has no version");
+  const release = releaseVersion(version);
 
-async function check(tag) {
-  const found = await versions();
-  const unique = new Set(Object.values(found));
-  const rows = Object.entries(found).map(([file, value]) => `  ${file}: ${value}`);
-  if (unique.size !== 1) {
-    console.error("Version mismatch between manifests:\n" + rows.join("\n"));
-    process.exit(1);
+  if ((command === "check" || command === "channel") && argument && argument !== release.tag) {
+    throw new Error(`Git tag ${argument} does not match ${release.tag}`);
   }
-  const version = [...unique][0];
-  if (!/^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/.test(version)) {
-    console.error(`Version "${version}" is not a semantic version`);
-    process.exit(1);
-  }
-  if (/[+]/.test(version)) {
-    console.error("Build metadata is not supported in release versions");
-    process.exit(1);
-  }
-  if (tag) {
-    const expected = `v${version}`;
-    if (tag !== expected) {
-      console.error(`Git tag "${tag}" does not match the manifest version ("${expected}")`);
-      process.exit(1);
+
+  switch (command) {
+    case "prepare": {
+      const cargo = spawnSync("cargo", ["update", "--workspace"], { cwd: fileURLToPath(root), stdio: "inherit" });
+      if (cargo.error) throw cargo.error;
+      if (cargo.status !== 0) throw new Error("Could not refresh Cargo.lock");
+      console.log(release.tag);
+      break;
     }
+    case "check": {
+      for (const file of ["Apps/desktop/package.json", "Apps/desktop/src-tauri/tauri.conf.json"]) {
+        const config = JSON.parse(await readFile(new URL(file, root), "utf8"));
+        if (Object.hasOwn(config, "version")) throw new Error(`Remove version from ${file}; use Cargo.toml`);
+      }
+      console.log(`version: ${version} (${release.channel})`);
+      break;
+    }
+    case "channel":
+      console.log(release.channel);
+      break;
+    case "tag":
+      console.log(release.tag);
+      break;
+    case "numeric":
+      console.log(release.core);
+      break;
+    case "deb-version":
+      console.log(release.deb);
+      break;
+    case "wix-config":
+    case "rpm-config": {
+      if (!argument) throw new Error(`${command} requires an output path`);
+      const config = command === "wix-config"
+        ? { bundle: { windows: { wix: { version: release.wix } } } }
+        : { version: release.core, bundle: { linux: { rpm: { release: release.rpmRelease } } } };
+      await writeFile(argument, `${JSON.stringify(config, null, 2)}\n`);
+      break;
+    }
+    default:
+      throw new Error(`Unknown command: ${command}`);
   }
-  console.log(`version: ${version}`);
-  for (const row of rows) console.log(row);
 }
 
-async function wixConfig(output) {
-  const version = await readWorkspaceVersion();
-  const numeric = numericVersion(version);
-  // Windows Installer requires a purely numeric product version. The prerelease
-  // suffix keeps living in the bundle file name, the tag and the release title.
-  const config = {
-    bundle: { windows: { wix: { version: `${numeric}.0` } } },
-  };
-  await mkdir(path.dirname(path.resolve(output)), { recursive: true });
-  await writeFile(output, JSON.stringify(config, null, 2) + "\n");
-  console.log(`wix version: ${numeric}.0 -> ${output}`);
-}
-
-async function rpmConfig(output) {
-  const numeric = numericVersion(await readWorkspaceVersion());
-  // The rpm bundler rejects prerelease suffixes in the package version. The rpm
-  // metadata carries the numeric version while the file name keeps the rc tag.
-  const config = { version: numeric };
-  await mkdir(path.dirname(path.resolve(output)), { recursive: true });
-  await writeFile(output, JSON.stringify(config, null, 2) + "\n");
-  console.log(`rpm version: ${numeric} -> ${output}`);
-}
-
-const [command = "check", argument] = process.argv.slice(2);
-switch (command) {
-  case "check":
-    await check(argument);
-    break;
-  case "wix-config":
-    if (!argument) {
-      console.error("wix-config requires an output path");
-      process.exit(1);
-    }
-    await wixConfig(argument);
-    break;
-  case "rpm-config":
-    if (!argument) {
-      console.error("rpm-config requires an output path");
-      process.exit(1);
-    }
-    await rpmConfig(argument);
-    break;
-  case "numeric":
-    console.log(numericVersion(await readWorkspaceVersion()));
-    break;
-  default:
-    console.error(`unknown command: ${command}`);
-    process.exit(1);
+if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
+  try {
+    await main();
+  } catch (error) {
+    console.error(error.message);
+    process.exitCode = 1;
+  }
 }

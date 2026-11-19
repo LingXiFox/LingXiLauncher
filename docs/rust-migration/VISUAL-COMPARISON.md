@@ -1,6 +1,6 @@
 # 新旧界面视觉对比
 
-本文件对照 SwiftUI 基线（tag `swift-implementation-before-removal`，commit `6aae3fd`）与 Rust + Tauri + React 实现（`rewrite/rust`，0.10.0）。
+本文件对照 SwiftUI 基线（提交 `6aae3fd`）与 Rust + Tauri + React 实现（`rewrite/rust`，0.10.0）。
 
 ## 捕获条件
 

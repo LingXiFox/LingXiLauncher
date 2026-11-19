@@ -5,7 +5,7 @@ use tauri_plugin_dialog::DialogExt;
 
 use crate::commands::app::SettingsView;
 use crate::commands::{command_error, CommandResult, JavaRuntimeView, TauriProgress};
-use crate::state::{AppState, Settings};
+use crate::state::{AppState, Settings, UpdateChannel};
 
 #[tauri::command]
 pub fn get_settings(state: State<'_, AppState>) -> CommandResult<SettingsView> {
@@ -28,6 +28,7 @@ pub fn save_settings(
     proxy_url: Option<String>,
     game_root: Option<String>,
     log_window_on_start: Option<bool>,
+    update_channel: Option<UpdateChannel>,
 ) -> CommandResult<SettingsView> {
     let mut settings = state.settings_snapshot();
     if let Some(path) = java_path {
@@ -118,6 +119,9 @@ pub fn save_settings(
     if let Some(enabled) = log_window_on_start {
         settings.log_window_on_start = enabled;
     }
+    if let Some(channel) = update_channel {
+        settings.update_channel = Some(channel);
+    }
     state.save_settings(&settings).map_err(command_error)?;
     // The proxy setting is process wide, so later clients pick it up without a
     // restart. Existing connections keep their pool until they time out.
@@ -160,6 +164,7 @@ impl From<&Settings> for SettingsView {
             proxy_url: settings.proxy_url.clone(),
             game_root: settings.game_root.clone(),
             log_window_on_start: settings.log_window_on_start,
+            update_channel: settings.effective_update_channel(),
         }
     }
 }

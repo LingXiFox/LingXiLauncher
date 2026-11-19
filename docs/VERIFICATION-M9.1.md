@@ -68,7 +68,7 @@ lingxi world delete ... --confirm
 
 - 手动验证（只构建、不发布）：[run 41157085234](https://github.com/LingXiFox/LingXiLauncher/actions/runs/41157085234) — success。
 - Tag `v0.1.0-beta.1` 发布：[run 41157425202](https://github.com/LingXiFox/LingXiLauncher/actions/runs/41157425202) — success，Pre-release 已创建。
-- Release：[v0.1.0-beta.1](https://github.com/LingXiFox/LingXiLauncher/releases/tag/v0.1.0-beta.1)。
+- 原 `v0.1.0-beta.1` 的发布页现为 [v0.10.0-beta.1](https://github.com/LingXiFox/LingXiLauncher/releases/tag/v0.10.0-beta.1)。
 
 ## 4. 真实游戏验证
 

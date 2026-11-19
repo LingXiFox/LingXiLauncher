@@ -11,6 +11,14 @@ use launcher_core::models::instance::InstanceRepository;
 use launcher_core::{GameDataLayout, PlatformContext, Runtime};
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum UpdateChannel {
+    Beta,
+    Rc,
+    Stable,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
@@ -26,6 +34,8 @@ pub struct Settings {
     pub proxy_url: Option<String>,
     pub game_root: Option<String>,
     pub log_window_on_start: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub update_channel: Option<UpdateChannel>,
 }
 
 impl Default for Settings {
@@ -43,11 +53,21 @@ impl Default for Settings {
             proxy_url: None,
             game_root: None,
             log_window_on_start: false,
+            update_channel: None,
         }
     }
 }
 
 impl Settings {
+    pub fn effective_update_channel(&self) -> UpdateChannel {
+        self.update_channel
+            .unwrap_or_else(|| match env!("CARGO_PKG_VERSION_PRE").split_once('.') {
+                Some(("beta", _)) => UpdateChannel::Beta,
+                Some(("rc", _)) => UpdateChannel::Rc,
+                _ => UpdateChannel::Stable,
+            })
+    }
+
     pub fn policy(&self) -> DownloadSourcePolicy {
         DownloadSourcePolicy::parse(&self.source).unwrap_or(DownloadSourcePolicy::Auto)
     }

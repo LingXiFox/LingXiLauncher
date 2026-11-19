@@ -70,6 +70,7 @@ const bootstrap = {
     proxyUrl: null,
     gameRoot: null,
     logWindowOnStart: false,
+    updateChannel: "stable",
   },
   accounts: {
     microsoft: [],
@@ -154,14 +155,11 @@ const replies = {
     proxyUrl: null,
     gameRoot: null,
     logWindowOnStart: false,
+    updateChannel: "stable",
   },
   check_update: {
     currentVersion: "0.10.0",
-    latestVersion: "0.10.0",
-    releaseUrl: "https://github.com/LingXiFox/LingXiLauncher/releases/tag/v0.10.0",
-    releaseNotes: null,
-    publishedAt: null,
-    available: false,
+    release: null,
   },
   open_log_window: null,
   restart_app: null,
@@ -194,7 +192,18 @@ function readBody(request) {
 const server = createServer(async (request, response) => {
   if (request.url === "/__ipc" && request.method === "POST") {
     try {
-      const { cmd } = JSON.parse(await readBody(request));
+      const { cmd, args } = JSON.parse(await readBody(request));
+      if (cmd === "save_settings" && args?.updateChannel) {
+        replies.save_settings.updateChannel = args.updateChannel;
+      }
+      if (cmd === "check_update") {
+        replies.check_update.release = replies.save_settings.updateChannel === "beta" ? {
+          version: "0.10.1-beta.1",
+          url: "https://github.com/LingXiFox/LingXiLauncher/releases/tag/v0.10.1-beta.1",
+          notes: null,
+          publishedAt: null,
+        } : null;
+      }
       const value = Object.prototype.hasOwnProperty.call(replies, cmd) ? replies[cmd] : null;
       response.writeHead(200, { "content-type": "application/json" });
       response.end(JSON.stringify(value));
@@ -425,7 +434,17 @@ try {
   await clickButton("关于");
   await waitFor("about tab", "document.body.innerText.includes('Rust 启动核心')");
   await clickButton("检查更新");
-  await waitFor("update check", "document.body.innerText.includes('已是最新版本')");
+  await waitFor("stable channel result", "document.querySelector('.update-card')?.innerText.includes('当前频道暂无更新')");
+  await evaluate(`(() => {
+    const channel = document.querySelector('select[aria-label="更新频道"]');
+    channel.value = "beta";
+    channel.dispatchEvent(new Event("change", { bubbles: true }));
+  })()`);
+  await waitFor("unsaved update channel", "document.body.innerText.includes('保存设置后可检查此频道')");
+  await clickButton("保存设置");
+  await waitFor("saved update channel", "!document.body.innerText.includes('保存设置后可检查此频道')");
+  await clickButton("检查更新");
+  await waitFor("beta channel result", "document.querySelector('.update-card')?.innerText.includes('0.10.1-beta.1')");
   await screenshot("06c-settings-about");
 
   await clickButton("游戏");
