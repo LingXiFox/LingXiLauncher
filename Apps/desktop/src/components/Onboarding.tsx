@@ -129,10 +129,14 @@ export function Onboarding() {
     setFinishing(true);
     setError(null);
     try {
-      await saveSettings({
+      const saved = await saveSettings({
         javaPath: javaPath || null,
         gameRoot: root || null,
       });
+      if (!saved) {
+        setError("设置保存失败，请重试或跳过引导。");
+        return;
+      }
       rememberOnboarding();
       setOpen(false);
     } finally {

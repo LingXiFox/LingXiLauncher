@@ -46,9 +46,9 @@ const instance = {
 
 const versions = [
   { id: "1.21.11", type: "release", releaseTime: "2026-10-01T00:00:00Z", installed: true },
-  { id: "1.21.10", type: "release", releaseTime: "2026-09-01T00:00:00Z", installed: false },
+  { id: "1.21.10", type: "release", releaseTime: "2026-09-01T00:00:00Z", installed: false, installStatus: "interrupted" },
   { id: "1.22-snapshot-3", type: "snapshot", releaseTime: "2026-10-20T00:00:00Z", installed: false },
-  { id: "1.22-snapshot-2", type: "snapshot", releaseTime: "2026-10-10T00:00:00Z", installed: false },
+  { id: "1.21.9", type: "release", releaseTime: "2026-08-01T00:00:00Z", installed: false, installStatus: "cancelled" },
 ];
 
 const bootstrap = {
@@ -189,10 +189,15 @@ function readBody(request) {
   });
 }
 
+let failFirstSettingsSave = true;
 const server = createServer(async (request, response) => {
   if (request.url === "/__ipc" && request.method === "POST") {
     try {
       const { cmd, args } = JSON.parse(await readBody(request));
+      if (cmd === "save_settings" && failFirstSettingsSave) {
+        failFirstSettingsSave = false;
+        throw new Error("simulated settings write failure");
+      }
       if (cmd === "save_settings" && args?.updateChannel) {
         replies.save_settings.updateChannel = args.updateChannel;
       }
@@ -387,14 +392,38 @@ try {
   await send("Page.navigate", { url: `http://127.0.0.1:${appPort}/` });
   await waitFor("onboarding", "document.body.innerText.includes('欢迎使用灵曦启动器')");
   await screenshot("00-onboarding");
-  await clickButton("跳过引导");
+  for (let step = 0; step < 4; step += 1) await clickButton("下一步");
+  await clickButton("开始使用 LingXi");
+  await waitFor("onboarding save error", "document.body.innerText.includes('设置保存失败')");
+  if (await evaluate("localStorage.getItem('lingxi.onboarded') !== null")) {
+    throw new Error("failed settings save marked onboarding complete");
+  }
+  await clickButton("开始使用 LingXi");
   await waitFor("onboarding closed", "!document.querySelector('[role=dialog]')");
+  await waitFor("onboarding persisted", "localStorage.getItem('lingxi.onboarded') !== null");
   await waitFor("launcher shell", "!!document.querySelector('.sidebar') && document.body.innerText.includes('首页')");
   await screenshot("01-home");
 
   await clickButton("游戏实例");
   await waitFor("instances page", "document.body.innerText.includes('冒烟实例')");
   await screenshot("02-instances");
+
+  // Round-3 item 7: a cancelled or crashed install must be labelled as such and
+  // still offer the repair action instead of looking like a plain failure.
+  await clickButton("版本下载");
+  await waitFor(
+    "interrupted install row",
+    "document.body.innerText.includes('上次安装被意外中断') && document.body.innerText.includes('意外中断')",
+  );
+  await waitFor(
+    "cancelled install row",
+    "document.body.innerText.includes('上次安装已取消') && document.body.innerText.includes('已取消')",
+  );
+  await waitFor("repair action", "[...document.querySelectorAll('button')].some((button) => button.textContent.trim() === '修复安装')");
+  await screenshot("02b-downloads-states");
+
+  await clickButton("游戏实例");
+  await waitFor("instances page again", "document.body.innerText.includes('冒烟实例')");
 
   const opened = await evaluate(`(() => {
     const node = document.querySelector(".instance-card__main");
@@ -475,7 +504,7 @@ try {
   await screenshot("09-home-log-preview");
 
   console.log(
-    "GUI smoke passed: onboarding, boot, navigation, instance detail, mods/graphics/install modals, settings tabs (game/launcher/about), update check, memory validation, accounts, home log preview",
+    "GUI smoke passed: onboarding, boot, navigation, instance detail, downloads states, mods/graphics/install modals, settings tabs (game/launcher/about), update check, memory validation, accounts, home log preview",
   );
   console.log(`Screenshots: ${ARTIFACTS}`);
 } catch (error) {

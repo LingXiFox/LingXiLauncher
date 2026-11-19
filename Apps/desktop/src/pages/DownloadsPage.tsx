@@ -280,8 +280,14 @@ export function DownloadsPage() {
                       <strong>{version.id}</strong>
                       {version.installed ? (
                         <span className="caption">已安装到本地</span>
+                      ) : version.installStatus === "interrupted" ? (
+                        <span className="caption">上次安装被意外中断，可继续修复</span>
+                      ) : version.installStatus === "cancelled" ? (
+                        <span className="caption">上次安装已取消，可继续修复</span>
+                      ) : version.installStatus === "failed" ? (
+                        <span className="caption">上次安装失败，可继续修复</span>
                       ) : version.installStatus ? (
-                        <span className="caption">上次安装未完成，可继续修复</span>
+                        <span className="caption">正在安装…</span>
                       ) : (
                         <span className="caption">Minecraft Java Edition</span>
                       )}
@@ -298,8 +304,12 @@ export function DownloadsPage() {
                       <Badge tone="accent" dot>已安装</Badge>
                     ) : version.installStatus === "failed" ? (
                       <Badge tone="warning" dot>安装失败</Badge>
+                    ) : version.installStatus === "interrupted" ? (
+                      <Badge tone="warning" dot>意外中断</Badge>
+                    ) : version.installStatus === "cancelled" ? (
+                      <Badge tone="neutral" dot>已取消</Badge>
                     ) : version.installStatus === "installing" ? (
-                      <Badge tone="neutral" dot>安装未完成</Badge>
+                      <Badge tone="neutral" dot>安装中</Badge>
                     ) : (
                       <span className="tertiary caption">未安装</span>
                     )}

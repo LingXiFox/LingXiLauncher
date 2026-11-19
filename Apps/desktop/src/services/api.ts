@@ -137,7 +137,7 @@ export interface GameVersion {
   type: string;
   releaseTime?: string | null;
   installed?: boolean;
-  installStatus?: "installing" | "complete" | "failed" | null;
+  installStatus?: "installing" | "complete" | "failed" | "cancelled" | "interrupted" | null;
   url?: string | null;
 }
 

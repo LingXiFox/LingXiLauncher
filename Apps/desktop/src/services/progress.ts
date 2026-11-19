@@ -75,6 +75,13 @@ export function applyInstallEvent(
         downloadedBytes: 0,
         message: event.message ?? base.message,
       };
+    case "extendPlan":
+      return {
+        ...base,
+        totalFiles: base.totalFiles + asNumber(event.totalFiles),
+        completedFiles: base.completedFiles + asNumber(event.cacheHits),
+        totalBytes: base.totalBytes + asNumber(event.totalBytes),
+      };
     case "fileStarted":
       return {
         ...base,

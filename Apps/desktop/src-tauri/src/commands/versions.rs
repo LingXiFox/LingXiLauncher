@@ -51,7 +51,9 @@ pub fn list_versions(
         .cached_manifest()
         .ok_or_else(|| "版本清单尚未下载，请点击刷新".to_string())?;
     let filter = filter.unwrap_or_else(|| "release".into());
-    let install_state = launcher_core::install::InstallStateMap::load(&state.layout);
+    // Settles any install left behind by a previous process before reporting
+    // status, so a crashed run cannot look like a live one forever.
+    let install_state = state.load_install_state();
     Ok(manifest
         .versions
         .into_iter()
@@ -143,15 +145,11 @@ pub async fn install_version(
         key: version_id.clone(),
     };
     // P0-3: record the install lifecycle so partial installs are visible and
-    // repairable instead of looking "installed".
-    let mut install_state = launcher_core::install::InstallStateMap::load(&state.layout);
-    install_state
-        .mark(
-            &version_id,
-            launcher_core::install::InstallStatus::Installing,
-        )
+    // repairable instead of looking "installed". The session token lets the
+    // next launch tell a live run from one left behind by a crash.
+    state
+        .update_install_state(|map, session| map.begin(&version_id, session))
         .map_err(command_error)?;
-    install_state.save(&state.layout).map_err(command_error)?;
     let started = std::time::Instant::now();
     crate::logging::info(format!("install {version_id}: started"));
     let result = installer.install(&version_id, progress, cancel).await;
@@ -167,25 +165,20 @@ pub async fn install_version(
                 report.is_complete()
             ),
         ),
+        Err(error) if error.is_cancelled() => crate::logging::info(format!(
+            "install {version_id}: cancelled after {:.1}s",
+            started.elapsed().as_secs_f64()
+        )),
         Err(error) => crate::logging::error(format!(
             "install {version_id} failed after {:.1}s: {error}",
             started.elapsed().as_secs_f64()
         )),
     }
-    match &result {
-        Ok(_) => {
-            install_state
-                .mark(&version_id, launcher_core::install::InstallStatus::Complete)
-                .map_err(command_error)?;
-            install_state.save(&state.layout).map_err(command_error)?;
-        }
-        Err(_) => {
-            install_state
-                .mark(&version_id, launcher_core::install::InstallStatus::Failed)
-                .map_err(command_error)?;
-            install_state.save(&state.layout).map_err(command_error)?;
-        }
-    }
+    // A user cancellation is not a failure: the GUI shows it differently and
+    // the repair install can resume from the files that were already verified.
+    state
+        .update_install_state(|map, _| map.mark(&version_id, install_outcome(&result)))
+        .map_err(command_error)?;
     let mut report = result.map_err(command_error)?;
     if let Some(instance_id) = instance_id {
         let instance = state.instances.load(&instance_id).map_err(command_error)?;
@@ -196,6 +189,20 @@ pub async fn install_version(
         report.instance_id = instance_id;
     }
     Ok(report)
+}
+
+/// Maps the installer result onto the persistent install status. A user
+/// cancellation must stay distinguishable from a real failure so the GUI can
+/// say "cancelled" instead of "failed" and the repair install keeps its
+/// already-verified files.
+fn install_outcome(
+    result: &launcher_core::Result<InstallReport>,
+) -> launcher_core::install::InstallStatus {
+    match result {
+        Ok(_) => launcher_core::install::InstallStatus::Complete,
+        Err(error) if error.is_cancelled() => launcher_core::install::InstallStatus::Cancelled,
+        Err(_) => launcher_core::install::InstallStatus::Failed,
+    }
 }
 
 /// P1-5: request cancellation of an in-flight install. The flag is checked

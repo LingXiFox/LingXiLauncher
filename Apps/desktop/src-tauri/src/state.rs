@@ -4,6 +4,7 @@ use std::sync::{Arc, Mutex};
 
 use launcher_auth::{AuthConfig, MicrosoftAuthService};
 use launcher_core::install::models::{DownloadSourcePolicy, TrustedMirrorConfiguration};
+use launcher_core::install::InstallStateMap;
 use launcher_core::java::JavaManager;
 use launcher_core::launch::GameControl;
 use launcher_core::manifest::ManifestService;
@@ -128,6 +129,10 @@ pub struct AppState {
     pub running: Mutex<Option<RunningGameHandle>>,
     pub auth_cancel: Mutex<Option<tokio::sync::watch::Sender<bool>>>,
     pub installs: Mutex<HashMap<String, InstallTask>>,
+    /// Identifies this launch in the install-state file; see
+    /// [`AppState::load_install_state`].
+    session: String,
+    install_state_lock: Mutex<()>,
 }
 
 impl AppState {
@@ -160,7 +165,36 @@ impl AppState {
             running: Mutex::new(None),
             auth_cancel: Mutex::new(None),
             installs: Mutex::new(HashMap::new()),
+            session: new_session_id(),
+            install_state_lock: Mutex::new(()),
         })
+    }
+
+    /// Loads the persistent install state and settles records that belong to
+    /// another process. A crash, force quit or power loss leaves an
+    /// `installing` record behind; only a later launch can tell it apart from
+    /// a run that is still in flight, and it must not stay "installing"
+    /// forever because the GUI offers repair installs from that status.
+    pub fn load_install_state(&self) -> InstallStateMap {
+        let _lock = self.install_state_lock.lock().expect("install state lock");
+        let mut state = InstallStateMap::load(&self.layout);
+        if state.settle(&self.session) {
+            if let Err(error) = state.save(&self.layout) {
+                eprintln!("failed to persist settled install state: {error}");
+            }
+        }
+        state
+    }
+
+    pub fn update_install_state(
+        &self,
+        update: impl FnOnce(&mut InstallStateMap, &str) -> launcher_core::Result<()>,
+    ) -> launcher_core::Result<()> {
+        let _lock = self.install_state_lock.lock().expect("install state lock");
+        let mut state = InstallStateMap::load(&self.layout);
+        state.settle(&self.session);
+        update(&mut state, &self.session)?;
+        state.save(&self.layout)
     }
 
     pub fn settings_snapshot(&self) -> Settings {
@@ -168,8 +202,9 @@ impl AppState {
     }
 
     pub fn save_settings(&self, settings: &Settings) -> launcher_core::Result<()> {
+        let mut current = self.settings.lock().expect("settings lock");
         write_settings_file(&self.layout, settings)?;
-        *self.settings.lock().expect("settings lock") = settings.clone();
+        *current = settings.clone();
         Ok(())
     }
 }
@@ -274,4 +309,15 @@ fn legacy_macos_settings() -> Option<Settings> {
         }
     }
     Some(settings)
+}
+
+/// Session token for the install-state file: process id plus a monotonic
+/// timestamp is enough to distinguish this launch from any earlier one, and
+/// needs no extra dependency or persisted counter.
+fn new_session_id() -> String {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_nanos())
+        .unwrap_or_default();
+    format!("{}-{nanos}", std::process::id())
 }
