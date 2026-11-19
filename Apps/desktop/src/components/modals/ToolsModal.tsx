@@ -109,7 +109,7 @@ export function ToolsModal({ instanceId, initialTab = "manage" }: ToolsModalProp
   const instance = useInstance(instanceId);
   const [tab, setTab] = useState<ToolTab>(initialTab);
 
-  const [memory, setMemory] = useState(instance?.memoryMiB ? String(instance.memoryMiB) : "");
+  const [memory, setMemory] = useState(instance?.memoryMib ? String(instance.memoryMib) : "");
   const [jvmArgs, setJvmArgs] = useState(instance?.jvmArguments ?? "");
   const [saving, setSaving] = useState(false);
   const [manageError, setManageError] = useState<string | null>(null);
@@ -135,9 +135,9 @@ export function ToolsModal({ instanceId, initialTab = "manage" }: ToolsModalProp
   const [crash, setCrash] = useState<CrashReport | null>(null);
 
   useEffect(() => {
-    setMemory(instance?.memoryMiB ? String(instance.memoryMiB) : "");
+    setMemory(instance?.memoryMib ? String(instance.memoryMib) : "");
     setJvmArgs(instance?.jvmArguments ?? "");
-  }, [instance?.memoryMiB, instance?.jvmArguments]);
+  }, [instance?.memoryMib, instance?.jvmArguments]);
 
   useEffect(() => {
     if (!instance?.launch) return;
@@ -173,7 +173,7 @@ export function ToolsModal({ instanceId, initialTab = "manage" }: ToolsModalProp
     setSaving(true);
     setManageError(null);
     try {
-      await api.updateInstance(instanceId, { memoryMiB: parsed, jvmArguments: jvmArgs });
+      await api.updateInstance(instanceId, { memoryMib: parsed, jvmArguments: jvmArgs });
       await refreshInstances(true);
       toast("success", "实例设置已保存", "启动实例时生效");
     } catch (cause) {

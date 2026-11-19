@@ -358,6 +358,7 @@ impl LaunchPlanBuilder {
         let memory_mib = instance
             .manifest
             .memory_mib
+            .or(context.default_memory_mib)
             .unwrap_or_else(crate::models::instance::InstanceMemory::automatic_mib);
         let memory_arguments = vec![
             format!("-Xms{}M", (memory_mib / 2).max(256).min(memory_mib)),

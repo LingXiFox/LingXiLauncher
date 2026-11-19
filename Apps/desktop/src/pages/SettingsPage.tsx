@@ -82,7 +82,8 @@ function sameSettings(left: LauncherSettings, right: LauncherSettings): boolean 
     (left.javaPath ?? "") === (right.javaPath ?? "") &&
     left.source === right.source &&
     (left.mirrorConfigPath ?? "") === (right.mirrorConfigPath ?? "") &&
-    left.defaultMemoryMiB === right.defaultMemoryMiB &&
+    left.defaultMemoryMib === right.defaultMemoryMib &&
+    left.memoryMode === right.memoryMode &&
     left.appearance === right.appearance &&
     left.language === right.language &&
     left.accent === right.accent &&
@@ -116,7 +117,7 @@ export function SettingsPage() {
   const [browsing, setBrowsing] = useState(false);
   const [picking, setPicking] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [memoryText, setMemoryText] = useState(String(settings.defaultMemoryMiB));
+  const [memoryText, setMemoryText] = useState(String(settings.defaultMemoryMib));
   const [checking, setChecking] = useState(false);
   const [update, setUpdate] = useState<UpdateInfo | null>(null);
   const [updateError, setUpdateError] = useState<string | null>(null);
@@ -125,7 +126,7 @@ export function SettingsPage() {
 
   useEffect(() => {
     setDraft(settings);
-    setMemoryText(String(settings.defaultMemoryMiB));
+    setMemoryText(String(settings.defaultMemoryMib));
   }, [settings]);
 
   useEffect(() => {
@@ -145,8 +146,8 @@ export function SettingsPage() {
   }
 
   function commitMemory(value: number) {
-    const clamped = Math.max(512, Math.min(65536, Math.round(value / 256) * 256));
-    updateDraft({ defaultMemoryMiB: clamped });
+    const clamped = Math.max(256, Math.min(65536, Math.round(value / 256) * 256));
+    updateDraft({ defaultMemoryMib: clamped });
     setMemoryText(String(clamped));
   }
 
@@ -211,9 +212,10 @@ export function SettingsPage() {
   }
 
   async function handleSave() {
-    const parsed = Number(memoryText);
-    if (!Number.isFinite(parsed) || parsed < 512 || parsed > 65536) {
-      setError("默认内存需在 512 MiB 到 65536 MiB 之间。");
+    const fixedMode = draft.memoryMode === "fixed";
+    const parsed = fixedMode ? Number(memoryText) : draft.defaultMemoryMib;
+    if (fixedMode && (!Number.isInteger(parsed) || parsed < 256 || parsed > 65536)) {
+      setError("请输入 256 到 65536 MiB 之间的整数。");
       setTab("game");
       return;
     }
@@ -234,7 +236,8 @@ export function SettingsPage() {
       backgroundImage: draft.backgroundImage ?? "",
       proxyUrl: draft.proxyUrl ?? "",
       gameRoot: draft.gameRoot ?? "",
-      defaultMemoryMiB: parsed,
+      defaultMemoryMib: fixedMode ? parsed : undefined,
+      memoryMode: draft.memoryMode,
       updateChannel: channelChanged ? draft.updateChannel : undefined,
     });
     setSaving(false);
@@ -243,7 +246,7 @@ export function SettingsPage() {
       setUpdate(null);
       setUpdateError(null);
     }
-    setDraft((previous) => ({ ...previous, defaultMemoryMiB: parsed }));
+    setDraft((previous) => ({ ...previous, defaultMemoryMib: parsed, memoryMode: draft.memoryMode }));
     setMemoryText(String(parsed));
     if ((before.gameRoot ?? "") !== (draft.gameRoot ?? "")) {
       toast("info", "Minecraft 目录已更新", "重新启动启动器后生效");
@@ -343,55 +346,90 @@ export function SettingsPage() {
           <div className="settings-layout">
             <div className="settings-column">
               <Card className="settings-card">
-                <SectionHeader title="全局游戏设置" caption="这些值作为新实例的默认值，已有实例可在实例工具中单独覆盖。" />
+                <SectionHeader title="全局游戏设置" caption="内存模式作用于所有实例；实例单独设置的内存优先于这里的全局选择。" />
                 <div className="settings-form">
                   <div className="memory-field">
-                    <div className="memory-field__head">
-                      <div>
-                        <p className="field__label">默认内存分配</p>
-                        <p className="memory-field__value">{formatMemory(Number(memoryText) || 0)}</p>
-                      </div>
-                      <input
-                        className="memory-field__range"
-                        type="range"
-                        min={512}
-                        max={16384}
-                        step={256}
-                        value={Math.min(16384, Math.max(512, Number(memoryText) || 4096))}
-                        onChange={(event) => commitMemory(Number(event.target.value))}
-                        aria-label="默认内存分配"
-                      />
+                    <div className="memory-mode" role="group" aria-label="内存分配模式">
+                      <button
+                        type="button"
+                        className={`memory-mode__option ${draft.memoryMode === "fixed" ? "" : "is-active"}`}
+                        aria-pressed={draft.memoryMode !== "fixed"}
+                        onClick={() => updateDraft({ memoryMode: "auto" })}
+                      >
+                        <span className="memory-mode__title">自动分配</span>
+                        <span className="memory-mode__hint">按物理内存自动计算</span>
+                      </button>
+                      <button
+                        type="button"
+                        className={`memory-mode__option ${draft.memoryMode === "fixed" ? "is-active" : ""}`}
+                        aria-pressed={draft.memoryMode === "fixed"}
+                        onClick={() => updateDraft({ memoryMode: "fixed" })}
+                      >
+                        <span className="memory-mode__title">固定分配</span>
+                        <span className="memory-mode__hint">手动指定堆大小</span>
+                      </button>
                     </div>
-                    <div className="memory-field__row">
-                      <TextInput
-                        label="精确数值（MiB）"
-                        type="number"
-                        min={512}
-                        max={65536}
-                        step={256}
-                        value={memoryText}
-                        onChange={(event) => {
-                          setMemoryText(event.target.value);
-                          const value = Number(event.target.value);
-                          if (Number.isFinite(value) && value >= 512 && value <= 65536) {
-                            setDraft((previous) => ({ ...previous, defaultMemoryMiB: Math.round(value) }));
-                          }
-                        }}
-                        hint="允许 512 – 65536 MiB；留空则在每个实例使用自动值（物理内存的 1/4，限制在 2 – 8 GiB）。"
-                      />
-                      <div className="memory-presets" role="group" aria-label="内存预设">
-                        {memoryPresets.map((value) => (
-                          <button
-                            key={value}
-                            type="button"
-                            className={`memory-preset ${Number(memoryText) === value ? "is-active" : ""}`}
-                            onClick={() => commitMemory(value)}
-                          >
-                            {value >= 1024 ? `${value / 1024} GB` : `${value} MB`}
-                          </button>
-                        ))}
+
+                    {draft.memoryMode === "fixed" ? (
+                      <>
+                        <div className="memory-field__head">
+                          <div>
+                            <p className="field__label">固定内存分配</p>
+                            <p className="memory-field__value">{formatMemory(Number(memoryText) || 0)}</p>
+                          </div>
+                          <input
+                            className="memory-field__range"
+                            type="range"
+                            min={256}
+                            max={65536}
+                            step={256}
+                            value={Math.min(65536, Math.max(256, Number(memoryText) || 2048))}
+                            onChange={(event) => commitMemory(Number(event.target.value))}
+                            aria-label="固定内存分配"
+                          />
+                        </div>
+                        <div className="memory-field__row">
+                          <TextInput
+                            label="精确数值（MiB）"
+                            type="number"
+                            min={256}
+                            max={65536}
+                            step={1}
+                            value={memoryText}
+                            onChange={(event) => {
+                              setMemoryText(event.target.value);
+                              const value = Number(event.target.value);
+                              if (Number.isInteger(value) && value >= 256 && value <= 65536) {
+                                updateDraft({ defaultMemoryMib: value });
+                              }
+                            }}
+                            hint="允许 256 – 65536 MiB。切换为自动分配时，已保存的固定值仍会保留。"
+                          />
+                          <div className="memory-presets" role="group" aria-label="内存预设">
+                            {memoryPresets.map((value) => (
+                              <button
+                                key={value}
+                                type="button"
+                                className={`memory-preset ${Number(memoryText) === value ? "is-active" : ""}`}
+                                onClick={() => commitMemory(value)}
+                              >
+                                {formatMemory(value)}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="memory-field__head">
+                        <div>
+                          <p className="field__label">自动分配结果</p>
+                          <p className="memory-field__value">{formatMemory(draft.automaticMemoryMib || 0)}</p>
+                          <p className="field__message">
+                            取物理内存的 1/4，范围为 2 – 8 GiB。实例单独设置的内存优先。
+                          </p>
+                        </div>
                       </div>
-                    </div>
+                    )}
                   </div>
 
                   <div className="field">

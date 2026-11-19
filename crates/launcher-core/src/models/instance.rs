@@ -352,6 +352,16 @@ impl Instance {
 pub const MIN_MEMORY_MIB: u32 = 256;
 pub const MAX_MEMORY_MIB: u32 = 65536;
 
+/// How the launcher sizes the JVM heap. `Auto` follows the detected physical
+/// memory (see [`InstanceMemory::automatic_mib`]); `Fixed` uses the saved value.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum MemoryMode {
+    #[default]
+    Auto,
+    Fixed,
+}
+
 /// Memory policy shared by the GUI slider and the CLI tuner.
 pub struct InstanceMemory;
 

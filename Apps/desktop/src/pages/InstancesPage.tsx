@@ -220,7 +220,7 @@ export function InstancesPage() {
                         {instance.loaderVersion ? ` · ${instance.loaderVersion}` : ""}
                       </span>
                       <span className="instance-card__meta">
-                        <span><Icon name="memory" size={12} />{formatMemory(instance.memoryMiB)}</span>
+                        <span><Icon name="memory" size={12} />{formatMemory(instance.memoryMib)}</span>
                         <span><Icon name="box" size={12} />{instance.modCount ?? 0} 模组</span>
                         <span><Icon name="clock" size={12} />{formatRelative(instance.lastLaunchedAt)}</span>
                       </span>
@@ -288,7 +288,7 @@ export function InstancesPage() {
 
                   <dl className="kv-list">
                     <div className="kv-row"><dt>加载器</dt><dd>{selected.loader ? `${loaderLabel(selected.loader)} ${selected.loaderVersion ?? ""}` : "原版"}</dd></div>
-                    <div className="kv-row"><dt>内存分配</dt><dd>{formatMemory(selected.memoryMiB)}</dd></div>
+                    <div className="kv-row"><dt>内存分配</dt><dd>{formatMemory(selected.memoryMib)}</dd></div>
                     <div className="kv-row"><dt>上次启动</dt><dd>{formatDate(selected.lastLaunchedAt, true)}</dd></div>
                     <div className="kv-row"><dt>JVM 参数</dt><dd className="instance-detail__jvm">{selected.jvmArguments || "使用默认参数"}</dd></div>
                     <div className="kv-row"><dt>实例路径</dt><dd className="truncate" title={selected.path ?? undefined}>{selected.path || "—"}</dd></div>
@@ -350,7 +350,7 @@ export function InstancesPage() {
           onConfirm={() => void handleDelete()}
           onCancel={() => setDeleteTarget(null)}
         >
-          <p className="caption">{minecraftVersion(deleteTarget)} · {formatMemory(deleteTarget.memoryMiB)}</p>
+          <p className="caption">{minecraftVersion(deleteTarget)} · {formatMemory(deleteTarget.memoryMib)}</p>
           <label className="checkbox-row">
             <input
               type="checkbox"

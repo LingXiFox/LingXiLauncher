@@ -14,6 +14,7 @@ export type Language = "zh-CN" | "en-US";
 export type ProxyMode = "system" | "manual" | "off";
 export type UpdateChannel = "stable" | "rc" | "beta";
 export type DownloadSource = "official" | "mirror" | "auto" | "local-cache-only";
+export type MemoryMode = "auto" | "fixed";
 export type VersionFilter = "release" | "snapshot" | "all";
 export type AccountKind = "microsoft" | "local";
 export type LogKind = "launcher" | "game" | "latest";
@@ -23,7 +24,11 @@ export interface LauncherSettings {
   javaPath?: string | null;
   source: DownloadSource;
   mirrorConfigPath?: string | null;
-  defaultMemoryMiB: number;
+  defaultMemoryMib: number;
+  /** `auto` derives the heap from physical memory; `fixed` uses the value above. */
+  memoryMode: MemoryMode;
+  /** Read-only result of the automatic policy, computed by the backend. */
+  automaticMemoryMib: number;
   appearance: Appearance;
   language: Language;
   accent: AccentColor;
@@ -67,7 +72,7 @@ export interface GameInstance {
   gameVersion?: string | null;
   loader?: string | null;
   loaderVersion?: string | null;
-  memoryMiB?: number | null;
+  memoryMib?: number | null;
   jvmArguments?: string | null;
   lastLaunchedAt?: string | null;
   modCount?: number | null;
@@ -286,7 +291,7 @@ export interface GraphicsSnapshot {
 
 export interface PerformanceSystemProfile {
   cpu?: string | null;
-  memoryMiB?: number | null;
+  memoryMib?: number | null;
   gpu?: string | null;
   os?: string | null;
 }
@@ -435,7 +440,9 @@ function normalizeBootstrap(raw: LauncherBootstrap & { accounts?: unknown }): La
       javaPath: (settings.javaPath as string | null | undefined) ?? null,
       source: (settings.source as DownloadSource) ?? "auto",
       mirrorConfigPath: (settings.mirrorConfigPath as string | null | undefined) ?? null,
-      defaultMemoryMiB: asNumber(settings.defaultMemoryMiB, 4096),
+      defaultMemoryMib: asNumber(settings.defaultMemoryMib, 4096),
+      memoryMode: settings.memoryMode === "fixed" ? "fixed" : "auto",
+      automaticMemoryMib: asNumber(settings.automaticMemoryMib, 0),
       appearance: (settings.appearance as Appearance) ?? "dark",
       language: (settings.language as LauncherSettings["language"]) ?? "zh-CN",
       accent: (settings.accent as LauncherSettings["accent"]) ?? "orange",
@@ -467,7 +474,7 @@ export const api = {
   listInstances: () => call<GameInstance[]>("list_instances"),
   createInstance: (name: string, versionId: string) =>
     call<GameInstance>("create_instance", { name, versionId }),
-  updateInstance: (id: string, patch: { memoryMiB?: number; jvmArguments?: string }) =>
+  updateInstance: (id: string, patch: { memoryMib?: number; jvmArguments?: string }) =>
     call<void>("update_instance", { id, ...patch }),
   updateInstanceLaunch: (id: string, launch: InstanceLaunchSettings) =>
     call<GameInstance>("update_instance_launch", { id, launch }),

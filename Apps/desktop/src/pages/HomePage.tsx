@@ -179,7 +179,7 @@ export function HomePage() {
                       {selected.loader ? ` · ${loaderLabel(selected.loader)} ${selected.loaderVersion ?? ""}` : " · 原版"}
                     </p>
                     <div className="chip-row quick-launch__chips">
-                      <Badge tone="outline">{formatMemory(selected.memoryMiB)}</Badge>
+                      <Badge tone="outline">{formatMemory(selected.memoryMib)}</Badge>
                       <Badge tone="outline">{selected.modCount ?? 0} 个模组</Badge>
                       <Badge tone="outline">{selected.resourcePackCount ?? 0} 个资源包</Badge>
                     </div>
@@ -349,7 +349,7 @@ export function HomePage() {
                       {loaderLabel(instance.loader)}
                     </p>
                     <div className="recent-card__meta">
-                      <span><Icon name="memory" size={12} />{formatMemory(instance.memoryMiB)}</span>
+                      <span><Icon name="memory" size={12} />{formatMemory(instance.memoryMib)}</span>
                       <span><Icon name="clock" size={12} />{formatRelative(instance.lastLaunchedAt)}</span>
                     </div>
                     <button

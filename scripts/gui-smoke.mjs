@@ -34,7 +34,7 @@ const instance = {
   gameVersion: "1.21.11",
   loader: "fabric",
   loaderVersion: "0.20.1",
-  memoryMiB: 4096,
+  memoryMib: 4096,
   jvmArguments: "",
   lastLaunchedAt: "2026-11-10T04:00:00Z",
   modCount: 0,
@@ -52,7 +52,7 @@ const versions = [
 ];
 
 const bootstrap = {
-  version: "0.10.0",
+  version: "0.10.0-beta.4",
   dataRoot: "/tmp/lingxi-smoke/data",
   gameRoot: "/tmp/lingxi-smoke/game",
   platform: "macos",
@@ -61,7 +61,9 @@ const bootstrap = {
     javaPath: null,
     source: "auto",
     mirrorConfigPath: null,
-    defaultMemoryMiB: 4096,
+    defaultMemoryMib: 4096,
+    memoryMode: "auto",
+    automaticMemoryMib: 4096,
     appearance: "dark",
     language: "zh-CN",
     accent: "orange",
@@ -128,7 +130,7 @@ const replies = {
     profile: "fancy",
     summary: "冒烟测试配置",
     recommendations: ["分配 4 GiB 内存", "渲染距离 12 区块"],
-    system: { cpu: "Apple M3 Pro", memoryMiB: 36864, gpu: null, os: "macOS" },
+    system: { cpu: "Apple M3 Pro", memoryMib: 36864, gpu: null, os: "macOS" },
     score: 87,
     benchmarkScore: 87,
     legacy_reports: [],
@@ -146,7 +148,9 @@ const replies = {
     javaPath: null,
     source: "auto",
     mirrorConfigPath: null,
-    defaultMemoryMiB: 4096,
+    defaultMemoryMib: 4096,
+    memoryMode: "auto",
+    automaticMemoryMib: 4096,
     appearance: "dark",
     language: "zh-CN",
     accent: "orange",
@@ -200,6 +204,14 @@ const server = createServer(async (request, response) => {
       }
       if (cmd === "save_settings" && args?.updateChannel) {
         replies.save_settings.updateChannel = args.updateChannel;
+      }
+      if (cmd === "save_settings" && args?.memoryMode) {
+        replies.save_settings.memoryMode = args.memoryMode;
+        if (args.defaultMemoryMib !== undefined) {
+          if (args.memoryMode !== "fixed") throw new Error("auto mode sent a fixed heap");
+          replies.save_settings.defaultMemoryMib = args.defaultMemoryMib;
+        }
+        Object.assign(bootstrap.settings, replies.save_settings);
       }
       if (cmd === "check_update") {
         replies.check_update.release = replies.save_settings.updateChannel === "beta" ? {
@@ -453,7 +465,8 @@ try {
   await waitFor("install wizard closed", "!document.querySelector('[role=dialog]')");
 
   await clickButton("设置");
-  await waitFor("settings page", "document.body.innerText.includes('默认内存分配')");
+  await waitFor("settings page", "document.body.innerText.includes('全局游戏设置')");
+  await waitFor("automatic memory result", "document.querySelector('.memory-field__value')?.textContent.includes('4') && !document.querySelector('.memory-field input')");
   await screenshot("06-settings");
 
   await clickButton("启动器");
@@ -477,7 +490,9 @@ try {
   await screenshot("06c-settings-about");
 
   await clickButton("游戏");
-  await waitFor("game tab", "document.body.innerText.includes('默认内存分配')");
+  await waitFor("game tab", "document.body.innerText.includes('全局游戏设置')");
+  await clickButton("固定分配");
+  await waitFor("fixed controls", "!!document.querySelector('.memory-field input[type=range]') && !!document.querySelector('.memory-field input[type=number]')");
 
   const changed = await evaluate(`(() => {
     const input = document.querySelector('input[type="number"]');
@@ -492,8 +507,22 @@ try {
   if (!changed) throw new Error("memory input not found");
   await delay(150);
   await clickButton("保存设置");
-  await waitFor("memory validation", "document.body.innerText.includes('默认内存需在 512 MiB 到 65536 MiB 之间')");
+  await waitFor("memory validation", "document.body.innerText.includes('请输入 256 到 65536 MiB 之间的整数')");
   await screenshot("07-validation");
+  await evaluate("[...document.querySelectorAll('.memory-preset')].find(button => button.textContent.includes('6')).click()");
+  await waitFor("memory preset", "document.querySelector('.memory-field input[type=number]').value === '6144'");
+  await clickButton("保存设置");
+  await waitFor("fixed memory saved", "document.body.innerText.includes('设置已保存')");
+  if (replies.save_settings.memoryMode !== "fixed" || replies.save_settings.defaultMemoryMib !== 6144) {
+    throw new Error("fixed memory did not reach settings storage");
+  }
+  await clickButton("自动分配");
+  await waitFor("automatic controls hidden", "!document.querySelector('.memory-field input')");
+  await clickButton("保存设置");
+  await waitFor("automatic memory saved", "[...document.querySelectorAll('button')].some(button => button.textContent.trim() === '保存设置' && button.disabled)");
+  if (replies.save_settings.memoryMode !== "auto" || replies.save_settings.defaultMemoryMib !== 6144) {
+    throw new Error("automatic mode did not preserve the saved fixed memory");
+  }
 
   await clickButton("账户管理");
   await waitFor("accounts page", "document.body.innerText.includes('Tester')");

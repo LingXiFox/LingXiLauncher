@@ -39,8 +39,9 @@
 
 .sidebar__brand {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
+  gap: 6px 10px;
   padding: 2px 6px 18px;
   border-bottom: 1px solid var(--border);
 }
@@ -61,29 +62,36 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
-  min-width: 0;
+  flex: 1 1 auto;
+  min-width: max-content;
 }
 
 .sidebar__brand-name {
   font: 800 15px/1 var(--font-sans);
   letter-spacing: 1.8px;
   color: var(--text);
+  white-space: nowrap;
 }
 
 .sidebar__brand-sub {
   font: 600 7.5px/1 var(--font-sans);
   letter-spacing: 2.6px;
   color: var(--text-tertiary);
+  white-space: nowrap;
 }
 
 .sidebar__edition {
   margin-left: auto;
+  flex: none;
+  max-width: 100%;
   padding: 3px 5px;
   border: 1px solid var(--border);
   border-radius: 4px;
   font: 500 7.5px/1 var(--font-mono);
   color: var(--text-tertiary);
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .sidebar__nav {

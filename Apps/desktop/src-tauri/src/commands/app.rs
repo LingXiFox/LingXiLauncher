@@ -8,6 +8,8 @@ use crate::commands::accounts::{collect_account_snapshot, AccountSnapshotView};
 use crate::commands::{AccountView, CommandResult, InstanceView, JavaRuntimeView};
 use crate::state::{AppState, UpdateChannel};
 
+use launcher_core::models::instance::MemoryMode;
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SettingsView {
@@ -15,6 +17,10 @@ pub struct SettingsView {
     pub source: String,
     pub mirror_config_path: Option<String>,
     pub default_memory_mib: u32,
+    pub memory_mode: MemoryMode,
+    /// Read-only result of the automatic policy, so the UI can show what
+    /// "auto" resolves to without duplicating the hardware detection.
+    pub automatic_memory_mib: u32,
     pub appearance: String,
     pub language: String,
     pub accent: String,

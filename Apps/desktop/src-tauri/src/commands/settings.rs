@@ -1,5 +1,5 @@
 use launcher_core::install::models::{CancelFlag, SharedProgress};
-use launcher_core::models::instance::JavaRuntimeRecord;
+use launcher_core::models::instance::{InstanceMemory, JavaRuntimeRecord, MemoryMode};
 use tauri::{AppHandle, State};
 use tauri_plugin_dialog::DialogExt;
 
@@ -20,6 +20,7 @@ pub fn save_settings(
     source: Option<String>,
     mirror_config_path: Option<String>,
     default_memory_mib: Option<u32>,
+    memory_mode: Option<MemoryMode>,
     appearance: Option<String>,
     language: Option<String>,
     accent: Option<String>,
@@ -52,9 +53,10 @@ pub fn save_settings(
         settings.mirror_config_path = Some(path).filter(|value| !value.is_empty());
     }
     if let Some(memory) = default_memory_mib {
-        settings.default_memory_mib =
-            launcher_core::models::instance::InstanceMemory::validate(memory)
-                .map_err(command_error)?;
+        settings.default_memory_mib = InstanceMemory::validate(memory).map_err(command_error)?;
+    }
+    if let Some(mode) = memory_mode {
+        settings.memory_mode = mode;
     }
     if let Some(appearance) = appearance {
         settings.appearance = match appearance.as_str() {
@@ -156,6 +158,8 @@ impl From<&Settings> for SettingsView {
             source: settings.source.clone(),
             mirror_config_path: settings.mirror_config_path.clone(),
             default_memory_mib: settings.default_memory_mib,
+            memory_mode: settings.memory_mode,
+            automatic_memory_mib: InstanceMemory::automatic_mib(),
             appearance: settings.appearance.clone(),
             language: settings.language.clone(),
             accent: settings.accent.clone(),

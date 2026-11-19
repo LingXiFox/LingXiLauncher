@@ -1,4 +1,5 @@
 import { useEffect, useRef, type ReactNode } from "react";
+import { Icon } from "./Icons";
 
 export interface TerminalLine {
   text: string;
@@ -51,10 +52,8 @@ export function Terminal({
         <header className="terminal__header">
           <div className="terminal__heading">
             {showChrome ? (
-              <span className="terminal__dots" aria-hidden="true">
-                <i />
-                <i />
-                <i />
+              <span className="terminal__icon" aria-hidden="true">
+                <Icon name="terminal" size={14} />
               </span>
             ) : null}
             <div className="terminal__title-group">

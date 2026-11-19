@@ -68,6 +68,9 @@ pub struct LaunchContext {
     pub platform: PlatformContext,
     pub identity: LaunchIdentity,
     pub additional_jvm_arguments: Vec<String>,
+    /// Default heap for instances without an override; `None` means the
+    /// launcher sizes it from the detected physical memory.
+    pub default_memory_mib: Option<u32>,
     pub features: BTreeMap<String, bool>,
     pub quick_play_singleplayer: Option<String>,
     /// Size of the display the launcher runs on, used to size a maximised game window.
@@ -91,6 +94,7 @@ impl LaunchContext {
             platform,
             identity,
             additional_jvm_arguments: Vec::new(),
+            default_memory_mib: None,
             features: BTreeMap::new(),
             quick_play_singleplayer: None,
             display_size: None,

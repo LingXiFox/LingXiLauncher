@@ -332,7 +332,7 @@ impl Default for DownloadConfiguration {
             max_retries: 3,
             retry_delay_ms: 500,
             global_concurrency: 24,
-            per_host_concurrency: 8,
+            per_host_concurrency: 16,
             segments: 4,
             segment_threshold_bytes: 4 * 1024 * 1024,
             adaptive_concurrency: true,

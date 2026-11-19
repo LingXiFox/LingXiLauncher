@@ -261,6 +261,9 @@ async fn launch_context(
     );
     context.launcher_name = launcher_core::models::launch::LAUNCHER_NAME.into();
     context.launcher_version = launcher_core::models::launch::LAUNCHER_VERSION.into();
+    // Global default memory only fills in when the instance has no override;
+    // `MemoryMode::Auto` keeps the builder on the hardware-derived value.
+    context.default_memory_mib = state.settings_snapshot().resolved_memory_mib();
     context.display_size = app.primary_monitor().ok().flatten().map(|monitor| {
         let size = monitor.size();
         let scale = monitor.scale_factor();

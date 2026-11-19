@@ -1,10 +1,10 @@
-use std::io;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use crate::error::{Error, Result};
 
-use super::super::hashing::{sha1_file, verify_file};
+use super::super::hashing::{sha1_bytes, sha1_file, verify_file};
 
 /// Content addressed cache shared by every version and instance.
 ///
@@ -38,6 +38,22 @@ fn publish(
     destination: &Path,
     verify: impl FnOnce(&Path) -> Result<bool>,
 ) -> Result<bool> {
+    publish_with(
+        destination,
+        |output| {
+            io::copy(&mut std::fs::File::open(source)?, output)?;
+            output.sync_data()?;
+            Ok(())
+        },
+        verify,
+    )
+}
+
+fn publish_with(
+    destination: &Path,
+    write: impl FnOnce(&mut std::fs::File) -> io::Result<()>,
+    verify: impl FnOnce(&Path) -> Result<bool>,
+) -> Result<bool> {
     let parent = destination
         .parent()
         .filter(|path| !path.as_os_str().is_empty())
@@ -46,8 +62,7 @@ fn publish(
     let temp = parent.join(format!(".lingxi-cache-{}.part", uuid::Uuid::new_v4()));
     let mut output = std::fs::File::create_new(&temp)?;
     let result = (|| {
-        io::copy(&mut std::fs::File::open(source)?, &mut output)?;
-        output.sync_data()?;
+        write(&mut output)?;
         drop(output);
         if !verify(&temp)? {
             return Ok(false);
@@ -104,6 +119,16 @@ impl ContentCache {
             ));
         }
         Ok(destination)
+    }
+
+    /// The buffer itself was SHA-checked; never copy from a mutable game file.
+    pub(super) fn store_verified_bytes(&self, sha1: &str, bytes: &[u8]) -> Result<()> {
+        let destination = self
+            .object_path(sha1)
+            .ok_or_else(|| Error::InvalidMetadata("invalid cache SHA-1".into()))?;
+        let _publication = publication(sha1);
+        publish_with(&destination, |output| output.write_all(bytes), |_| Ok(true))?;
+        Ok(())
     }
 
     /// Repairs the cache entry for `sha1` from a verified file on disk.
@@ -175,5 +200,26 @@ impl ContentCache {
         publish(&object, destination, |temp| {
             verify_file(temp, Some(sha1), size)
         })
+    }
+
+    pub(super) fn materialize_small(
+        &self,
+        sha1: &str,
+        size: u64,
+        destination: &Path,
+    ) -> Result<bool> {
+        use std::io::Read;
+
+        let Some(object) = self.object_path(sha1) else {
+            return Ok(false);
+        };
+        let mut bytes = Vec::new();
+        std::fs::File::open(object)?
+            .take(size + 1)
+            .read_to_end(&mut bytes)?;
+        if bytes.len() as u64 != size || !sha1_bytes(&bytes).eq_ignore_ascii_case(sha1) {
+            return Ok(false);
+        }
+        publish_with(destination, |output| output.write_all(&bytes), |_| Ok(true))
     }
 }

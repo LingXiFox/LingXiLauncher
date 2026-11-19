@@ -197,7 +197,8 @@ fn check_memory(
     let memory = instance
         .manifest
         .memory_mib
-        .unwrap_or(settings.default_memory_mib);
+        .or(settings.resolved_memory_mib())
+        .unwrap_or_else(launcher_core::models::instance::InstanceMemory::automatic_mib);
     let profile = SystemProfile::detect(&state.layout.data_root);
     if memory < 512 {
         return fail(
@@ -350,7 +351,8 @@ pub fn diagnostic_bundle(state: State<'_, AppState>, instance_id: String) -> Com
     let memory = instance
         .manifest
         .memory_mib
-        .unwrap_or(settings.default_memory_mib);
+        .or(settings.resolved_memory_mib())
+        .unwrap_or_else(launcher_core::models::instance::InstanceMemory::automatic_mib);
     let checks = vec![
         check_java(&state, &instance),
         check_game_files(&state, &instance),

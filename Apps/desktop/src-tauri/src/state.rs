@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::fs::{File, OpenOptions};
+use std::fs::File;
 use std::io;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -10,7 +10,7 @@ use launcher_core::install::InstallStateMap;
 use launcher_core::java::JavaManager;
 use launcher_core::launch::GameControl;
 use launcher_core::manifest::ManifestService;
-use launcher_core::models::instance::InstanceRepository;
+use launcher_core::models::instance::{InstanceRepository, MemoryMode};
 use launcher_core::{GameDataLayout, PlatformContext, Runtime};
 use serde::{Deserialize, Serialize};
 
@@ -29,6 +29,7 @@ pub struct Settings {
     pub source: String,
     pub mirror_config_path: Option<String>,
     pub default_memory_mib: u32,
+    pub memory_mode: MemoryMode,
     pub appearance: String,
     pub language: String,
     pub accent: String,
@@ -48,6 +49,7 @@ impl Default for Settings {
             source: "auto".to_string(),
             mirror_config_path: None,
             default_memory_mib: 2048,
+            memory_mode: MemoryMode::Auto,
             appearance: "dark".to_string(),
             language: "zh-CN".to_string(),
             accent: "orange".to_string(),
@@ -86,6 +88,16 @@ impl Settings {
         match self.game_root.as_ref().map(PathBuf::from) {
             Some(path) if path.is_dir() => path,
             _ => fallback,
+        }
+    }
+
+    /// Heap the launcher uses for instances without their own override.
+    /// `None` means "size it from the detected hardware", which keeps the
+    /// launch builder on [`InstanceMemory::automatic_mib`].
+    pub fn resolved_memory_mib(&self) -> Option<u32> {
+        match self.memory_mode {
+            MemoryMode::Auto => None,
+            MemoryMode::Fixed => Some(self.default_memory_mib),
         }
     }
 }
@@ -230,7 +242,7 @@ impl InstanceLock {
 
 #[cfg(unix)]
 fn open_lock_file(path: &std::path::Path) -> io::Result<File> {
-    OpenOptions::new()
+    std::fs::OpenOptions::new()
         .create(true)
         .truncate(false)
         .read(true)
@@ -445,7 +457,9 @@ fn legacy_macos_settings() -> Option<Settings> {
         }
     }
     if let Some(memory) = memory.filter(|value| *value > 0) {
+        // The legacy launcher had no auto mode: a stored number was the pin.
         settings.default_memory_mib = memory;
+        settings.memory_mode = MemoryMode::Fixed;
     }
     if let Some(appearance) = appearance {
         if matches!(appearance.as_str(), "dark" | "light" | "system") {
@@ -487,5 +501,35 @@ mod instance_lock_tests {
         let second = InstanceLock::acquire(&directory).expect("lock after drop");
         drop(second);
         std::fs::remove_dir_all(directory).expect("remove test directory");
+    }
+}
+
+#[cfg(test)]
+mod memory_mode_tests {
+    use super::Settings;
+    use launcher_core::models::instance::MemoryMode;
+
+    #[test]
+    fn legacy_settings_without_mode_default_to_auto() {
+        let settings: Settings =
+            serde_json::from_str(r#"{"defaultMemoryMib":6144}"#).expect("legacy settings");
+        assert_eq!(settings.memory_mode, MemoryMode::Auto);
+        assert_eq!(settings.default_memory_mib, 6144);
+        assert_eq!(settings.resolved_memory_mib(), None);
+    }
+
+    #[test]
+    fn fixed_mode_round_trips_and_pins_value() {
+        let settings: Settings = serde_json::from_str(
+            r#"{"memoryMode":"fixed","defaultMemoryMib":8192}"#,
+        )
+        .expect("fixed settings");
+        assert_eq!(settings.memory_mode, MemoryMode::Fixed);
+        assert_eq!(settings.resolved_memory_mib(), Some(8192));
+
+        let json = serde_json::to_string(&settings).expect("serialize settings");
+        assert!(json.contains("\"memoryMode\":\"fixed\""), "{json}");
+        // The frontend reads this exact key; serde camelCases `_mib` to `Mib`.
+        assert!(json.contains("\"defaultMemoryMib\":8192"), "{json}");
     }
 }

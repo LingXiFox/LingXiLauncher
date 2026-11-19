@@ -631,6 +631,54 @@ async fn failed_truncated_stream_resumes_in_a_fresh_downloader() {
 }
 
 #[tokio::test]
+async fn interrupted_small_asset_resumes_and_repairs_a_corrupted_cache_entry() {
+    let body = payload(64 * 1024);
+    let directory = temp_dir("small-asset-resume");
+    let destination = directory.join("asset");
+    let partial = directory.join("asset.part");
+    let cache_root = directory.join("cache");
+    let cache = ContentCache::new(cache_root.clone());
+    let cache_object = cache.object_path(&sha1_bytes(&body)).unwrap();
+    std::fs::create_dir_all(cache_object.parent().unwrap()).unwrap();
+    std::fs::write(&cache_object, vec![0; body.len()]).unwrap();
+
+    let mut configuration = configuration(1);
+    configuration.max_retries = 1;
+    configuration.cache_directory = Some(cache_root);
+    let download = |url, path| {
+        let downloader =
+            Downloader::new(DownloadSourcePolicy::Official, None, configuration.clone()).unwrap();
+        let mut asset = task(path, url, &body);
+        asset.kind = MissingDependencyKind::Asset;
+        async move {
+            downloader.download(vec![asset], progress(), CancelFlag::new()).await.unwrap()
+        }
+    };
+
+    let (url, _) = serve_with(body.clone(), true, |_, _, _| Behavior::Truncated);
+    assert!(!download(url, destination.clone()).await.is_success());
+    assert!(!destination.exists());
+    let offset = std::fs::metadata(&partial).unwrap().len();
+    assert!(offset > 0 && offset < body.len() as u64);
+
+    let (url, log) = serve(body.clone(), true);
+    let summary = download(url.clone(), destination.clone()).await;
+    assert!(summary.is_success());
+    assert_eq!(std::fs::read(&destination).unwrap(), body);
+    assert_eq!(std::fs::read(cache_object).unwrap(), body);
+    assert!(!partial.exists());
+    assert_eq!(log.ranges(), vec![Some(format!("bytes={offset}-"))]);
+
+    std::fs::write(destination, b"modified").unwrap();
+    let second = directory.join("second");
+    let summary = download(url, second.clone()).await;
+    assert_eq!(summary.cache_hits, 1);
+    assert_eq!(std::fs::read(second).unwrap(), body);
+    assert_eq!(log.ranges().len(), 1);
+    std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[tokio::test]
 async fn cancellation_while_waiting_for_http_headers_is_prompt() {
     let body = payload(1024 * 1024);
     let (url, log) = serve_with(body.clone(), true, |_, _, _| {

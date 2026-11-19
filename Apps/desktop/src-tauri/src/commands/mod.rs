@@ -288,6 +288,15 @@ impl AccountView {
 pub(crate) struct TauriProgress {
     app: AppHandle,
     task_id: String,
+    files: std::sync::Mutex<FileProgress>,
+}
+
+#[derive(Default, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FileProgress {
+    finished: usize,
+    current_file: Option<String>,
+    message: Option<String>,
 }
 
 impl TauriProgress {
@@ -297,12 +306,41 @@ impl TauriProgress {
         Arc::new(Self {
             app,
             task_id: task_id.into(),
+            files: Default::default(),
         })
+    }
+
+    fn flush_files(&self, files: &mut FileProgress) {
+        if files.finished == 0 && files.current_file.is_none() {
+            return;
+        }
+        let _ = self.app.emit(
+            "install-progress",
+            serde_json::json!({
+                "kind": "files",
+                "taskId": self.task_id,
+                "files": std::mem::take(files),
+            }),
+        );
     }
 }
 
 impl ProgressSink for TauriProgress {
     fn emit(&self, event: InstallProgressEvent) {
+        let mut files = self.files.lock().expect("file progress");
+        match event {
+            InstallProgressEvent::FileStarted { path, .. } => {
+                files.current_file = Some(path.clone());
+                files.message = Some(path);
+                return;
+            }
+            InstallProgressEvent::FileFinished { path, .. } => {
+                files.finished += 1;
+                files.message = Some(path);
+                return;
+            }
+            _ => self.flush_files(&mut files),
+        }
         let mut payload = match serde_json::to_value(&event) {
             Ok(value) => value,
             Err(_) => return,
@@ -314,5 +352,12 @@ impl ProgressSink for TauriProgress {
             );
         }
         let _ = self.app.emit("install-progress", &payload);
+    }
+}
+
+impl Drop for TauriProgress {
+    fn drop(&mut self) {
+        let mut files = std::mem::take(self.files.get_mut().expect("file progress"));
+        self.flush_files(&mut files);
     }
 }

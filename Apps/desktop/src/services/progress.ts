@@ -28,6 +28,7 @@ export interface InstallEvent {
   activeFiles?: number;
   attempt?: number;
   maxAttempts?: number;
+  files?: { finished?: number; currentFile?: string | null; message?: string | null };
 }
 
 function asNumber(value: unknown, fallback = 0): number {
@@ -93,6 +94,13 @@ export function applyInstallEvent(
         ...base,
         completedFiles: base.completedFiles + 1,
         message: event.path ?? base.message,
+      };
+    case "files":
+      return {
+        ...base,
+        completedFiles: base.completedFiles + asNumber(event.files?.finished),
+        currentFile: event.files?.currentFile ?? base.currentFile,
+        message: event.files?.message ?? base.message,
       };
     case "fileFailed":
       return {

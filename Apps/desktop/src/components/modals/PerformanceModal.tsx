@@ -122,7 +122,7 @@ export function PerformanceModal({ instanceId }: PerformanceModalProps) {
             </div>
             <div className="performance-system__item">
               <Icon name="memory" size={16} />
-              <div><span>系统内存</span><strong>{system?.memoryMiB ? formatBytes(system.memoryMiB * 1024 * 1024) : "未检测"}</strong></div>
+              <div><span>系统内存</span><strong>{system?.memoryMib ? formatBytes(system.memoryMib * 1024 * 1024) : "未检测"}</strong></div>
             </div>
             <div className="performance-system__item">
               <Icon name="monitor" size={16} />

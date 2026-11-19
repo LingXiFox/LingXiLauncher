@@ -58,7 +58,9 @@ const DEFAULT_SETTINGS: LauncherSettings = {
   javaPath: null,
   source: "auto",
   mirrorConfigPath: null,
-  defaultMemoryMiB: 4096,
+  defaultMemoryMib: 4096,
+  memoryMode: "auto",
+  automaticMemoryMib: 4096,
   appearance: "dark",
   language: "zh-CN",
   accent: "orange",
@@ -122,7 +124,7 @@ export interface AppStore {
   refreshVersions: (filter?: VersionFilter, silent?: boolean) => Promise<void>;
   refreshGameStatus: () => Promise<void>;
   createInstance: (name: string, versionId: string) => Promise<GameInstance | null>;
-  updateInstance: (id: string, patch: { memoryMiB?: number; jvmArguments?: string }) => Promise<boolean>;
+  updateInstance: (id: string, patch: { memoryMib?: number; jvmArguments?: string }) => Promise<boolean>;
   deleteInstance: (id: string, keepSaves?: boolean) => Promise<boolean>;
   copyInstance: (id: string) => Promise<GameInstance | null>;
   launchInstance: (id: string) => Promise<boolean>;
@@ -499,7 +501,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
 
   const updateInstance = useCallback(
-    async (id: string, patch: { memoryMiB?: number; jvmArguments?: string }) => {
+    async (id: string, patch: { memoryMib?: number; jvmArguments?: string }) => {
       try {
         await api.updateInstance(id, patch);
         await refreshInstances(true);
