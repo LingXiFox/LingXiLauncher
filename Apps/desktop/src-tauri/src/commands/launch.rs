@@ -280,28 +280,32 @@ fn java_executable(
     instance: &Instance,
     version: &launcher_core::version::ResolvedVersion,
 ) -> CommandResult<std::path::PathBuf> {
-    if let Some(runtime) = instance.manifest.java_runtime.as_ref() {
-        let path = std::path::PathBuf::from(&runtime.executable);
-        if path.is_file() {
-            return Ok(path);
-        }
-    }
-    if let Some(path) = state
-        .settings_snapshot()
-        .java_path
-        .filter(|path| !path.is_empty())
+    let minimum = version.java_requirement.major_version;
+    let settings = state.settings_snapshot();
+    let instance_java = instance.manifest.java_runtime.as_ref();
+    for path in [
+        instance_java.map(|runtime| runtime.executable.as_str()),
+        settings.java_path.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
     {
-        let path = std::path::PathBuf::from(path);
-        if path.is_file() {
-            return Ok(path);
+        let path = std::path::Path::new(path);
+        if !path.is_file() {
+            continue;
+        }
+        if let Ok(runtime) = state.java.inspect(path) {
+            if minimum.is_none_or(|major| runtime.major_version >= major) {
+                return Ok(runtime.executable);
+            }
         }
     }
-    let required = version.java_requirement.major_version.unwrap_or(21).max(8);
+    let required = minimum.unwrap_or(21).max(8);
     if let Some(runtime) = state.java.find(required) {
         return Ok(runtime.executable);
     }
     Err(format!(
-        "未找到 Java {required} 运行时，请在设置中指定 Java 路径或安装托管运行时"
+        "未找到 Java {required} 或更高版本的可用运行时，请在设置中指定 Java 路径或安装托管运行时"
     ))
 }
 

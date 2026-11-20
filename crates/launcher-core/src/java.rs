@@ -113,15 +113,9 @@ impl JavaManager {
     }
 
     /// Best installed runtime for the requested major version, preferring the
-    /// exact version and the native architecture.
+    /// exact version, then native architecture and the closest newer version.
     pub fn find(&self, major: u32) -> Option<JavaRuntime> {
-        let runtimes = self.discover();
-        runtimes
-            .iter()
-            .find(|r| r.major_version == major && r.architecture == Architecture::current())
-            .or_else(|| runtimes.iter().find(|r| r.major_version == major))
-            .or_else(|| runtimes.iter().find(|r| r.major_version > major))
-            .cloned()
+        best_runtime(self.discover(), major)
     }
 
     pub fn inspect(&self, executable: &Path) -> Result<JavaRuntime> {
@@ -304,6 +298,20 @@ fn collect_java_binaries(root: &Path, depth: usize, found: &mut Vec<PathBuf>) {
     }
 }
 
+fn best_runtime(runtimes: Vec<JavaRuntime>, major: u32) -> Option<JavaRuntime> {
+    let native = Architecture::current();
+    runtimes
+        .into_iter()
+        .filter(|runtime| runtime.major_version >= major)
+        .min_by_key(|runtime| {
+            (
+                runtime.major_version != major,
+                runtime.architecture != native,
+                runtime.major_version,
+            )
+        })
+}
+
 fn inspect_runtime(executable: &Path) -> Result<JavaRuntime> {
     let output = Command::new(executable)
         .args(["-XshowSettings:properties", "-version"])
@@ -311,6 +319,13 @@ fn inspect_runtime(executable: &Path) -> Result<JavaRuntime> {
         .map_err(|e| {
             Error::JavaUnusable(format!("cannot execute {}: {e}", executable.display()))
         })?;
+    if !output.status.success() {
+        return Err(Error::JavaUnusable(format!(
+            "{} failed to report Java settings ({})",
+            executable.display(),
+            output.status
+        )));
+    }
     let text = format!(
         "{}\n{}",
         String::from_utf8_lossy(&output.stdout),
@@ -497,6 +512,29 @@ pub fn verify_managed_runtime(root: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn runtime_selection_falls_back_to_the_closest_compatible_java() {
+        let runtime = |major_version: u32| JavaRuntime {
+            executable: PathBuf::from("java"),
+            version_string: major_version.to_string(),
+            major_version,
+            architecture: Architecture::current(),
+            vendor: "Test".into(),
+            is_64_bit: true,
+            is_managed: false,
+        };
+        let runtimes = vec![runtime(27), runtime(26), runtime(17)];
+        assert_eq!(
+            best_runtime(runtimes.clone(), 25).unwrap().major_version,
+            26
+        );
+        assert_eq!(
+            best_runtime(runtimes.clone(), 17).unwrap().major_version,
+            17
+        );
+        assert!(best_runtime(runtimes, 28).is_none());
+    }
 
     #[test]
     fn version_strings_map_to_major_versions() {
