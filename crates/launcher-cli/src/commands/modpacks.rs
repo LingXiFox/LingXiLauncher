@@ -47,11 +47,11 @@ pub async fn mrpack(context: &Context, action: MrpackAction) -> Result<()> {
             let display_name = name.unwrap_or_else(|| summary.name.clone());
             let cancel = context.cancel();
             let instance = modpack::install(
-                &file,
-                &display_name,
-                &context.layout,
+                file.clone(),
+                display_name,
+                context.layout.clone(),
                 Some(context.progress()),
-                Some(&cancel),
+                Some(cancel),
             )
             .await?;
             let manifest = modpack::read_manifest(&instance)?;

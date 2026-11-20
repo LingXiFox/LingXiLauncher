@@ -13,7 +13,7 @@
 use std::collections::{BTreeMap, HashSet};
 use std::fs::File;
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -303,19 +303,19 @@ pub fn inspect(archive: &Path) -> Result<MrpackSummary> {
 /// Loader details are available through [`read_manifest`] (`dependencies` and
 /// `loader`); actual loader installation belongs to another module.
 pub async fn install(
-    archive: &Path,
-    display_name: &str,
-    layout: &GameDataLayout,
+    archive: PathBuf,
+    display_name: String,
+    layout: GameDataLayout,
     progress: Option<SharedProgress>,
-    cancel: Option<&CancelFlag>,
+    cancel: Option<CancelFlag>,
 ) -> Result<Instance> {
-    check_cancel(cancel)?;
-    let index = read_index(archive)?;
+    check_cancel(cancel.as_ref())?;
+    let index = read_index(&archive)?;
     let game_version = minecraft_version(&index)?.to_string();
     PathSafety::validate_component(&game_version)?;
 
-    let display_name = pack_display_name(&index, archive, display_name);
-    let repository = InstanceRepository::new(layout.clone());
+    let display_name = pack_display_name(&index, &archive, &display_name);
+    let repository = InstanceRepository::new(layout);
     let instance = repository.create_with_generated_id(&display_name)?;
     ensure_dir(&instance.game_directory)?;
 
@@ -328,7 +328,14 @@ pub async fn install(
     );
 
     let client = ModrinthClient::new()?;
-    let files = download_index_files(&instance, &index, &client, progress.as_ref(), cancel).await?;
+    let files = download_index_files(
+        &instance,
+        &index,
+        &client,
+        progress.as_ref(),
+        cancel.as_ref(),
+    )
+    .await?;
 
     emit(
         progress.as_ref(),
@@ -337,7 +344,7 @@ pub async fn install(
             message: "正在应用整合包覆盖文件".into(),
         },
     );
-    apply_overrides(archive, &instance.game_directory, cancel)?;
+    apply_overrides(&archive, &instance.game_directory, cancel.as_ref())?;
 
     let manifest = ModpackManifest {
         name: if index.name.trim().is_empty() {

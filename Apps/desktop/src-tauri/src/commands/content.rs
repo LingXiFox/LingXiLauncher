@@ -297,9 +297,15 @@ pub async fn import_mrpack(
     let modpack_task = format!("modpack:{}", archive.display());
     let progress: SharedProgress = TauriProgress::shared(app.clone(), modpack_task.clone());
     let label = name.unwrap_or_default();
-    let mut instance = modpack::install(archive, &label, &state.layout, Some(progress), None)
-        .await
-        .map_err(command_error)?;
+    let mut instance = modpack::install(
+        archive.to_path_buf(),
+        label,
+        state.layout.clone(),
+        Some(progress),
+        None,
+    )
+    .await
+    .map_err(command_error)?;
     let manifest = modpack::read_manifest(&instance).map_err(command_error)?;
     let game_version = manifest
         .dependencies
