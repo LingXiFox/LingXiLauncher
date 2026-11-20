@@ -503,6 +503,21 @@ impl InstanceRepository {
     }
 
     pub fn create_with_generated_id(&self, display_name: &str) -> Result<Instance> {
+        self.create_named(display_name, None)
+    }
+
+    pub fn ensure_version_instance(&self, version_id: &str) -> Result<Instance> {
+        if let Some(instance) = self
+            .list()?
+            .into_iter()
+            .find(|instance| instance.manifest.version_id.as_deref() == Some(version_id))
+        {
+            return Ok(instance);
+        }
+        self.create_named(&format!("Minecraft {version_id}"), Some(version_id))
+    }
+
+    fn create_named(&self, display_name: &str, version_id: Option<&str>) -> Result<Instance> {
         let base: String = display_name
             .chars()
             .map(|c| {
@@ -524,7 +539,7 @@ impl InstanceRepository {
         } else {
             base
         };
-        self.create(&id, display_name, None)
+        self.create(&id, display_name, version_id)
     }
 
     pub fn load(&self, id: &str) -> Result<Instance> {
@@ -672,6 +687,25 @@ mod tests {
         assert!(text.contains("gameVersion"));
         let back: InstanceManifest = serde_json::from_str(&text).unwrap();
         assert_eq!(back.game_version.as_deref(), Some("1.21.11"));
+    }
+
+    #[test]
+    fn completed_version_reuses_its_instance() {
+        let root = std::env::temp_dir().join(format!("lingxi-instance-{}", uuid::Uuid::new_v4()));
+        let repository = InstanceRepository::new(GameDataLayout::new(root.join("game"), &root));
+        repository
+            .create("minecraft-26-3", "Other version", Some("1.21.11"))
+            .unwrap();
+
+        let instance = repository.ensure_version_instance("26.3").unwrap();
+        assert_eq!(instance.manifest.version_id.as_deref(), Some("26.3"));
+        assert_eq!(instance.manifest.display_name, "Minecraft 26.3");
+        assert_eq!(
+            repository.ensure_version_instance("26.3").unwrap().id(),
+            instance.id()
+        );
+        assert_eq!(repository.list().unwrap().len(), 2);
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

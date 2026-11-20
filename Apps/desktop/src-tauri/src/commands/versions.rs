@@ -180,14 +180,15 @@ pub async fn install_version(
         .update_install_state(|map, _| map.mark(&version_id, install_outcome(&result)))
         .map_err(command_error)?;
     let mut report = result.map_err(command_error)?;
-    if let Some(instance_id) = instance_id {
-        let instance = state.instances.load(&instance_id).map_err(command_error)?;
-        state
-            .instances
-            .assign_version(&instance, &version_id)
-            .map_err(command_error)?;
-        report.instance_id = instance_id;
+    let instance = match instance_id {
+        Some(id) => {
+            let instance = state.instances.load(&id).map_err(command_error)?;
+            state.instances.assign_version(&instance, &version_id)
+        }
+        None => state.instances.ensure_version_instance(&version_id),
     }
+    .map_err(command_error)?;
+    report.instance_id = instance.id().to_string();
     Ok(report)
 }
 

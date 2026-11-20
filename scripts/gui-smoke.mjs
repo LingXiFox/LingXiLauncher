@@ -46,6 +46,7 @@ const instance = {
 
 const versions = [
   { id: "1.21.11", type: "release", releaseTime: "2026-10-01T00:00:00Z", installed: true },
+  { id: "1.21.8", type: "release", releaseTime: "2026-07-01T00:00:00Z", installed: true },
   { id: "1.21.10", type: "release", releaseTime: "2026-09-01T00:00:00Z", installed: false, installStatus: "interrupted" },
   { id: "1.22-snapshot-3", type: "snapshot", releaseTime: "2026-10-20T00:00:00Z", installed: false },
   { id: "1.21.9", type: "release", releaseTime: "2026-08-01T00:00:00Z", installed: false, installStatus: "cancelled" },
@@ -198,6 +199,14 @@ const server = createServer(async (request, response) => {
   if (request.url === "/__ipc" && request.method === "POST") {
     try {
       const { cmd, args } = JSON.parse(await readBody(request));
+      if (cmd === "create_instance") {
+        if (args.name !== "Minecraft 1.21.8" || args.versionId !== "1.21.8") {
+          throw new Error("unexpected instance creation request");
+        }
+        const created = { ...instance, id: "minecraft-1-21-8", name: args.name, versionId: args.versionId };
+        replies.list_instances.push(created);
+        replies.create_instance = created;
+      }
       if (cmd === "save_settings" && failFirstSettingsSave) {
         failFirstSettingsSave = false;
         throw new Error("simulated settings write failure");
@@ -433,9 +442,15 @@ try {
   );
   await waitFor("repair action", "[...document.querySelectorAll('button')].some((button) => button.textContent.trim() === '修复安装')");
   await screenshot("02b-downloads-states");
+  await clickButton("创建实例");
+  await waitFor("installed version linked to instance", `
+    [...document.querySelectorAll('.version-row')].some((row) =>
+      row.textContent.includes('1.21.8') && row.textContent.includes('已有实例'))
+  `);
 
   await clickButton("游戏实例");
   await waitFor("instances page again", "document.body.innerText.includes('冒烟实例')");
+  await waitFor("created instance listed", "document.body.innerText.includes('Minecraft 1.21.8')");
 
   const opened = await evaluate(`(() => {
     const node = document.querySelector(".instance-card__main");

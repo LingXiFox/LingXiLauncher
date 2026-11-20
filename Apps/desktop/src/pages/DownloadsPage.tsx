@@ -48,6 +48,8 @@ export function DownloadsPage() {
   const {
     versions,
     versionsLoading,
+    instances,
+    createInstance,
     refreshVersions,
     refreshInstances,
     installedProgress,
@@ -59,6 +61,8 @@ export function DownloadsPage() {
   const [query, setQuery] = useState("");
   const [refreshing, setRefreshing] = useState(false);
   const [installingId, setInstallingId] = useState<string | null>(null);
+  const [creatingId, setCreatingId] = useState<string | null>(null);
+  const instanceVersions = useMemo(() => new Set(instances.map((instance) => instance.versionId)), [instances]);
 
   useEffect(() => {
     if (versions.length === 0) void refreshVersions("all", true);
@@ -101,7 +105,7 @@ export function DownloadsPage() {
     try {
       await api.installVersion(version.id);
       resetInstallProgress();
-      toast("success", `Minecraft ${version.id} 已安装`);
+      toast("success", `Minecraft ${version.id} 已安装`, "可在「游戏实例」中找到此版本。");
       await Promise.all([refreshVersions("all", true), refreshInstances(true)]);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -118,6 +122,15 @@ export function DownloadsPage() {
       await refreshVersions("all", true);
     } finally {
       setInstallingId(null);
+    }
+  }
+
+  async function handleCreateInstance(versionId: string) {
+    setCreatingId(versionId);
+    try {
+      await createInstance(`Minecraft ${versionId}`, versionId);
+    } finally {
+      setCreatingId(null);
     }
   }
 
@@ -152,7 +165,7 @@ export function DownloadsPage() {
       <PageHeader
         eyebrow="Downloads / 版本仓库"
         title="版本下载"
-        subtitle="浏览 Mojang 版本清单，安装原版游戏或为实例准备新的版本。安装进度会实时显示。"
+        subtitle="安装原版游戏会为该版本准备一个游戏实例。已下载的版本也可以直接创建实例。"
         actions={
           <>
             <Button
@@ -319,9 +332,18 @@ export function DownloadsPage() {
                       )}
                     </div>
                     <div className="version-row__action">
-                      {version.installed ? (
-                        <Button variant="ghost" size="sm" icon="check" disabled>
-                          已安装
+                      {version.installed ? instanceVersions.has(version.id) ? (
+                        <span className="caption">已有实例</span>
+                      ) : (
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          icon="plus"
+                          loading={creatingId === version.id}
+                          disabled={creatingId !== null || installingId !== null}
+                          onClick={() => void handleCreateInstance(version.id)}
+                        >
+                          创建实例
                         </Button>
                       ) : (
                         <Button
@@ -329,7 +351,7 @@ export function DownloadsPage() {
                           size="sm"
                           icon={showRepair ? "refresh" : "download"}
                           loading={installingId === version.id}
-                          disabled={installingId !== null && installingId !== version.id}
+                          disabled={creatingId !== null || (installingId !== null && installingId !== version.id)}
                           onClick={() => void handleInstall(version)}
                         >
                           {showRepair ? "修复安装" : "安装"}
