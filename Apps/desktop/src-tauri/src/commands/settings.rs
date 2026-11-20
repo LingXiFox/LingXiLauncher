@@ -385,31 +385,43 @@ pub fn detect_java(state: State<'_, AppState>) -> CommandResult<Vec<JavaRuntimeV
 }
 
 #[tauri::command]
-pub fn browse_java(app: AppHandle) -> CommandResult<Option<String>> {
-    let file = app.dialog().file().blocking_pick_file();
-    Ok(file
-        .and_then(|path| path.into_path().ok())
-        .map(|path| path.display().to_string()))
+pub async fn browse_java(app: AppHandle) -> CommandResult<Option<String>> {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app.dialog().file().pick_file(move |file| {
+        let path = file
+            .and_then(|path| path.into_path().ok())
+            .map(|path| path.display().to_string());
+        let _ = tx.send(path);
+    });
+    rx.await.map_err(|_| "文件选择器未返回结果".to_string())
 }
 
 #[tauri::command]
-pub fn browse_folder(app: AppHandle) -> CommandResult<Option<String>> {
-    let folder = app.dialog().file().blocking_pick_folder();
-    Ok(folder
-        .and_then(|path| path.into_path().ok())
-        .map(|path| path.display().to_string()))
+pub async fn browse_folder(app: AppHandle) -> CommandResult<Option<String>> {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app.dialog().file().pick_folder(move |folder| {
+        let path = folder
+            .and_then(|path| path.into_path().ok())
+            .map(|path| path.display().to_string());
+        let _ = tx.send(path);
+    });
+    rx.await.map_err(|_| "目录选择器未返回结果".to_string())
 }
 
 #[tauri::command]
-pub fn browse_image(app: AppHandle) -> CommandResult<Option<String>> {
-    let file = app
+pub async fn browse_image(app: AppHandle) -> CommandResult<Option<String>> {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app
         .dialog()
         .file()
         .add_filter("Image", &["png", "jpg", "jpeg", "webp", "gif", "bmp"])
-        .blocking_pick_file();
-    Ok(file
-        .and_then(|path| path.into_path().ok())
-        .map(|path| path.display().to_string()))
+        .pick_file(move |file| {
+            let path = file
+                .and_then(|path| path.into_path().ok())
+                .map(|path| path.display().to_string());
+            let _ = tx.send(path);
+        });
+    rx.await.map_err(|_| "图片选择器未返回结果".to_string())
 }
 
 /// Upper bound for a background picture: the webview keeps the whole image in
