@@ -753,7 +753,7 @@ export function SettingsPage() {
           <div className="settings-layout">
             <div className="settings-column">
               <Card className="settings-card">
-                <SectionHeader title="灵曦启动器" caption="LingXi Launcher" />
+                <SectionHeader title="泠溪（LingXiFox）启动器" caption="LingXi Launcher" />
                 <div className="about-hero">
                   <div className="about-hero__mark" aria-hidden="true">
                     <Icon name="sparkles" size={26} />

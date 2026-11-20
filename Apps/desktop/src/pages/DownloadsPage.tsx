@@ -219,8 +219,8 @@ export function DownloadsPage() {
               )}
             </div>
             <ProgressBar
-              value={installedProgress.completedFiles}
-              max={Math.max(installedProgress.totalFiles, 1)}
+              value={progressValue(installedProgress)}
+              max={100}
               label={`${installedProgress.completedFiles} / ${installedProgress.totalFiles} 个文件`}
             />
             <div className="install-progress-card__stats">
@@ -270,70 +270,74 @@ export function DownloadsPage() {
             />
           ) : (
             <div className="version-table__body">
-              {filtered.map((version) => (
-                <div className="version-row" key={version.id}>
-                  <div className="version-row__id">
-                    <span className="version-row__mark" aria-hidden="true">
-                      <Icon name="package" size={15} />
-                    </span>
+              {filtered.map((version) => {
+                const showRepair =
+                  version.installStatus !== null && version.installStatus !== "cancelled";
+                return (
+                  <div className="version-row" key={version.id}>
+                    <div className="version-row__id">
+                      <span className="version-row__mark" aria-hidden="true">
+                        <Icon name="package" size={15} />
+                      </span>
+                      <div>
+                        <strong>{version.id}</strong>
+                        {version.installed ? (
+                          <span className="caption">已安装到本地</span>
+                        ) : version.installStatus === "interrupted" ? (
+                          <span className="caption">上次安装被意外中断，可继续修复</span>
+                        ) : version.installStatus === "cancelled" ? (
+                          <span className="caption">上次安装已取消，可重新安装</span>
+                        ) : version.installStatus === "failed" ? (
+                          <span className="caption">上次安装失败，可继续修复</span>
+                        ) : version.installStatus ? (
+                          <span className="caption">正在安装…</span>
+                        ) : (
+                          <span className="caption">Minecraft Java Edition</span>
+                        )}
+                      </div>
+                    </div>
                     <div>
-                      <strong>{version.id}</strong>
+                      <Badge tone={version.type === "release" ? "success" : version.type === "snapshot" ? "warning" : "neutral"}>
+                        {versionTypeLabel(version.type)}
+                      </Badge>
+                    </div>
+                    <span className="version-row__date">{formatDate(version.releaseTime)}</span>
+                    <div>
                       {version.installed ? (
-                        <span className="caption">已安装到本地</span>
-                      ) : version.installStatus === "interrupted" ? (
-                        <span className="caption">上次安装被意外中断，可继续修复</span>
-                      ) : version.installStatus === "cancelled" ? (
-                        <span className="caption">上次安装已取消，可继续修复</span>
+                        <Badge tone="accent" dot>已安装</Badge>
                       ) : version.installStatus === "failed" ? (
-                        <span className="caption">上次安装失败，可继续修复</span>
-                      ) : version.installStatus ? (
-                        <span className="caption">正在安装…</span>
+                        <Badge tone="warning" dot>安装失败</Badge>
+                      ) : version.installStatus === "interrupted" ? (
+                        <Badge tone="warning" dot>意外中断</Badge>
+                      ) : version.installStatus === "cancelled" ? (
+                        <Badge tone="neutral" dot>已取消</Badge>
+                      ) : version.installStatus === "installing" ? (
+                        <Badge tone="neutral" dot>安装中</Badge>
                       ) : (
-                        <span className="caption">Minecraft Java Edition</span>
+                        <span className="tertiary caption">未安装</span>
+                      )}
+                    </div>
+                    <div className="version-row__action">
+                      {version.installed ? (
+                        <Button variant="ghost" size="sm" icon="check" disabled>
+                          已安装
+                        </Button>
+                      ) : (
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          icon={showRepair ? "refresh" : "download"}
+                          loading={installingId === version.id}
+                          disabled={installingId !== null && installingId !== version.id}
+                          onClick={() => void handleInstall(version)}
+                        >
+                          {showRepair ? "修复安装" : "安装"}
+                        </Button>
                       )}
                     </div>
                   </div>
-                  <div>
-                    <Badge tone={version.type === "release" ? "success" : version.type === "snapshot" ? "warning" : "neutral"}>
-                      {versionTypeLabel(version.type)}
-                    </Badge>
-                  </div>
-                  <span className="version-row__date">{formatDate(version.releaseTime)}</span>
-                  <div>
-                    {version.installed ? (
-                      <Badge tone="accent" dot>已安装</Badge>
-                    ) : version.installStatus === "failed" ? (
-                      <Badge tone="warning" dot>安装失败</Badge>
-                    ) : version.installStatus === "interrupted" ? (
-                      <Badge tone="warning" dot>意外中断</Badge>
-                    ) : version.installStatus === "cancelled" ? (
-                      <Badge tone="neutral" dot>已取消</Badge>
-                    ) : version.installStatus === "installing" ? (
-                      <Badge tone="neutral" dot>安装中</Badge>
-                    ) : (
-                      <span className="tertiary caption">未安装</span>
-                    )}
-                  </div>
-                  <div className="version-row__action">
-                    {version.installed ? (
-                      <Button variant="ghost" size="sm" icon="check" disabled>
-                        已安装
-                      </Button>
-                    ) : (
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        icon={version.installStatus ? "refresh" : "download"}
-                        loading={installingId === version.id}
-                        disabled={installingId !== null && installingId !== version.id}
-                        onClick={() => void handleInstall(version)}
-                      >
-                        {version.installStatus ? "修复安装" : "安装"}
-                      </Button>
-                    )}
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </Card>

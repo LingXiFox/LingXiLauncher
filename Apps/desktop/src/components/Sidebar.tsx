@@ -57,7 +57,7 @@ export function Sidebar() {
             <span className="sidebar__brand-sub">LAUNCHER</span>
           </span>
         </span>
-        <span className="sidebar__edition" title={`灵曦启动器 ${version}`}>
+        <span className="sidebar__edition" title={`泠溪（LingXiFox）启动器 ${version}`}>
           v{version.replace(/^v/i, "")}
         </span>
       </div>
@@ -103,7 +103,7 @@ export function Sidebar() {
         </button>
         <div className="sidebar__meta">
           <span className={["sidebar__status-dot", resolvedTheme === "light" ? "is-light" : ""].join(" ")} aria-hidden="true" />
-          <span>灵曦启动器</span>
+          <span>泠溪（LingXiFox）启动器</span>
           <span className="sidebar__meta-sep">·</span>
           <span>v{version.replace(/^v/i, "")}</span>
         </div>

@@ -176,7 +176,7 @@ export function Onboarding() {
 
   return (
     <Modal
-      title="欢迎使用灵曦启动器"
+      title="欢迎使用泠溪（LingXiFox）启动器"
       eyebrow="首次启动"
       subtitle="三步完成基础配置，之后随时可以在设置里修改。"
       onClose={skip}

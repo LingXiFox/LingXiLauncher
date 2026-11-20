@@ -366,7 +366,7 @@ pub fn diagnostic_bundle(state: State<'_, AppState>, instance_id: String) -> Com
         .unwrap_or_else(|| "未检测到可用 Java".into());
 
     let mut out: Vec<String> = Vec::new();
-    out.push("## 灵曦启动器诊断信息".into());
+    out.push("## 泠溪（LingXiFox）启动器诊断信息".into());
     out.push(String::new());
     out.push(format!(
         "- 启动器版本：{} ({})",

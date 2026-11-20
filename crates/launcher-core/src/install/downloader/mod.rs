@@ -29,7 +29,7 @@ const MIN_SEGMENT_BYTES: u64 = 1024 * 1024;
 type HostGates = Mutex<HashMap<String, Arc<Semaphore>>>;
 
 const SMALL_FILE_BYTES: u64 = 512 * 1024;
-const PROGRESS_EMIT_INTERVAL: Duration = Duration::from_millis(100);
+const PROGRESS_EMIT_INTERVAL: Duration = Duration::from_millis(150);
 
 static GLOBAL: LazyLock<Semaphore> =
     LazyLock::new(|| Semaphore::new(DownloadConfiguration::default().global_concurrency));

@@ -16,6 +16,10 @@ function skinOf(account: { skinTextureUrl?: string | null; skinTextureURL?: stri
   return account.skinTextureUrl ?? account.skinTextureURL ?? null;
 }
 
+function maskUuid(uuid: string) {
+  return uuid.replace(/[0-9a-f]/gi, "•");
+}
+
 export function AccountsPage() {
   const {
     accounts,
@@ -40,6 +44,7 @@ export function AccountsPage() {
   const [deleteName, setDeleteName] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [busyKey, setBusyKey] = useState<string | null>(null);
+  const [revealedUuidIds, setRevealedUuidIds] = useState<Set<string>>(() => new Set());
 
   useEffect(() => {
     let disposed = false;
@@ -81,6 +86,15 @@ export function AccountsPage() {
 
   function isActive(kind: "microsoft" | "local", identifier: string) {
     return activeAccount?.kind === kind && activeAccount.identifier === identifier;
+  }
+
+  function toggleUuid(accountId: string) {
+    setRevealedUuidIds((current) => {
+      const next = new Set(current);
+      if (next.has(accountId)) next.delete(accountId);
+      else next.add(accountId);
+      return next;
+    });
   }
 
   async function handleRefresh() {
@@ -246,7 +260,19 @@ export function AccountsPage() {
                         {current ? <Badge tone="success" dot>当前使用</Badge> : <Badge tone="outline">Microsoft</Badge>}
                       </div>
                       <p className="caption">
-                        {account.uuid ? `UUID ${shortUuid(account.uuid)}` : "未获取 UUID"}
+                        {account.uuid ? (
+                          <button
+                            type="button"
+                            className="text-link account-card__uuid"
+                            title={revealedUuidIds.has(account.id) ? "隐藏 UUID" : "点击显示完整 UUID"}
+                            aria-label={revealedUuidIds.has(account.id) ? "隐藏完整 UUID" : "显示完整 UUID"}
+                            onClick={() => toggleUuid(account.id)}
+                          >
+                            UUID {revealedUuidIds.has(account.id) ? account.uuid : maskUuid(account.uuid)}
+                          </button>
+                        ) : (
+                          "未获取 UUID"
+                        )}
                         {account.signedInAt ? ` · 登录于 ${formatDate(account.signedInAt)}` : ""}
                       </p>
                     </div>

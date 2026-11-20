@@ -124,7 +124,7 @@ export function HomePage() {
         title={`${greeting()}${activeProfile ? `，${activeProfile.name}` : ""}`}
         subtitle={
           activeProfile
-            ? "灵曦已就绪。选择一个实例继续冒险，或安装新的游戏版本。"
+            ? "泠溪（LingXiFox）已就绪。选择一个实例继续冒险，或安装新的游戏版本。"
             : "尚未选择玩家身份。登录账户后即可启动游戏，或者先安装一个版本。"
         }
         actions={

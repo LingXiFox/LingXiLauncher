@@ -402,7 +402,7 @@ try {
   });
 
   await send("Page.navigate", { url: `http://127.0.0.1:${appPort}/` });
-  await waitFor("onboarding", "document.body.innerText.includes('欢迎使用灵曦启动器')");
+  await waitFor("onboarding", "document.body.innerText.includes('欢迎使用泠溪（LingXiFox）启动器')");
   await screenshot("00-onboarding");
   for (let step = 0; step < 4; step += 1) await clickButton("下一步");
   await clickButton("开始使用 LingXi");

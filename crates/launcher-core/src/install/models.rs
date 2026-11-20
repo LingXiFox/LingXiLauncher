@@ -328,7 +328,10 @@ pub struct DownloadConfiguration {
 impl Default for DownloadConfiguration {
     fn default() -> Self {
         Self {
-            concurrency: 8,
+            // Start small-file batches with enough parallel requests to hide
+            // normal CDN round trips, while the adaptive gate still backs off
+            // quickly when a host starts throttling.
+            concurrency: 12,
             max_retries: 3,
             retry_delay_ms: 500,
             global_concurrency: 24,
