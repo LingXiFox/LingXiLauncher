@@ -100,6 +100,7 @@ export function DownloadsPage() {
     resetInstallProgress();
     try {
       await api.installVersion(version.id);
+      resetInstallProgress();
       toast("success", `Minecraft ${version.id} 已安装`);
       await Promise.all([refreshVersions("all", true), refreshInstances(true)]);
     } catch (error) {

@@ -205,10 +205,6 @@ impl VanillaInstaller {
             });
         }
         let extracted_natives = if summary.failures.is_empty() {
-            progress.emit(InstallProgressEvent::Phase {
-                phase: "natives".into(),
-                message: "Extracting native libraries".into(),
-            });
             self.extract_natives(plan.clone(), progress.clone(), cancel.clone())
                 .await?
         } else {
@@ -549,6 +545,13 @@ fn extract_natives_blocking(
     let target = layout.natives_directory(&plan.version.natives_version_id, architecture)?;
     ensure_dir(&target)?;
     let (total_files, total_bytes) = native_extraction_totals(plan)?;
+    if total_files == 0 {
+        return Ok(0);
+    }
+    progress.emit(InstallProgressEvent::Phase {
+        phase: "natives".into(),
+        message: "Extracting native libraries".into(),
+    });
     progress.emit(InstallProgressEvent::Plan {
         total_files,
         total_bytes,
