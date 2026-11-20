@@ -386,14 +386,14 @@ impl LaunchPlanBuilder {
             &version.jvm_arguments,
             &context.platform,
             &variables,
-            &sensitive,
+            &[],
         )?);
         arguments.push(version.main_class.clone());
         arguments.extend(expand(
             &version.game_arguments,
             &context.platform,
             &variables,
-            &sensitive,
+            &[],
         )?);
         // Window mode and renderer switches are launcher owned: vanilla only
         // emits --width/--height behind has_custom_resolution.

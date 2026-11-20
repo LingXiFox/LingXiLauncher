@@ -112,4 +112,20 @@ mod tests {
         let argv = expand(&entries, &platform(), &vars, &[]).unwrap();
         assert_eq!(argv, vec!["--x", "1 b"]);
     }
+
+    #[test]
+    fn runtime_expansion_keeps_auth_token() {
+        let entries = vec![ArgumentEntry::Plain("${auth_access_token}".into())];
+        let mut vars = BTreeMap::new();
+        vars.insert("auth_access_token".into(), "live-token".into());
+
+        assert_eq!(
+            expand(&entries, &platform(), &vars, &[]).unwrap(),
+            ["live-token"]
+        );
+        assert_eq!(
+            expand(&entries, &platform(), &vars, &["auth_access_token"]).unwrap(),
+            [REDACTION_PLACEHOLDER]
+        );
+    }
 }
