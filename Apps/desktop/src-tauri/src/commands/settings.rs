@@ -411,8 +411,7 @@ pub async fn browse_folder(app: AppHandle) -> CommandResult<Option<String>> {
 #[tauri::command]
 pub async fn browse_image(app: AppHandle) -> CommandResult<Option<String>> {
     let (tx, rx) = tokio::sync::oneshot::channel();
-    app
-        .dialog()
+    app.dialog()
         .file()
         .add_filter("Image", &["png", "jpg", "jpeg", "webp", "gif", "bmp"])
         .pick_file(move |file| {

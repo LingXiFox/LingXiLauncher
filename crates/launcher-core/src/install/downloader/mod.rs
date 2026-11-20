@@ -984,6 +984,7 @@ impl Downloader {
             .await
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn fetch_small_asset(
         &self,
         task: &DownloadTask,

@@ -651,7 +651,10 @@ async fn interrupted_small_asset_resumes_and_repairs_a_corrupted_cache_entry() {
         let mut asset = task(path, url, &body);
         asset.kind = MissingDependencyKind::Asset;
         async move {
-            downloader.download(vec![asset], progress(), CancelFlag::new()).await.unwrap()
+            downloader
+                .download(vec![asset], progress(), CancelFlag::new())
+                .await
+                .unwrap()
         }
     };
 

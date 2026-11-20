@@ -520,10 +520,9 @@ mod memory_mode_tests {
 
     #[test]
     fn fixed_mode_round_trips_and_pins_value() {
-        let settings: Settings = serde_json::from_str(
-            r#"{"memoryMode":"fixed","defaultMemoryMib":8192}"#,
-        )
-        .expect("fixed settings");
+        let settings: Settings =
+            serde_json::from_str(r#"{"memoryMode":"fixed","defaultMemoryMib":8192}"#)
+                .expect("fixed settings");
         assert_eq!(settings.memory_mode, MemoryMode::Fixed);
         assert_eq!(settings.resolved_memory_mib(), Some(8192));
 
