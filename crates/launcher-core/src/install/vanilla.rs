@@ -209,7 +209,8 @@ impl VanillaInstaller {
                 phase: "natives".into(),
                 message: "Extracting native libraries".into(),
             });
-            self.extract_natives(&plan, &cancel)?
+            self.extract_natives(plan.clone(), progress.clone(), cancel.clone())
+                .await?
         } else {
             0
         };
@@ -490,54 +491,19 @@ impl VanillaInstaller {
         Ok(parsed.objects.len())
     }
 
-    fn extract_natives(&self, plan: &VanillaInstallPlan, cancel: &CancelFlag) -> Result<usize> {
-        let target = self.layout.natives_directory(
-            &plan.version.natives_version_id,
-            self.platform.architecture.jvm_name(),
-        )?;
-        ensure_dir(&target)?;
-        let mut extracted_names = BTreeSet::new();
-        for jar in &plan.native_jars {
-            if cancel.is_cancelled() {
-                return Err(Error::Cancelled);
-            }
-            if !jar.path.is_file() {
-                continue;
-            }
-            let file = std::fs::File::open(&jar.path)?;
-            let mut archive = zip::ZipArchive::new(file)
-                .map_err(|e| Error::Zip(format!("{}: {e}", jar.path.display())))?;
-            for index in 0..archive.len() {
-                if cancel.is_cancelled() {
-                    return Err(Error::Cancelled);
-                }
-                let mut entry = archive
-                    .by_index(index)
-                    .map_err(|e| Error::Zip(format!("{}: {e}", jar.path.display())))?;
-                if entry.is_dir() {
-                    continue;
-                }
-                let name = entry.name().to_string();
-                if name.starts_with("META-INF/") || name.ends_with('/') {
-                    continue;
-                }
-                if jar.excludes.iter().any(|prefix| name.starts_with(prefix)) {
-                    continue;
-                }
-                let Some(file_name) = name.rsplit('/').next() else {
-                    continue;
-                };
-                let destination = target.join(file_name);
-                if !destination.starts_with(&target) {
-                    continue;
-                }
-                let mut data = Vec::with_capacity(entry.size() as usize);
-                entry.read_to_end(&mut data)?;
-                std::fs::write(&destination, &data)?;
-                extracted_names.insert(file_name.to_string());
-            }
-        }
-        Ok(extracted_names.len())
+    async fn extract_natives(
+        &self,
+        plan: VanillaInstallPlan,
+        progress: SharedProgress,
+        cancel: CancelFlag,
+    ) -> Result<usize> {
+        let layout = self.layout.clone();
+        let architecture = self.platform.architecture.jvm_name().to_string();
+        tokio::task::spawn_blocking(move || {
+            extract_natives_blocking(&layout, &architecture, &plan, &progress, &cancel)
+        })
+        .await
+        .map_err(|error| Error::Other(format!("native extraction task failed: {error}")))?
     }
 
     fn missing_dependencies(&self, plan: &VanillaInstallPlan) -> Result<Vec<MissingDependency>> {
@@ -571,6 +537,107 @@ impl VanillaInstaller {
         }
         Ok(missing)
     }
+}
+
+fn extract_natives_blocking(
+    layout: &GameDataLayout,
+    architecture: &str,
+    plan: &VanillaInstallPlan,
+    progress: &SharedProgress,
+    cancel: &CancelFlag,
+) -> Result<usize> {
+    let target = layout.natives_directory(&plan.version.natives_version_id, architecture)?;
+    ensure_dir(&target)?;
+    let (total_files, total_bytes) = native_extraction_totals(plan)?;
+    progress.emit(InstallProgressEvent::Plan {
+        total_files,
+        total_bytes,
+        cache_hits: 0,
+    });
+
+    let mut extracted_bytes = 0;
+    let mut extracted_names = BTreeSet::new();
+    for jar in &plan.native_jars {
+        if cancel.is_cancelled() {
+            return Err(Error::Cancelled);
+        }
+        if !jar.path.is_file() {
+            continue;
+        }
+        let file = std::fs::File::open(&jar.path)?;
+        let mut archive = zip::ZipArchive::new(file)
+            .map_err(|e| Error::Zip(format!("{}: {e}", jar.path.display())))?;
+        for index in 0..archive.len() {
+            if cancel.is_cancelled() {
+                return Err(Error::Cancelled);
+            }
+            let mut entry = archive
+                .by_index(index)
+                .map_err(|e| Error::Zip(format!("{}: {e}", jar.path.display())))?;
+            let name = entry.name().to_string();
+            let Some(file_name) = native_entry_name(&name, entry.is_dir(), &jar.excludes) else {
+                continue;
+            };
+            let destination = target.join(file_name);
+            if !destination.starts_with(&target) {
+                continue;
+            }
+            progress.emit(InstallProgressEvent::FileStarted {
+                path: destination.to_string_lossy().to_string(),
+                size: entry.size(),
+            });
+            let mut data = Vec::with_capacity(entry.size() as usize);
+            entry.read_to_end(&mut data)?;
+            std::fs::write(&destination, &data)?;
+            extracted_bytes += data.len() as u64;
+            extracted_names.insert(file_name.to_string());
+            progress.emit(InstallProgressEvent::FileFinished {
+                path: destination.to_string_lossy().to_string(),
+                bytes: data.len() as u64,
+                source: "native".into(),
+            });
+            progress.emit(InstallProgressEvent::Bytes {
+                downloaded: extracted_bytes,
+                total: total_bytes,
+            });
+        }
+    }
+    Ok(extracted_names.len())
+}
+
+fn native_extraction_totals(plan: &VanillaInstallPlan) -> Result<(usize, u64)> {
+    let mut total_files = 0;
+    let mut total_bytes = 0;
+    for jar in &plan.native_jars {
+        if !jar.path.is_file() {
+            continue;
+        }
+        let file = std::fs::File::open(&jar.path)?;
+        let mut archive = zip::ZipArchive::new(file)
+            .map_err(|e| Error::Zip(format!("{}: {e}", jar.path.display())))?;
+        for index in 0..archive.len() {
+            let entry = archive
+                .by_index(index)
+                .map_err(|e| Error::Zip(format!("{}: {e}", jar.path.display())))?;
+            if native_entry_name(entry.name(), entry.is_dir(), &jar.excludes).is_some() {
+                total_files += 1;
+                total_bytes += entry.size();
+            }
+        }
+    }
+    Ok((total_files, total_bytes))
+}
+
+fn native_entry_name<'a>(name: &'a str, is_dir: bool, excludes: &[String]) -> Option<&'a str> {
+    if is_dir || name.starts_with("META-INF/") || name.ends_with('/') {
+        return None;
+    }
+    if excludes.iter().any(|prefix| name.starts_with(prefix)) {
+        return None;
+    }
+    name.rsplit('/')
+        .next()
+        .filter(|file_name| !file_name.is_empty())
 }
 
 #[derive(Deserialize)]
