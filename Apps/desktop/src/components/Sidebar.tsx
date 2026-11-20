@@ -48,12 +48,14 @@ export function Sidebar() {
   return (
     <aside className="sidebar" aria-label="主导航">
       <div className="sidebar__brand">
-        <span className="sidebar__mark" aria-hidden="true">
-          <FoxMark size={30} />
-        </span>
-        <span className="sidebar__brand-text">
-          <span className="sidebar__brand-name">LINGXI</span>
-          <span className="sidebar__brand-sub">LAUNCHER</span>
+        <span className="sidebar__brand-main">
+          <span className="sidebar__mark" aria-hidden="true">
+            <FoxMark size={30} />
+          </span>
+          <span className="sidebar__brand-text">
+            <span className="sidebar__brand-name">LINGXI</span>
+            <span className="sidebar__brand-sub">LAUNCHER</span>
+          </span>
         </span>
         <span className="sidebar__edition" title={`灵曦启动器 ${version}`}>
           v{version.replace(/^v/i, "")}

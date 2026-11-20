@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Avatar } from "../components/Avatar";
 import { Badge } from "../components/Badge";
 import { Button, IconButton } from "../components/Button";
@@ -10,6 +10,7 @@ import { ConfirmDialog } from "../components/Modal";
 import { PageHeader } from "../components/PageHeader";
 import { useApp } from "../stores/app";
 import { formatDate, shortUuid } from "../lib/format";
+import { onAuthChanged, onAuthError } from "../services/api";
 
 function skinOf(account: { skinTextureUrl?: string | null; skinTextureURL?: string | null }) {
   return account.skinTextureUrl ?? account.skinTextureURL ?? null;
@@ -39,6 +40,37 @@ export function AccountsPage() {
   const [deleteName, setDeleteName] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [busyKey, setBusyKey] = useState<string | null>(null);
+
+  useEffect(() => {
+    let disposed = false;
+    let unlistenChanged: (() => void) | null = null;
+    let unlistenError: (() => void) | null = null;
+
+    void onAuthChanged(() => {
+      setLoginUrl(null);
+      setLoggingIn(false);
+      toast("success", "Microsoft 登录成功");
+      void refreshAccounts();
+    }).then((dispose) => {
+      if (disposed) dispose();
+      else unlistenChanged = dispose;
+    }).catch(() => undefined);
+
+    void onAuthError((message) => {
+      setLoginUrl(null);
+      setLoggingIn(false);
+      toast("error", "Microsoft 登录失败", message);
+    }).then((dispose) => {
+      if (disposed) dispose();
+      else unlistenError = dispose;
+    }).catch(() => undefined);
+
+    return () => {
+      disposed = true;
+      unlistenChanged?.();
+      unlistenError?.();
+    };
+  }, [refreshAccounts, toast]);
 
   const nameLength = useMemo(() => Array.from(name.trim()).length, [name]);
   const nameError =
@@ -96,6 +128,7 @@ export function AccountsPage() {
   }
 
   async function handleLogin() {
+    setLoginUrl(null);
     setLoggingIn(true);
     try {
       const url = await beginMicrosoftLogin();

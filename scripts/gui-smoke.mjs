@@ -482,9 +482,8 @@ try {
     channel.value = "beta";
     channel.dispatchEvent(new Event("change", { bubbles: true }));
   })()`);
-  await waitFor("unsaved update channel", "document.body.innerText.includes('保存设置后可检查此频道')");
-  await clickButton("保存设置");
-  await waitFor("saved update channel", "!document.body.innerText.includes('保存设置后可检查此频道')");
+  await waitFor("pending update channel", "document.body.innerText.includes('自动保存后可检查此频道')");
+  await waitFor("saved update channel", "!document.body.innerText.includes('自动保存后可检查此频道')");
   await clickButton("检查更新");
   await waitFor("beta channel result", "document.querySelector('.update-card')?.innerText.includes('0.10.1-beta.1')");
   await screenshot("06c-settings-about");
@@ -505,21 +504,17 @@ try {
     return true;
   })()`);
   if (!changed) throw new Error("memory input not found");
-  await delay(150);
-  await clickButton("保存设置");
   await waitFor("memory validation", "document.body.innerText.includes('请输入 256 到 65536 MiB 之间的整数')");
   await screenshot("07-validation");
   await evaluate("[...document.querySelectorAll('.memory-preset')].find(button => button.textContent.includes('6')).click()");
   await waitFor("memory preset", "document.querySelector('.memory-field input[type=number]').value === '6144'");
-  await clickButton("保存设置");
-  await waitFor("fixed memory saved", "document.body.innerText.includes('设置已保存')");
+  await waitFor("fixed memory saved", "document.body.innerText.includes('已自动保存')");
   if (replies.save_settings.memoryMode !== "fixed" || replies.save_settings.defaultMemoryMib !== 6144) {
     throw new Error("fixed memory did not reach settings storage");
   }
   await clickButton("自动分配");
   await waitFor("automatic controls hidden", "!document.querySelector('.memory-field input')");
-  await clickButton("保存设置");
-  await waitFor("automatic memory saved", "[...document.querySelectorAll('button')].some(button => button.textContent.trim() === '保存设置' && button.disabled)");
+  await waitFor("automatic memory saved", "document.body.innerText.includes('已自动保存')");
   if (replies.save_settings.memoryMode !== "auto" || replies.save_settings.defaultMemoryMib !== 6144) {
     throw new Error("automatic mode did not preserve the saved fixed memory");
   }

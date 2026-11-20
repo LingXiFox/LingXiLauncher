@@ -22,8 +22,8 @@ export function TopBar() {
   };
 
   return (
-    <header className="topbar" data-tauri-drag-region>
-      <div className="topbar__left" data-tauri-drag-region>
+    <header className="topbar">
+      <div className="topbar__left">
         <span className="topbar__crumb">
           <span className="topbar__crumb-root">LINGXI</span>
           <span className="topbar__crumb-sep">/</span>

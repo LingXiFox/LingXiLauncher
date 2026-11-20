@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Badge } from "../components/Badge";
 import { Button } from "../components/Button";
 import { Card, SectionHeader } from "../components/Card";
@@ -122,18 +122,20 @@ export function SettingsPage() {
   const [update, setUpdate] = useState<UpdateInfo | null>(null);
   const [updateError, setUpdateError] = useState<string | null>(null);
   const channelChanged = draft.updateChannel !== settings.updateChannel;
+  const dirty = useMemo(() => !sameSettings(draft, settings), [draft, settings]);
+  const memoryInputDirty =
+    draft.memoryMode === "fixed" && memoryText.trim() !== String(draft.defaultMemoryMib);
   const release = update?.release;
 
   useEffect(() => {
+    if (saving || dirty) return;
     setDraft(settings);
     setMemoryText(String(settings.defaultMemoryMib));
-  }, [settings]);
+  }, [dirty, saving, settings]);
 
   useEffect(() => {
     setDetected(javaRuntimes);
   }, [javaRuntimes]);
-
-  const dirty = useMemo(() => !sameSettings(draft, settings), [draft, settings]);
 
   const selectedRuntime = useMemo(() => {
     if (!draft.javaPath) return null;
@@ -211,7 +213,7 @@ export function SettingsPage() {
     }
   }
 
-  async function handleSave() {
+  const handleSave = useCallback(async () => {
     const fixedMode = draft.memoryMode === "fixed";
     const parsed = fixedMode ? Number(memoryText) : draft.defaultMemoryMib;
     if (fixedMode && (!Number.isInteger(parsed) || parsed < 256 || parsed > 65536)) {
@@ -239,19 +241,27 @@ export function SettingsPage() {
       defaultMemoryMib: fixedMode ? parsed : undefined,
       memoryMode: draft.memoryMode,
       updateChannel: channelChanged ? draft.updateChannel : undefined,
-    });
+    }, { silent: true });
     setSaving(false);
     if (!ok) return;
     if (channelChanged) {
       setUpdate(null);
       setUpdateError(null);
     }
-    setDraft((previous) => ({ ...previous, defaultMemoryMib: parsed, memoryMode: draft.memoryMode }));
-    setMemoryText(String(parsed));
+    setDraft((previous) => {
+      if (!sameSettings(previous, draft)) return previous;
+      return { ...previous, defaultMemoryMib: parsed, memoryMode: draft.memoryMode };
+    });
     if ((before.gameRoot ?? "") !== (draft.gameRoot ?? "")) {
       toast("info", "Minecraft 目录已更新", "重新启动启动器后生效");
     }
-  }
+  }, [channelChanged, draft, memoryText, saveSettings, settings, toast]);
+
+  useEffect(() => {
+    if ((!dirty && !memoryInputDirty) || saving) return;
+    const timer = window.setTimeout(() => void handleSave(), 450);
+    return () => window.clearTimeout(timer);
+  }, [dirty, draft, handleSave, memoryInputDirty, saving]);
 
   async function handleReveal(path: string) {
     try {
@@ -263,7 +273,7 @@ export function SettingsPage() {
 
   function handleAppearance(appearance: Appearance) {
     updateDraft({ appearance });
-    setAppearance(appearance);
+    setAppearance(appearance, false);
   }
 
   function handleAccent(accent: AccentColor) {
@@ -312,13 +322,12 @@ export function SettingsPage() {
       <PageHeader
         eyebrow="Preferences / 系统"
         title="设置"
-        subtitle="游戏、启动器与下载各自成栏；所有修改会写入启动核心的配置文件。"
+        subtitle="游戏、启动器与下载各自成栏；所有修改会自动写入启动核心的配置文件。"
         actions={
           <>
-            {dirty ? <Badge tone="warning" dot>有未保存的修改</Badge> : null}
-            <Button variant="primary" icon="save" loading={saving} disabled={!dirty || saving} onClick={() => void handleSave()}>
-              保存设置
-            </Button>
+            <Badge tone={saving ? "accent" : dirty || memoryInputDirty ? "warning" : "success"} dot>
+              {saving ? "正在自动保存" : dirty || memoryInputDirty ? "等待自动保存" : "已自动保存"}
+            </Badge>
           </>
         }
       />
@@ -728,10 +737,10 @@ export function SettingsPage() {
                     <Icon name="info" size={16} />
                   </span>
                   <div>
-                    <p className="settings-tip__title">保存到哪里？</p>
+                    <p className="settings-tip__title">自动保存</p>
                     <p className="settings-tip__body">
-                      设置写入数据目录下的 <span className="mono">settings.json</span>，不会改动实例内的文件。实例级窗口与 Java
-                      参数可在实例工具中覆盖。
+                      修改会自动写入数据目录下的 <span className="mono">settings.json</span>，不会改动实例内的文件。实例级窗口与
+                      Java 参数可在实例工具中覆盖。
                     </p>
                   </div>
                 </div>
@@ -799,7 +808,7 @@ export function SettingsPage() {
                   options={updateChannelOptions}
                   value={draft.updateChannel}
                   onChange={(value) => updateDraft({ updateChannel: value as UpdateChannel })}
-                  hint={channelChanged ? "保存设置后可检查此频道。" : undefined}
+                  hint={channelChanged ? "自动保存后可检查此频道。" : undefined}
                   disabled={checking || saving}
                 />
                 {updateError ? <ErrorBanner message={updateError} title="检查更新失败" onDismiss={() => setUpdateError(null)} /> : null}

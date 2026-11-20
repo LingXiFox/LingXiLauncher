@@ -129,8 +129,8 @@ export interface AppStore {
   copyInstance: (id: string) => Promise<GameInstance | null>;
   launchInstance: (id: string) => Promise<boolean>;
   stopGame: () => Promise<boolean>;
-  saveSettings: (patch: Partial<LauncherSettings>) => Promise<boolean>;
-  setAppearance: (appearance: Appearance) => void;
+  saveSettings: (patch: Partial<LauncherSettings>, options?: { silent?: boolean }) => Promise<boolean>;
+  setAppearance: (appearance: Appearance, persist?: boolean) => void;
   toggleTheme: () => void;
   setActiveAccount: (kind: AccountKind, identifier: string) => Promise<boolean>;
   createLocalAccount: (name: string) => Promise<LocalAccount | null>;
@@ -577,13 +577,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [refreshGameStatus, reportError, toast]);
 
   const saveSettings = useCallback(
-    async (patch: Partial<LauncherSettings>) => {
+    async (patch: Partial<LauncherSettings>, options?: { silent?: boolean }) => {
       try {
         /* The command returns the normalised settings, so the UI mirrors what
            the core actually persisted instead of the raw draft. */
         const saved = await api.saveSettings(patch);
         setSettings((previous) => ({ ...DEFAULT_SETTINGS, ...previous, ...saved }));
-        toast("success", "设置已保存");
+        if (!options?.silent) toast("success", "设置已保存");
         return true;
       } catch (error) {
         reportError("设置保存失败", error);
@@ -594,11 +594,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
 
   const setAppearance = useCallback(
-    (appearance: Appearance) => {
+    (appearance: Appearance, persist = true) => {
       setSettings((previous) => ({ ...previous, appearance }));
-      void api.saveSettings({ appearance }).catch((error) => {
-        toast("error", "外观已切换，但未能保存到启动核心", errorText(error));
-      });
+      if (persist) {
+        void api.saveSettings({ appearance }).catch((error) => {
+          toast("error", "外观已切换，但未能保存到启动核心", errorText(error));
+        });
+      }
     },
     [toast],
   );

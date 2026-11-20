@@ -671,3 +671,9 @@ export function onGameExited(handler: (exit: GameExit) => void): Promise<Unliste
 export function onAuthChanged(handler: () => void): Promise<UnlistenFn> {
   return listen<unknown>("auth-changed", () => handler());
 }
+
+export function onAuthError(handler: (message: string) => void): Promise<UnlistenFn> {
+  return listen<unknown>("auth-error", (event) => {
+    handler(typeof event.payload === "string" ? event.payload : "Microsoft 登录失败");
+  });
+}
